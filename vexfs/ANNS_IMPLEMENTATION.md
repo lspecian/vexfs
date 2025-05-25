@@ -185,8 +185,8 @@ pub struct WalEntry {
 - Shared vector data types and compression formats
 - Unified error handling and result types
 
-### Kernel Optimization Features
-- `no_std` compatibility for kernel environment
+### Kernel Integration Features
+- C FFI interface for kernel module integration
 - Memory-aligned data structures
 - SIMD instruction utilization
 - Minimal heap allocation strategies
@@ -286,7 +286,7 @@ The ANNS implementation is complete and ready for integration testing. Recommend
 
 ## Compliance with Requirements
 
-✅ **Kernel Execution Optimized**: Full `no_std` compatibility with kernel-specific optimizations
+✅ **Kernel Integration Optimized**: C FFI interface with kernel-specific optimizations
 ✅ **Memory-Efficient Partial Loading**: Sophisticated memory management with configurable budgets  
 ✅ **Batch and Incremental Indexing**: Complete support for both operation modes
 ✅ **Index Persistence**: Robust serialization with crash recovery

@@ -8,26 +8,8 @@
 use core::mem;
 use crate::vector_storage::VectorDataType;
 
-// Import libm for no_std math functions
-#[cfg(not(feature = "kernel"))]
-use libm::{sqrtf, powf};
-
-// Use kernel's sqrt equivalent for kernel mode
-#[cfg(feature = "kernel")]
-fn sqrtf(x: f32) -> f32 {
-    // Use kernel's builtin sqrt
-    unsafe { core::intrinsics::sqrtf32(x) }
-}
-
-#[cfg(feature = "kernel")]
-fn powf(base: f32, exp: f32) -> f32 {
-    // Simple power implementation for kernel
-    if exp == 2.0 {
-        base * base
-    } else {
-        base // Fallback
-    }
-}
+// Import libm for math functions
+use libm::sqrtf;
 
 /// Distance metrics for vector similarity calculation
 #[derive(Debug, Clone, Copy, PartialEq)]

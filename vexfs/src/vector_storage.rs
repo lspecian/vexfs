@@ -307,7 +307,7 @@ impl VectorStorageManager {
     /// Get vectors associated with a file
     pub fn get_file_vectors(&mut self, file_inode: u64) -> Result<[u64; 16], VectorStorageError> {
         // TODO: Implement file-to-vector lookup
-        // This would return an array of vector IDs (limited size for no_std)
+        // This would return an array of vector IDs (fixed size for FFI compatibility)
         Err(VectorStorageError::FileNotFound)
     }
 

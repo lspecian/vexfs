@@ -14,10 +14,10 @@ default: vm-build
 vm-build: clean rust-lib kernel-module
 	@echo "✅ VM build complete: vexfs.ko ready"
 
-# Build Rust static library  
+# Build Rust static library
 rust-lib:
 	@echo "🦀 Building Rust static library..."
-	cargo build --release --target=$(RUST_TARGET)
+	cargo build --release --target=$(RUST_TARGET) --features=kernel
 	cp target/$(RUST_TARGET)/release/lib$(MODULE_NAME).a ./lib$(MODULE_NAME).a
 
 # Build kernel module

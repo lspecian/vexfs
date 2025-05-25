@@ -37,6 +37,22 @@ pub const VEXFS_FIRST_USER_INO: u64 = 11;
 pub const VEXFS_INODE_SIZE: u16 = 256; // Fixed 256 bytes per inode
 pub const VEXFS_INODES_PER_BLOCK: u32 = VEXFS_DEFAULT_BLOCK_SIZE / VEXFS_INODE_SIZE as u32;
 
+// File system limits
+pub const VEXFS_MAX_FILE_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
+pub const VEXFS_MAX_FILENAME_LEN: usize = 255;
+pub const VEXFS_DIR_ENTRIES_PER_BLOCK: usize = VEXFS_DEFAULT_BLOCK_SIZE as usize / 64; // Estimate based on entry size
+
+// Directory entry types (from Linux kernel)
+pub const DT_UNKNOWN: u8 = 0;
+pub const DT_FIFO: u8 = 1;
+pub const DT_CHR: u8 = 2;
+pub const DT_DIR: u8 = 4;
+pub const DT_BLK: u8 = 6;
+pub const DT_REG: u8 = 8;
+pub const DT_LNK: u8 = 10;
+pub const DT_SOCK: u8 = 12;
+pub const DT_WHT: u8 = 14;
+
 /// Direct and indirect block pointer constants
 pub const VEXFS_N_DIRECT: usize = 12;      // Direct block pointers
 pub const VEXFS_N_INDIRECT: usize = 1;     // Single indirect

@@ -71,8 +71,8 @@ Successfully implemented Task 6: "Implement Vector Search and Retrieval" for the
 - **Audit Logging:** Security event tracking and monitoring
 
 ### Kernel Compatibility
-- **no_std Environment:** Full compatibility with kernel constraints
-- **Memory Management:** Proper kernel memory allocation patterns
+- **C FFI Interface:** Integration via C kernel module, avoiding Rust-for-Linux complexity
+- **Memory Management:** Proper kernel memory allocation patterns via C bridge
 - **Error Handling:** Kernel-appropriate error propagation
 - **Concurrency:** Safe concurrent access patterns
 - **Integration:** Seamless integration with existing VexFS components

@@ -1,11 +1,5 @@
-use kernel::prelude::*;
-use kernel::super_block::{SuperBlock, Dentry}; // Added Dentry
-use kernel::inode::{Inode, InodeOperations, GenericInodeOperations};
-use kernel::file::FileOperations; // For i_fop
-use kernel::bindings; // For S_IFDIR, dev_t, umode_t etc.
-use kernel::sync::Arc;
-use kernel::time::CurrentTime; // For timestamps
-use kernel::uapi; // For error codes like ENOENT
+// Note: Kernel integration handled via C FFI, not direct kernel crate usage
+// These types are defined as stubs for Rust library interface
 
 // Define VexFS Inode-Specific Structure
 // For now, it's minimal. Could hold directory contents or file metadata later.
@@ -101,7 +95,7 @@ pub static VEXFS_ROOT_INODE_OPS: InodeOperations = InodeOperations {
     ..InodeOperations::empty() // Initialize all other fields to None
 };
 
-use kernel::file::{File, DirentEmitterContext, DirentType}; // For readdir
+// Note: File operations handled via C FFI bridge
 
 // Placeholder for directory file operations (for readdir, etc.)
 // We'll use a generic one for now, to be specialized later.
@@ -152,7 +146,7 @@ extern "C" fn vexfs_readdir(file: &File, ctx: &mut DirentEmitterContext) -> Resu
 
 
 pub static VEXFS_DIR_FILE_OPS: FileOperations = FileOperations {
-    llseek: Some(kernel::file::generic_file_llseek),
+    llseek: None, // Handled by C FFI bridge
     read: None, // Or Some(generic_dir_read) if directory reading is desired (uncommon)
     write: None, // Cannot write to a directory directly
     read_iter: None,
@@ -305,7 +299,7 @@ extern "C" fn vexfs_unlocked_ioctl(
     }
     else {
         pr_warn!("VexFS: Unknown IOCTL command received: {:#x}\n", cmd);
-        Err(kernel::Error::ENOTTY) // ENOTTY is often used for inappropriate ioctl. Or EINVAL.
+        Err(-25) // ENOTTY equivalent, handled by C FFI bridge
     }
 }
 
@@ -321,7 +315,7 @@ pub fn vexfs_get_inode(
     pr_info!("VexFS: vexfs_get_inode (root specialization) called. Mode: {:#o}\n", mode);
 
     // For the root inode, a fixed inode number is common.
-    const ROOT_INO: u64 = 1; // Or use `kernel::fs::ROOT_INO` if available and appropriate
+    const ROOT_INO: u64 = 1; // Fixed root inode number
 
     // Inode::new_anon is suitable for inodes not backed by a block device in a complex way,
     // or for initial setup.
@@ -367,8 +361,9 @@ pub fn vexfs_get_inode(
     // Set UID and GID (e.g., current user, or root)
     // These might need to be configured or inherited.
     // For simplicity, using 0 (root) for now.
-    new_inode.i_uid = kernel:: kuid_t { val: 0 }; // kernel::Kuid::from_raw(0) or similar
-    new_inode.i_gid = kernel:: kgid_t { val: 0 }; // kernel::Kgid::from_raw(0)
+    // Note: UID/GID assignment handled by C FFI bridge
+    // new_inode.i_uid = kuid_t { val: 0 }; // Handled in C layer
+    // new_inode.i_gid = kgid_t { val: 0 }; // Handled in C layer
 
     // Size of a directory can be block size, or number of entries, or other conventions.
     // Often, it's the size of the data needed to store its entries.

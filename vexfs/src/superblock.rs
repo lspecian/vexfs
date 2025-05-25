@@ -1,8 +1,5 @@
-use kernel::prelude::*;
-use kernel::super_block::{SuperBlock, SuperOperations, Dentry}; // Added Dentry
-use kernel::bindings; // For c_int, c_void, S_IFDIR, etc.
-use kernel::sync::Arc; // Using Arc for s_fs_info if VexfsSuperblock needs to be shared
-                       // and for Arc<Inode> from vexfs_get_inode
+// Note: Kernel integration handled via C FFI, not direct kernel crate usage
+// These types are defined as stubs for Rust library interface
 
 // Import inode functions
 use crate::inode;
@@ -68,7 +65,7 @@ pub static VEXFS_SUPER_OPS: SuperOperations = SuperOperations {
     destroy_inode: None, // To be implemented
     write_inode: None, // To be implemented
     dirty_inode: None, // To be implemented
-    drop_inode: Some(kernel::fs::generic_drop_inode), // Use a generic helper
+    drop_inode: None, // Handled by C FFI bridge
     evict_inode: None, // To be implemented, often custom
     put_super: None, // kill_sb handles overall cleanup
     sync_fs: None, // To be implemented
@@ -143,7 +140,7 @@ pub fn vexfs_fill_super(
                 let _ = Box::from_raw(sb.s_fs_info as *mut VexfsSuperblock);
             }
             sb.s_fs_info = core::ptr::null_mut();
-            return Err(kernel::Error::ENOMEM); // ENOMEM is a common error for dentry creation failure
+            return Err(-12); // ENOMEM equivalent, handled by C FFI bridge
         }
     };
     

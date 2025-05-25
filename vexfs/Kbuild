@@ -6,15 +6,12 @@ obj-m += vexfs.o
 # Name of the C object file compiled from vexfs_module_entry.c
 VEXFS_C_OBJ := vexfs_module_entry.o
 
-# Path to the Rust static library, relative to this Kbuild file.
-# The Makefile will place libvexfs.a in the current directory $(src).
-VEXFS_RUST_LIB_FILENAME := libvexfs.a
-
 # Specify the objects that make up vexfs.o
-# Kbuild will compile vexfs_module_entry.c to vexfs_module_entry.o.
-# It will then link vexfs_module_entry.o with libvexfs.a to produce vexfs.o,
-# which is then used to create vexfs.ko.
-vexfs-objs := $(VEXFS_C_OBJ) $(VEXFS_RUST_LIB_FILENAME)
+# We only include the C object here, and link the Rust library via LDFLAGS
+vexfs-objs := $(VEXFS_C_OBJ)
+
+# Add the Rust static library to the link flags using absolute path
+EXTRA_LDFLAGS += $(src)/libvexfs.a
 
 # Optional: If there are C header files specific to this module in an 'include' directory
 # ccflags-y += -I$(src)/include

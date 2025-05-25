@@ -5,12 +5,11 @@
 //! memory safety, and integration with the VFS layer.
 
 use crate::ioctl::*;
+use crate::vector_storage::{VectorDataType, CompressionType};
 use alloc::vec::Vec;
 use core::ptr;
-use kernel::prelude::*;
-use kernel::user_ptr::{UserSlicePtr, UserSlicePtrReader};
-use kernel::time;
-use kernel::crc32;
+
+// Note: Kernel integration handled via C FFI, not direct kernel crate usage
 
 /// Maximum vector dimension size for safety checks
 const MAX_VECTOR_DIMENSION: u32 = 65536;

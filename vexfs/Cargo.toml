@@ -13,13 +13,10 @@ categories = ["filesystem", "os", "science"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# Kernel development requires no_std (commented out for testing)
-# kernel = { git = "https://github.com/Rust-for-Linux/linux.git", branch = "rust-next" }
-
-# Math functions for no_std environments
+# Math functions for userspace operations
 libm = "0.2"
 
-# Allocator for userspace testing in no_std
+# Allocator for userspace testing
 linked_list_allocator = "0.10"
 
 [lib]
@@ -43,5 +40,4 @@ opt-level = 0
 [features]
 default = ["std"]
 std = []
-kernel = []
-c_bindings = []  # New feature for current C FFI approach
+c_bindings = []  # Feature for C FFI approach with kernel module
