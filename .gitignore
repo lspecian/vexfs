@@ -18,11 +18,15 @@ node_modules/
 # Editor directories and files
 .idea
 .vscode
+.cursor/
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+
+# Rust build artifacts
+target/
 
 # OS specific
 .DS_Store
