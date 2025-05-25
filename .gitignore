@@ -27,6 +27,10 @@ node_modules/
 
 # Rust build artifacts
 target/
+*.rlib
+size_check
+size_test*
+vector_storage_test
 
 # OS specific
 .DS_Store
@@ -41,3 +45,6 @@ tasks.json
 tasks/ 
 
 .windsurfrules
+.roomodes
+.taskmasterconfig
+scripts/

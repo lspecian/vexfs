@@ -1,0 +1,38 @@
+[package]
+name = "vexfs"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# Kernel development requires no_std (commented out for testing)
+# kernel = { git = "https://github.com/Rust-for-Linux/linux.git", branch = "rust-next" }
+
+# Dependencies for no_std compatibility
+hashbrown = { version = "0.14", default-features = false }
+
+[lib]
+crate-type = ["staticlib"]
+path = "src/lib.rs"
+
+# Add test binary target
+[[bin]]
+name = "vector_test_runner"
+path = "src/bin/vector_test_runner.rs"
+
+[profile.release]
+panic = "abort"
+opt-level = 2
+lto = true
+
+[profile.dev]
+panic = "abort"
+opt-level = 0
+
+# Features for conditional compilation
+[features]
+default = ["std"]
+std = []
+kernel = []  # Keep for future RfL approach but disabled
+c_bindings = []  # New feature for current C FFI approach
