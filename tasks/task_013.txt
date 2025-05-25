@@ -1,27 +1,23 @@
 # Task ID: 13
-# Title: Implement Hybrid Query Optimizer
+# Title: Develop Hybrid Query Optimizer
 # Status: pending
 # Dependencies: 6, 7
-# Priority: low
-# Description: Develop a query optimizer for efficiently executing hybrid queries that combine metadata and vector search operations.
+# Priority: medium
+# Description: Implement a query optimizer for hybrid searches combining traditional file attributes with vector similarity
 # Details:
-1. Design a simplified query language or API for hybrid queries
-2. Implement a query parser
-3. Create a cost-based optimizer
-4. Develop execution plans for hybrid queries
-5. Implement query execution engine
-6. Create result merging and ranking mechanisms
-7. Develop query caching
-8. Implement query monitoring and statistics
+1. Design query representation format
+2. Implement query parsing and validation
+3. Develop cost-based optimization strategies
+4. Create execution plan generation
+5. Implement result merging and ranking
+6. Develop filter pushdown optimizations
 
-This is a more advanced feature that may be implemented in a limited form initially. The goal is to provide a thin SQL-like query layer or a DuckDB-style planner accessible via ioctl or the vexctl tool, translating simplified hybrid queries into optimized sequences of metadata and vector operations.
+The query optimizer should efficiently combine traditional metadata filters with vector similarity searches. Implement statistics collection to inform optimization decisions.
 
 # Test Strategy:
-1. Test query parsing with various query formats
-2. Verify optimizer plan selection
-3. Benchmark query execution performance
-4. Test result merging and ranking accuracy
-5. Validate query caching effectiveness
-6. Test with complex hybrid queries
-7. Verify performance statistics
-8. Test concurrent query execution
+1. Test query optimization with various query patterns
+2. Benchmark performance against naive execution strategies
+3. Verify result correctness for complex queries
+4. Test optimizer adaptability to data distribution
+5. Validate handling of edge cases (empty results, large result sets)
+6. Measure optimization overhead

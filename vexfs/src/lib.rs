@@ -10,6 +10,20 @@ use kernel::bindings; // For MS_SILENT flag if used directly
 mod superblock;
 mod inode; // Add inode module
 pub mod ioctl; // Add ioctl module
+pub mod ondisk; // Add on-disk format definitions
+pub mod inode_mgmt; // Add inode management system
+pub mod file_ops; // Add file operations
+pub mod dir_ops; // Add directory operations
+pub mod space_alloc; // Add space allocation system
+pub mod journal; // Add journaling and transaction system
+pub mod vector_storage; // Add vector embedding storage system
+pub mod vector_metrics; // Add SIMD-optimized vector similarity metrics
+pub mod knn_search; // Add k-NN search algorithm with metadata filtering
+pub mod result_scoring; // Add result scoring, ranking and validation framework
+pub mod vector_search; // Add main vector search API
+pub mod vector_search_integration; // Add vector search integration layer
+pub mod anns; // Add Approximate Nearest Neighbor Search system
+pub mod vector_handlers; // Add core vector operation handlers
 
 // The FileSystemType structure for VexFS
 struct VexfsFsType;

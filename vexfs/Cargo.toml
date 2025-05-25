@@ -6,3 +6,28 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+# Kernel development requires no_std (commented out for testing)
+# kernel = { git = "https://github.com/Rust-for-Linux/linux.git", branch = "rust-next" }
+
+[lib]
+crate-type = ["staticlib"]
+
+# Add test binary target
+[[bin]]
+name = "vector_test_runner"
+path = "src/bin/vector_test_runner.rs"
+
+[profile.release]
+panic = "abort"
+opt-level = 2
+lto = true
+
+[profile.dev]
+panic = "abort"
+opt-level = 0
+
+# Features for conditional compilation
+[features]
+default = ["std"]
+std = []
+kernel = []

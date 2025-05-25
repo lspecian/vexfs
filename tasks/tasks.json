@@ -2,493 +2,172 @@
   "tasks": [
     {
       "id": 1,
-      "title": "Setup Kernel Module Development Environment",
-      "description": "Create a development environment for building and testing the VexFS kernel module in Rust, including the Packer-based image build pipeline.",
-      "details": "1. Set up a Rust development environment with nightly toolchain for kernel development\n2. Configure Linux kernel build environment (≥ 6.1) with Rust support (CONFIG_RUST=y)\n3. Create Packer templates for building minimal Linux images with:\n   - Custom kernel with Rust support\n   - Development tools (Rust nightly, build-essential)\n   - Space for vexfs.ko module injection\n4. Set up QEMU testing environment with:\n   - KVM acceleration\n   - Kernel debugging support (GDB/kgdb)\n   - Serial console output for logs\n   - Configurable virtual disk\n5. Create initial project structure for the VexFS kernel module\n6. Implement basic build scripts and Makefile for the kernel module\n7. Set up CI/CD pipeline for automated testing",
-      "testStrategy": "1. Verify successful build of the kernel with Rust support\n2. Test Packer image build process and validate the resulting image\n3. Boot the QEMU VM and verify kernel version and Rust support\n4. Test kernel module loading/unloading with a minimal stub module\n5. Validate debugging capabilities by setting breakpoints and inspecting kernel state",
-      "priority": "high",
+      "title": "Setup Rust Kernel Module Development Environment",
+      "description": "Create the initial project structure and development environment for building a Linux kernel module in Rust",
+      "status": "in-progress",
       "dependencies": [],
-      "status": "done",
+      "priority": "high",
+      "details": "1. Set up a Rust project with appropriate crate structure for kernel module development\n2. Configure build system to compile Rust code as a Linux kernel module (vexfs.ko)\n3. Implement basic module loading/unloading functionality\n4. Setup cross-compilation support for different kernel versions\n5. Configure development environment with QEMU for testing\n6. Create initial documentation structure\n\nThe module should follow the Linux kernel module conventions while leveraging Rust's safety features. Use the Linux Rust kernel module infrastructure.",
+      "testStrategy": "1. Verify module loads and unloads cleanly in QEMU environment\n2. Test compilation against multiple kernel versions\n3. Validate module appears in lsmod output\n4. Check for memory leaks during module lifecycle\n5. Ensure proper error handling during initialization",
       "subtasks": [
         {
-          "id": 1,
-          "title": "Setup Rust Kernel Development Environment",
-          "description": "Install and configure Rust toolchain with specific components required for Linux kernel module development using VexFS.",
-          "dependencies": [],
-          "details": "1. Install Rust using rustup\n2. Configure specific Rust toolchain version (nightly required for kernel development)\n3. Add rust-src component: `rustup component add rust-src`\n4. Install bindgen and other Rust dependencies\n5. Configure Cargo for cross-compilation if needed\n6. Set up rustfmt and clippy for code quality\n7. Validate installation with a simple kernel-compatible Rust code compilation test\n8. Document environment variables needed for VexFS development\n<info added on 2025-05-25T16:05:24.773Z>\nCOMPLETED - Rust kernel development environment has been successfully set up:\n\n✅ Rust toolchain configuration found in project:\n- Cargo.toml exists with proper package structure\n- Makefile shows sophisticated Rust-to-kernel module compilation pipeline\n- Packer configuration includes automated Rust nightly installation\n- Build system handles cross-compilation for kernel module development\n\n✅ Environment validation:\n- Makefile shows proper RUST_TARGET configuration (x86_64-unknown-linux-gnu)\n- Build process creates static library and links with kernel module\n- Packer provisioner tests cargo installation and builds the module\n\nThe Rust environment is production-ready for VexFS kernel module development.\n</info added on 2025-05-25T16:05:24.773Z>",
-          "status": "done"
+          "id": 1.1,
+          "title": "Create Rust project structure",
+          "description": "Set up vexfs/ directory with Cargo.toml and appropriate module structure",
+          "status": "completed"
         },
         {
-          "id": 2,
-          "title": "Configure and Build Linux Kernel for Module Development",
-          "description": "Prepare the Linux kernel source code with appropriate configuration for VexFS module development and testing.",
-          "dependencies": [
-            1
-          ],
-          "details": "1. Download Linux kernel source (recommended version for VexFS)\n2. Install kernel build dependencies\n3. Configure kernel with `make menuconfig` enabling:\n   - Module loading support\n   - Debugging features\n   - Required filesystem interfaces\n4. Enable Rust support in kernel configuration\n5. Build the kernel with `make -j$(nproc)`\n6. Build kernel modules\n7. Create a test module to verify build environment\n8. Document kernel configuration options specific to VexFS\n<info added on 2025-05-25T16:06:24.068Z>\n## Implementation Update\n\nThe kernel configuration approach has been simplified and optimized:\n\n- Using Packer configuration to install kernel headers for the host kernel version\n- Avoiding custom kernel builds in favor of using existing Debian kernels\n- Leveraging pre-enabled module loading support in standard kernels\n- Utilizing kernel headers to access necessary APIs for module development\n\nThis approach provides significant benefits:\n- Faster development iteration without kernel build time\n- Stable, tested kernel from Debian repositories\n- Reduced configuration complexity for MVP development\n- Ready access to module loading and debugging features\n\nAll kernel requirements for VexFS development are satisfied through this method:\n- Module loading support (standard in Debian kernels)\n- Debugging features available via standard tools\n- Required filesystem interfaces accessible through kernel headers\n</info added on 2025-05-25T16:06:24.068Z>",
-          "status": "done"
+          "id": 1.2,
+          "title": "Implement basic kernel module files",
+          "description": "Create core module files including lib.rs, inode.rs, ioctl.rs, and superblock.rs",
+          "status": "completed"
         },
         {
-          "id": 3,
-          "title": "Create Packer VM Images for Testing",
-          "description": "Use Packer to create standardized virtual machine images that will be used for testing the VexFS kernel module.",
-          "dependencies": [
-            2
-          ],
-          "details": "1. Install Packer\n2. Create Packer template JSON/HCL file for VM image\n3. Configure base OS (e.g., Debian/Ubuntu)\n4. Add provisioners to install development tools\n5. Include custom kernel from previous step\n6. Configure network settings for testing\n7. Add scripts to automate module loading/testing\n8. Build image with `packer build`\n9. Validate image with basic boot test\n10. Document image specifications and included tools\n<info added on 2025-05-25T16:05:44.867Z>\n# VexFS VM Image Creation Status\n\n## Completed Successfully\n- Packer configuration is comprehensive and production-ready\n- Complete Packer HCL template created at test_env/vexfs.pkr.hcl\n\n## Base Configuration\n- Debian 12.5 base OS with automated preseed installation\n- QEMU with KVM acceleration, 2GB RAM, 2 CPUs\n\n## Provisioning Pipeline\n- Development tools: make, gcc, curl, git\n- Kernel headers for current kernel\n- Rust nightly toolchain via rustup\n- Automated VexFS kernel module build during image creation\n- vexctl CLI tool installation to /usr/local/bin\n\n## Advanced Features\n- HTTP server for preseed file delivery\n- SSH configuration for automation\n- File provisioners for VexFS source code\n- Multi-stage build process with validation\n- Environment variable handling for Rust builds\n\n## Outcome\nSuccessfully created bootable VMs with VexFS pre-built and ready for testing.\n</info added on 2025-05-25T16:05:44.867Z>",
-          "status": "done"
+          "id": 1.3,
+          "title": "Configure build system",
+          "description": "Set up Makefile and Kbuild for kernel module compilation",
+          "status": "completed"
         },
         {
-          "id": 4,
-          "title": "Setup QEMU Testing Environment for VexFS",
-          "description": "Configure QEMU for efficient testing and debugging of the VexFS kernel module with appropriate monitoring and analysis tools.",
-          "dependencies": [
-            3
-          ],
-          "details": "1. Install QEMU and KVM acceleration\n2. Create startup scripts for VM with appropriate parameters\n3. Configure kernel debugging options (KGDB/serial console)\n4. Set up shared folders between host and guest for code transfer\n5. Configure network for remote debugging\n6. Install analysis tools (perf, ftrace, etc.)\n7. Create automated test harness for VexFS\n8. Setup kernel crash dump collection\n9. Document QEMU launch parameters\n10. Create validation tests to verify complete environment functionality\n<info added on 2025-05-25T16:06:04.918Z>\nCOMPLETED - QEMU testing environment has been successfully set up:\n\n✅ Complete QEMU automation script exists at test_env/run_qemu.sh:\n- Automatically finds newest Packer-built VM image\n- Creates dedicated test disk for VexFS (100MB raw format)\n- Configures KVM acceleration with 2GB RAM and 2 CPUs\n- Sets up serial console output for kernel debugging\n- Port forwarding (SSH on port 2222) for remote access\n- Virtio drivers for optimal performance\n\n✅ Advanced testing features:\n- Supports both headless (-display none) and graphical modes\n- Serial console integration for kernel log monitoring\n- Extra disk attachment for VexFS testing\n- Error handling and validation checks\n- Clear usage instructions and connection details\n\nThe QEMU environment is production-ready for VexFS kernel module testing and debugging.\n</info added on 2025-05-25T16:06:04.918Z>",
-          "status": "done"
+          "id": 1.4,
+          "title": "Setup QEMU testing environment",
+          "description": "Create test_env/ directory with Packer configuration for QEMU-based testing",
+          "status": "completed"
+        },
+        {
+          "id": 1.5,
+          "title": "Create vexctl command-line tool structure",
+          "description": "Set up project structure for the vexctl utility tool",
+          "status": "completed"
+        },
+        {
+          "id": 1.6,
+          "title": "Implement vector-specific functionality",
+          "description": "Develop vector_handlers.rs and vector_search_integration.rs for vector operations",
+          "status": "in-progress"
+        },
+        {
+          "id": 1.7,
+          "title": "Validate module loading/unloading",
+          "description": "Perform final testing of module loading and unloading in QEMU environment",
+          "status": "pending"
+        },
+        {
+          "id": 1.8,
+          "title": "Test cross-compilation for different kernel versions",
+          "description": "Verify module compilation against multiple kernel versions",
+          "status": "pending"
+        },
+        {
+          "id": 1.9,
+          "title": "Complete documentation structure",
+          "description": "Finalize the documentation framework for the project",
+          "status": "pending"
         }
       ]
     },
     {
       "id": 2,
       "title": "Implement VFS Interface Layer",
-      "description": "Develop the core VFS interface layer that will register VexFS with the Linux Virtual File System and handle standard file system operations.",
-      "details": "1. Implement the necessary VFS operations structure (file_system_type)\n2. Create mount/unmount handlers\n3. Implement superblock operations\n4. Define inode operations structure\n5. Implement file operations structure\n6. Register the file system with the VFS\n7. Implement basic directory operations (lookup, readdir)\n8. Create minimal implementations of required VFS callbacks\n9. Implement module init/exit functions\n\nCode structure should follow Linux kernel conventions while leveraging Rust safety features. Use the no_std environment and appropriate kernel bindings for Rust.",
-      "testStrategy": "1. Test mounting and unmounting the file system\n2. Verify basic directory listing functionality\n3. Test creation and deletion of empty files\n4. Validate proper registration with VFS\n5. Check for memory leaks or reference counting issues\n6. Verify proper error handling for edge cases\n7. Test concurrent mount/unmount operations",
+      "description": "Develop the Virtual File System (VFS) interface layer to register VexFS with the Linux kernel",
+      "details": "1. Implement superblock operations (mount, unmount, statfs)\n2. Define file system type registration structure\n3. Create initialization and cleanup functions\n4. Implement basic inode operations structure\n5. Setup dentry operations\n6. Register file system with VFS\n\nThe VFS interface should adhere to Linux kernel standards while providing the foundation for vector-aware extensions. Use Rust's type system to ensure memory safety in VFS callbacks.",
+      "testStrategy": "1. Test mounting and unmounting the file system\n2. Verify proper registration with VFS\n3. Check for resource leaks during mount/unmount cycles\n4. Validate superblock information retrieval\n5. Test error handling for edge cases (e.g., mounting on invalid devices)",
       "priority": "high",
       "dependencies": [
         1
       ],
       "status": "pending",
-      "subtasks": [
-        {
-          "id": 1,
-          "title": "Implement File System Registration and Mount Operations",
-          "description": "Create the necessary structures and functions to register VexFS with the Linux kernel and handle mount/unmount operations.",
-          "dependencies": [],
-          "details": "1. Define a `file_system_type` structure with appropriate callbacks\n2. Implement `init_fs()` and `exit_fs()` for module loading/unloading\n3. Create mount operation handler that initializes superblock\n4. Implement proper error handling for mount failures\n5. Add Rust FFI bindings for `register_filesystem()` and `unregister_filesystem()`\n6. Test with manual filesystem mounting and verify proper registration in `/proc/filesystems`",
-          "status": "pending"
-        },
-        {
-          "id": 2,
-          "title": "Implement Superblock Operations",
-          "description": "Create the superblock structure and associated operations for VexFS.",
-          "dependencies": [
-            1
-          ],
-          "details": "1. Define `super_operations` structure with appropriate callbacks\n2. Implement `alloc_inode()`, `destroy_inode()`, `write_super()` functions\n3. Create Rust representation of superblock with necessary metadata\n4. Implement statfs operation to report filesystem statistics\n5. Add proper locking mechanisms for concurrent access\n6. Test superblock initialization and verify filesystem statistics reporting",
-          "status": "pending"
-        },
-        {
-          "id": 3,
-          "title": "Implement Inode Operations",
-          "description": "Create the inode structure and associated operations for file and directory management.",
-          "dependencies": [
-            2
-          ],
-          "details": "1. Define `inode_operations` structure with appropriate callbacks\n2. Implement `create()`, `lookup()`, `link()`, `unlink()`, `mkdir()`, `rmdir()` functions\n3. Create Rust representation of inode with necessary metadata\n4. Implement proper permission checking\n5. Add Rust FFI bindings for inode-related kernel functions\n6. Test inode creation, lookup, and basic operations with appropriate error handling",
-          "status": "pending"
-        },
-        {
-          "id": 4,
-          "title": "Implement File Operations",
-          "description": "Create the file operations structure and implement functions for file I/O.",
-          "dependencies": [
-            3
-          ],
-          "details": "1. Define `file_operations` structure with appropriate callbacks\n2. Implement `open()`, `read()`, `write()`, `llseek()`, `flush()`, `release()` functions\n3. Create memory management for file handles and buffers\n4. Implement proper locking for concurrent file access\n5. Add Rust FFI bindings for file operation kernel functions\n6. Test file operations with various access patterns and verify proper data integrity",
-          "status": "pending"
-        },
-        {
-          "id": 5,
-          "title": "Implement Directory Operations",
-          "description": "Create the directory operations and implement functions for directory traversal and manipulation.",
-          "dependencies": [
-            3,
-            4
-          ],
-          "details": "1. Define `dir_operations` structure with appropriate callbacks\n2. Implement `readdir()` function to iterate directory entries\n3. Create proper dentry management and caching\n4. Implement `fsync()` for directories\n5. Add Rust FFI bindings for directory operation kernel functions\n6. Test directory traversal, creation, and deletion with proper error handling",
-          "status": "pending"
-        }
-      ]
+      "subtasks": []
     },
     {
       "id": 3,
       "title": "Develop Core File System Logic",
-      "description": "Implement the core file system functionality for managing files and directories, including metadata management and data storage allocation.",
-      "details": "1. Implement on-disk format for file data storage using blocks or extents\n2. Create inode allocation and management\n3. Implement file creation, deletion, and modification operations\n4. Develop directory entry management\n5. Implement read/write operations for file data\n6. Create metadata storage mechanisms for both traditional and vector-specific metadata\n7. Implement permission checking and access control\n8. Develop space allocation algorithms for file data\n9. Implement basic journaling or transaction mechanism for crash consistency\n\nThe implementation should support configurable block/extent sizes to balance small file efficiency against large file throughput. Consider drawing inspiration from ZFS and Btrfs for block/extent management strategies.",
-      "testStrategy": "1. Test POSIX compliance for basic file operations\n2. Verify correct handling of file permissions and ownership\n3. Test file data integrity after writes and rereads\n4. Benchmark read/write performance for various file sizes\n5. Test concurrent file operations\n6. Verify crash recovery capabilities\n7. Test edge cases like full file system, maximum file size, etc.\n8. Validate directory operations with large numbers of entries",
+      "description": "Implement the core file system operations for managing files and directories",
+      "details": "1. Implement file operations (read, write, open, close, etc.)\n2. Develop directory operations (create, lookup, unlink, etc.)\n3. Implement inode management\n4. Create block allocation and management system\n5. Implement basic journaling for crash recovery\n6. Design and implement on-disk format\n\nThe implementation should focus on POSIX compliance while preparing for vector extensions. Use memory-safe abstractions for file operations and ensure proper locking for concurrent access.",
+      "testStrategy": "1. Test standard file operations (create, read, write, delete)\n2. Verify directory operations (mkdir, rmdir, ls)\n3. Test concurrent access patterns\n4. Validate crash recovery mechanisms\n5. Benchmark basic file operations against ext4\n6. Verify POSIX compliance with standard test suites",
       "priority": "high",
       "dependencies": [
         2
       ],
       "status": "pending",
-      "subtasks": [
-        {
-          "id": 1,
-          "title": "Design On-disk Format and Layout",
-          "description": "Define the physical structure of the file system on disk, including superblock, inode tables, data blocks, and free space tracking.",
-          "dependencies": [],
-          "details": "Create detailed specifications for: 1) Superblock structure with magic number, version, block size, and filesystem metadata; 2) Inode table layout with fixed-size entries; 3) Data block organization with configurable block sizes (4KB-64KB); 4) Free space bitmap/list design; 5) Reserved areas for journaling. Implement serialization/deserialization functions for all structures. Validate with disk layout visualization tools and ensure backward compatibility considerations are documented.",
-          "status": "pending"
-        },
-        {
-          "id": 2,
-          "title": "Implement Inode Management System",
-          "description": "Develop the core inode data structure and associated management functions for file metadata handling.",
-          "dependencies": [
-            1
-          ],
-          "details": "Implement: 1) Inode structure with file attributes (permissions, timestamps, size, owner); 2) Direct, indirect, and double-indirect block pointers for large file support; 3) Inode allocation and deallocation algorithms; 4) Inode caching for performance; 5) Reference counting for hard links. Test with edge cases including maximum file size scenarios, concurrent inode allocation, and recovery after crashes. Benchmark inode operations against ext4 for performance comparison.",
-          "status": "pending"
-        },
-        {
-          "id": 3,
-          "title": "Develop File Operations Implementation",
-          "description": "Create the core file operation functions including read, write, truncate, and attribute manipulation.",
-          "dependencies": [
-            2
-          ],
-          "details": "Implement: 1) Block-level read/write operations with buffer management; 2) File read/write with proper locking; 3) File creation and deletion; 4) File truncation and extension algorithms; 5) Extended attribute support; 6) Memory-mapped file operations. Ensure proper error handling, atomic operations where needed, and implement O_DIRECT support for database workloads. Validate with fio benchmarks and stress tests targeting sequential and random I/O patterns.",
-          "status": "pending"
-        },
-        {
-          "id": 4,
-          "title": "Create Directory Management System",
-          "description": "Implement directory entry management, lookup operations, and directory structure maintenance.",
-          "dependencies": [
-            2
-          ],
-          "details": "Develop: 1) Directory entry format with variable-length names; 2) Fast directory lookup using hashing; 3) Directory creation, modification and deletion operations; 4) Support for large directories (>10K entries) with efficient iteration; 5) Directory entry caching for performance. Implement both linear and hash-based directory formats. Test with deep directory hierarchies, concurrent directory modifications, and recovery scenarios. Benchmark against ext4 directory operations.",
-          "status": "pending"
-        },
-        {
-          "id": 5,
-          "title": "Design and Implement Space Allocation Algorithms",
-          "description": "Create efficient algorithms for block allocation, deallocation, and free space management.",
-          "dependencies": [
-            1
-          ],
-          "details": "Implement: 1) Bitmap-based free space tracking; 2) Extent-based allocation for contiguous blocks; 3) Buddy system for efficient variable-size allocations; 4) Block group management for locality; 5) Delayed allocation for performance; 6) Fragmentation reduction techniques. Optimize for both SSDs and HDDs with different allocation strategies. Test with fragmentation analysis tools and long-running workloads. Benchmark space allocation performance and fragmentation levels against ext4 and XFS.",
-          "status": "pending"
-        },
-        {
-          "id": 6,
-          "title": "Develop Journaling and Transaction System",
-          "description": "Implement crash-consistent journaling for metadata and optionally data to ensure filesystem integrity.",
-          "dependencies": [
-            2,
-            3,
-            4,
-            5
-          ],
-          "details": "Create: 1) Journal area management with circular buffer; 2) Transaction begin/commit/abort operations; 3) Metadata-only and full data journaling modes; 4) Checkpointing mechanism for journal pruning; 5) Recovery procedures for crash scenarios; 6) Journal compression for space efficiency. Implement both physical and logical journaling options. Test with power-failure simulation, corrupted journal recovery, and performance impact analysis. Validate with fsck equivalent tool to verify filesystem integrity after simulated crashes.",
-          "status": "pending"
-        }
-      ]
+      "subtasks": []
     },
     {
       "id": 4,
-      "title": "Implement Vector Embedding Storage",
-      "description": "Design and implement the storage mechanism for vector embeddings, including on-disk format and association with source files.",
-      "details": "1. Design on-disk format for vector embeddings storage\n2. Implement storage allocation for embeddings\n3. Create mechanisms to link embeddings to their source files\n4. Develop storage for vector metadata (dimensionality, model version, etc.)\n5. Implement efficient serialization/deserialization of vector data\n6. Create mechanisms for vector data compression/quantization\n7. Implement columnar storage layout for vectors if appropriate\n8. Develop mechanisms for vector data integrity verification\n\nConsider multiple approaches for embedding storage:\n- Extended attributes (xattrs) for smaller embeddings\n- Dedicated vector store within VexFS for larger embeddings\n- Support for memory-mapped (mmap) access to embeddings\n\nDefer sparse vector storage support for future development unless strong early demand is identified.",
-      "testStrategy": "1. Test storage and retrieval of vectors of various dimensions\n2. Verify correct association between files and their embeddings\n3. Test vector data integrity after file operations\n4. Benchmark vector storage and retrieval performance\n5. Verify correct handling of vector metadata\n6. Test concurrent vector operations\n7. Validate storage efficiency through compression/quantization\n8. Test mmap access to vector data if implemented",
+      "title": "Design and Implement Vector Storage Format",
+      "description": "Create the storage format and management system for vector embeddings within the file system",
+      "details": "1. Design on-disk format for vector embeddings\n2. Implement vector metadata structures\n3. Create storage allocation strategy for vectors\n4. Develop vector compression/quantization mechanisms\n5. Implement columnar storage layout for efficient vector operations\n6. Design vector-to-file mapping system\n\nThe storage format should optimize for both space efficiency and query performance. Consider different vector dimensions and types, and implement appropriate compression techniques based on vector characteristics.",
+      "testStrategy": "1. Test storage and retrieval of vectors with different dimensions\n2. Benchmark compression ratios for various vector types\n3. Verify data integrity after compression/decompression\n4. Test vector storage with large datasets\n5. Validate mapping between files and their vector embeddings",
       "priority": "high",
       "dependencies": [
         3
       ],
       "status": "pending",
-      "subtasks": [
-        {
-          "id": 1,
-          "title": "Design Vector On-Disk Format",
-          "description": "Create a specification for the on-disk format to store vector embeddings efficiently",
-          "dependencies": [],
-          "details": "Design a binary format that supports variable-length vectors with different dimensions. Include header structures with metadata (vector dimension, data type, creation timestamp). Consider memory alignment for optimal read performance. Implement versioning to support format evolution. Evaluate trade-offs between dense and sparse vector storage formats. Benchmark read/write performance with different block sizes (4KB, 8KB, 16KB) to optimize for both SSD and HDD storage. Document the byte-level layout with diagrams.",
-          "status": "pending"
-        },
-        {
-          "id": 2,
-          "title": "Implement Storage Allocation Mechanisms",
-          "description": "Develop efficient allocation strategies for vector data that minimize fragmentation and optimize access patterns",
-          "dependencies": [
-            1
-          ],
-          "details": "Create a vector-specific allocation manager that handles variable-sized embeddings. Implement a buddy allocation system for vectors with similar dimensions. Design a paging mechanism with configurable page sizes (default 64KB). Develop strategies for handling vector updates (copy-on-write vs. in-place updates). Implement garbage collection for deleted vectors. Create benchmarks to measure fragmentation over time with different allocation strategies. Optimize for batch operations when storing multiple vectors simultaneously.",
-          "status": "pending"
-        },
-        {
-          "id": 3,
-          "title": "Develop File-to-Embedding Linking System",
-          "description": "Create a robust system to maintain relationships between file objects and their vector embeddings",
-          "dependencies": [
-            1,
-            2
-          ],
-          "details": "Design a bidirectional mapping between file IDs and vector embeddings. Implement a persistent B-tree index for fast lookups. Support one-to-many relationships (multiple embeddings per file). Create a caching layer for frequently accessed mappings. Implement transactional updates to maintain consistency between files and embeddings. Design recovery mechanisms for interrupted operations. Support bulk operations for efficiency when processing multiple files. Include versioning to track embedding updates over time.",
-          "status": "pending"
-        },
-        {
-          "id": 4,
-          "title": "Implement Vector Metadata Management",
-          "description": "Create a system to store, index, and query metadata associated with vector embeddings",
-          "dependencies": [
-            1,
-            3
-          ],
-          "details": "Design a schema for vector metadata (source, model version, confidence scores, timestamps). Implement a columnar storage format for efficient queries on specific metadata fields. Create indexes for common query patterns. Support both structured and semi-structured metadata. Implement a query language for metadata filtering. Design a versioning system to track metadata changes. Optimize storage with compression techniques specific to metadata types. Create a caching strategy for frequently accessed metadata.",
-          "status": "pending"
-        },
-        {
-          "id": 5,
-          "title": "Develop Vector Serialization and Compression",
-          "description": "Implement efficient serialization and compression techniques for vector data to minimize storage requirements",
-          "dependencies": [
-            1,
-            2
-          ],
-          "details": "Research and implement vector-specific compression algorithms (quantization, dimensionality reduction, sparse encoding). Create a pluggable compression framework to support multiple algorithms. Implement adaptive compression based on vector characteristics. Benchmark compression ratio vs. decompression speed for different algorithms. Support both lossy and lossless compression options with configurable quality settings. Implement batched compression/decompression for improved throughput. Create utilities for analyzing compression effectiveness across different vector types. Optimize for SIMD instructions where applicable.",
-          "status": "pending"
-        }
-      ]
+      "subtasks": []
     },
     {
       "id": 5,
-      "title": "Develop Vector Indexing Module (ANNS)",
-      "description": "Implement the Approximate Nearest Neighbor Search (ANNS) indexing functionality optimized for in-kernel execution.",
-      "details": "1. Implement at least one ANNS algorithm (HNSW recommended for initial implementation)\n2. Design on-disk serialization format for ANNS indices\n3. Implement index building and update mechanisms\n4. Create efficient partial loading of indices\n5. Develop batch and incremental indexing support\n6. Implement index persistence and recovery\n7. Create tunable parameters for index performance\n8. Optimize for kernel execution environment\n\nThe implementation should focus on memory efficiency and performance within kernel constraints. Consider implementing a Vector Write-Ahead Log (WAL) to decouple embedding ingestion from index updates, particularly useful for handling bursts of embedding updates.",
-      "testStrategy": "1. Test index building with various vector dimensions and counts\n2. Verify index persistence across mount/unmount cycles\n3. Benchmark search performance with different index configurations\n4. Test incremental index updates\n5. Verify index integrity after crashes or power failures\n6. Test concurrent index operations\n7. Validate memory usage during index operations\n8. Compare search results against reference implementations for accuracy",
+      "title": "Implement ANNS Algorithms for Vector Indexing",
+      "description": "Develop Approximate Nearest Neighbor Search (ANNS) algorithms for efficient vector indexing and retrieval",
+      "details": "1. Implement HNSW (Hierarchical Navigable Small World) algorithm\n2. Develop IVFADC (Inverted File System with Additive Distance Computation) indexing\n3. Implement DiskANN for SSD-optimized vector search\n4. Create index management and maintenance routines\n5. Develop index persistence mechanisms\n6. Implement index parameter tuning interfaces\n\nThe implementation should focus on kernel-compatible algorithms that minimize memory allocations and maximize performance. Consider read-optimized and update-optimized index variants.",
+      "testStrategy": "1. Benchmark search performance against standard vector datasets\n2. Test index building with varying parameters\n3. Validate search accuracy (recall@k) for different algorithms\n4. Measure memory consumption during index operations\n5. Test index persistence across mount/unmount cycles\n6. Verify concurrent search operations",
       "priority": "high",
       "dependencies": [
         4
       ],
       "status": "pending",
-      "subtasks": [
-        {
-          "id": 1,
-          "title": "Implement HNSW Algorithm with Kernel Optimization",
-          "description": "Develop a kernel-optimized implementation of the Hierarchical Navigable Small World (HNSW) algorithm for approximate nearest neighbor search.",
-          "dependencies": [],
-          "details": "Implement the core HNSW algorithm with multi-level graph structure. Optimize for kernel execution using SIMD instructions for distance calculations. Implement parallel graph traversal with work queue management. Use memory-aligned data structures for vector storage. Optimize the entry point selection and layer promotion strategy. Benchmark against naive implementation to verify performance gains. Consider CUDA implementation for GPU acceleration if applicable.",
-          "status": "pending"
-        },
-        {
-          "id": 2,
-          "title": "Design On-disk Index Serialization Format",
-          "description": "Create an efficient serialization format for persisting vector indexes to disk with minimal overhead during loading.",
-          "dependencies": [
-            1
-          ],
-          "details": "Design a binary serialization format with metadata header containing version, dimensions, and index parameters. Implement memory-mapped file support for direct access without full loading. Create separate sections for graph connectivity and vector data. Develop checksum verification for data integrity. Implement compression for vector data using techniques like product quantization. Design a format that allows for incremental updates without full rewrite. Document the binary format specification for future reference.",
-          "status": "pending"
-        },
-        {
-          "id": 3,
-          "title": "Develop Index Building and Update Mechanisms",
-          "description": "Create efficient mechanisms for building indexes from scratch and updating existing indexes with new vectors.",
-          "dependencies": [
-            1,
-            2
-          ],
-          "details": "Implement batch index building with parallel processing for initial creation. Develop incremental update strategy that minimizes graph restructuring. Create optimized insertion algorithm with neighbor recalculation. Implement deletion support with tombstone marking. Design rebalancing mechanism to maintain graph quality after multiple updates. Optimize for cache locality during index construction. Implement progress tracking and resumable building for large indexes. Create benchmarking suite to measure build and update performance.",
-          "status": "pending"
-        },
-        {
-          "id": 4,
-          "title": "Implement Partial Loading and Memory Management",
-          "description": "Create a system for partial loading of large indexes and efficient memory management during query execution.",
-          "dependencies": [
-            2,
-            3
-          ],
-          "details": "Implement on-demand loading of index segments based on query patterns. Design LRU cache for frequently accessed portions of the index. Create prefetching mechanism based on graph connectivity. Implement memory budget constraints with adaptive behavior. Develop eviction strategies for least-used portions of the index. Create monitoring tools for memory usage statistics. Implement shared memory support for multi-process access. Optimize for NUMA architectures in multi-socket systems.",
-          "status": "pending"
-        },
-        {
-          "id": 5,
-          "title": "Develop Write-ahead Logging for Index Updates",
-          "description": "Implement a write-ahead logging system to ensure durability and crash recovery for index modifications.",
-          "dependencies": [
-            3,
-            4
-          ],
-          "details": "Design log format for recording index modifications (insertions, deletions, updates). Implement log replay mechanism for crash recovery. Create checkpointing system to limit log size and replay time. Develop background compaction process to apply logs to the main index. Implement atomic commit protocol for multi-vector operations. Create log pruning mechanism for completed operations. Design performance optimizations like group commit for high-throughput scenarios. Implement verification tools to ensure index consistency after recovery.",
-          "status": "pending"
-        }
-      ]
+      "subtasks": []
     },
     {
       "id": 6,
-      "title": "Implement Vector Search and Retrieval",
-      "description": "Develop the in-kernel vector search functionality, including similarity metrics, query processing, and result filtering.",
-      "details": "1. Implement multiple similarity metrics (L2 Distance, Cosine Similarity, Inner Product)\n2. Develop k-NN search algorithm optimized for in-kernel execution\n3. Implement filtering based on file metadata\n4. Create hybrid search logic to combine metadata and vector search results\n5. Optimize search performance for kernel environment\n6. Implement batched search requests\n7. Develop query-aware pruning techniques\n8. Create mechanisms for search result scoring and ranking\n\nThe implementation should leverage SIMD instructions where available for vector operations. Focus on minimizing memory allocations and copies during search operations.",
-      "testStrategy": "1. Test search accuracy for various similarity metrics\n2. Benchmark search performance with different vector dimensions and dataset sizes\n3. Verify correct filtering based on file metadata\n4. Test hybrid search functionality\n5. Validate search results against reference implementations\n6. Test concurrent search operations\n7. Measure memory usage during search operations\n8. Test edge cases like empty indices or extreme parameter values",
-      "priority": "high",
+      "title": "Develop Vector Search and Retrieval Functions",
+      "description": "Implement vector similarity search functions using different distance metrics",
+      "details": "1. Implement L2 Distance (Euclidean) calculation\n2. Develop Cosine Similarity computation\n3. Implement Inner Product similarity\n4. Create k-nearest neighbor search functionality\n5. Develop range search capabilities\n6. Implement search result filtering and sorting\n\nOptimize vector operations for kernel execution, potentially using SIMD instructions where available. Implement both exact and approximate search variants with configurable accuracy-performance tradeoffs.",
+      "testStrategy": "1. Test search accuracy with known vector pairs\n2. Benchmark search performance with varying dataset sizes\n3. Validate different distance metrics against reference implementations\n4. Test edge cases (zero vectors, identical vectors)\n5. Verify search with different k values\n6. Test performance under concurrent search load",
+      "priority": "medium",
       "dependencies": [
         5
       ],
       "status": "pending",
-      "subtasks": [
-        {
-          "id": 1,
-          "title": "Design and implement secure ioctl interface for vector operations",
-          "description": "Create a secure kernel ioctl interface that handles vector operation requests from user space while enforcing proper access controls and validation.",
-          "dependencies": [],
-          "details": "Implement a kernel module with ioctl handlers that validate all incoming requests. Define command codes for vector operations (search, insert, delete). Implement input validation including bounds checking, permission verification, and buffer safety. Use copy_from_user/copy_to_user for safe data transfer. Add proper locking mechanisms for concurrent access. Document the API interface with clear parameter specifications.",
-          "status": "pending"
-        },
-        {
-          "id": 2,
-          "title": "Implement SIMD-optimized vector similarity metrics",
-          "description": "Develop kernel-compatible vector similarity functions optimized with SIMD instructions for various distance metrics.",
-          "dependencies": [
-            1
-          ],
-          "details": "Implement cosine similarity, Euclidean distance, dot product, and Jaccard similarity metrics. Use architecture-specific SIMD instructions (AVX2/AVX-512 for x86, NEON for ARM). Create fallback implementations for systems without SIMD support. Benchmark each implementation against naive versions. Ensure proper alignment of memory for optimal SIMD performance. Add kernel configuration options to select metrics at runtime.",
-          "status": "pending"
-        },
-        {
-          "id": 3,
-          "title": "Develop k-NN search algorithm with metadata filtering",
-          "description": "Create an efficient k-nearest neighbors search implementation with support for metadata-based filtering in the kernel space.",
-          "dependencies": [
-            2
-          ],
-          "details": "Implement priority queue for maintaining top-k results. Add support for early termination optimizations. Create efficient index structures for vector storage (consider inverted indices or partition-based approaches). Implement metadata filtering that can be applied during or after vector similarity search. Optimize memory usage for kernel environment. Add support for batch processing of queries. Implement proper error handling and recovery mechanisms.",
-          "status": "pending"
-        },
-        {
-          "id": 4,
-          "title": "Create result scoring, ranking and validation framework",
-          "description": "Develop a comprehensive system for scoring, ranking and validating vector search results before returning them to user space.",
-          "dependencies": [
-            3
-          ],
-          "details": "Implement configurable scoring algorithms that combine similarity scores with metadata relevance. Create a ranking system that sorts results based on combined scores. Add result validation to ensure returned data meets quality thresholds. Implement pagination support for large result sets. Create comprehensive logging for search performance metrics. Design and implement unit tests for accuracy validation. Add support for returning confidence scores with results.",
-          "status": "pending"
-        }
-      ]
+      "subtasks": []
     },
     {
       "id": 7,
-      "title": "Design and Implement ioctl Interface",
-      "description": "Create the ioctl-based API for vector operations, providing a secure and efficient interface for userspace applications.",
-      "details": "1. Define ioctl command codes for all vector operations\n2. Implement core vector operations:\n   - VEXFS_IOCTL_ADD_EMBEDDING\n   - VEXFS_IOCTL_GET_EMBEDDING\n   - VEXFS_IOCTL_UPDATE_EMBEDDING\n   - VEXFS_IOCTL_DELETE_EMBEDDING\n   - VEXFS_IOCTL_VECTOR_SEARCH\n   - VEXFS_IOCTL_HYBRID_SEARCH\n   - VEXFS_IOCTL_MANAGE_INDEX\n3. Create data structures for ioctl parameters and results\n4. Implement rigorous input validation\n5. Add permission and capability checks\n6. Develop secure error reporting\n7. Optimize for minimal copying between kernel and userspace\n8. Implement batched operations where appropriate\n\nThe implementation should follow the principle of least privilege and ensure that all user inputs are thoroughly validated to prevent security vulnerabilities.",
-      "testStrategy": "1. Test each ioctl command with valid and invalid inputs\n2. Verify proper permission checking\n3. Test error handling and reporting\n4. Benchmark performance of ioctl operations\n5. Test concurrent ioctl calls\n6. Verify memory safety during ioctl processing\n7. Test with malformed or malicious inputs (fuzzing)\n8. Validate behavior with edge case parameters",
-      "priority": "medium",
-      "dependencies": [
-        6
-      ],
-      "status": "pending",
-      "subtasks": [
-        {
-          "id": 1,
-          "title": "Design ioctl Command Set and Data Structures",
-          "description": "Define the complete ioctl command set and associated data structures for vector operations",
-          "dependencies": [],
-          "details": "Create a comprehensive API design document that includes: 1) Command codes for all vector operations (add, subtract, multiply, etc.), 2) Data structures for passing vector data between userspace and kernel, 3) Error code definitions, 4) Documentation of parameter requirements. Include memory layout considerations for efficient data transfer and alignment requirements. Design should account for both small and large vector operations.",
-          "status": "pending"
-        },
-        {
-          "id": 2,
-          "title": "Implement Core Vector Operation Handlers",
-          "description": "Develop the kernel-side handlers for each vector operation defined in the ioctl interface",
-          "dependencies": [
-            1
-          ],
-          "details": "Implement efficient C functions for each vector operation that: 1) Extract parameters from the ioctl call, 2) Perform the requested vector calculation, 3) Copy results back to userspace. Include optimizations like SIMD instructions where appropriate. Create a dispatch mechanism in the module's ioctl handler to route commands to the appropriate implementation. Develop unit tests for each operation using kernel testing frameworks.",
-          "status": "pending"
-        },
-        {
-          "id": 3,
-          "title": "Implement Security and Validation Mechanisms",
-          "description": "Add comprehensive input validation, permission checking, and security hardening to the ioctl interface",
-          "dependencies": [
-            1,
-            2
-          ],
-          "details": "Implement robust security measures including: 1) Bounds checking on all vector dimensions, 2) Validation of user-provided memory addresses, 3) Proper permission verification before operations, 4) Protection against integer overflows, 5) Mitigation of potential side-channel attacks. Document all security considerations and create test cases specifically designed to verify security properties. Implement proper error handling and reporting.",
-          "status": "pending"
-        },
-        {
-          "id": 4,
-          "title": "Optimize Performance and Create Testing Framework",
-          "description": "Optimize the kernel-userspace data transfer and create a comprehensive testing environment",
-          "dependencies": [
-            2,
-            3
-          ],
-          "details": "Implement performance optimizations including: 1) Minimizing copying between kernel and userspace, 2) Using appropriate memory allocation strategies, 3) Implementing batching for multiple operations. Create a testing framework that includes: 1) Kernel module compilation setup, 2) QEMU-based testing environment, 3) Performance benchmarks comparing different vector sizes, 4) Stress tests for concurrent operations. Document performance characteristics and provide usage examples.",
-          "status": "pending"
-        }
-      ]
-    },
-    {
-      "id": 8,
-      "title": "Develop Userspace Embedding Service Orchestration",
-      "description": "Implement the kernel-side orchestration for communicating with userspace embedding services via IPC mechanisms.",
-      "details": "1. Design IPC protocol for kernel-userspace communication (Netlink recommended)\n2. Implement kernel-side IPC handlers\n3. Create embedding request/response message formats\n4. Develop service discovery and management\n5. Implement request queuing and prioritization\n6. Create timeout and error handling mechanisms\n7. Develop embedding result processing and storage\n8. Implement service health monitoring\n\nThe implementation should isolate complex model execution in userspace while providing efficient communication channels. The kernel module should be resilient to userspace service failures and provide appropriate fallback mechanisms.",
-      "testStrategy": "1. Test communication with mock userspace services\n2. Verify correct handling of service failures\n3. Test request queuing and prioritization\n4. Benchmark IPC performance\n5. Test concurrent embedding requests\n6. Verify timeout handling\n7. Test with various message sizes\n8. Validate embedding result processing",
+      "title": "Implement ioctl Interface for Vector Operations",
+      "description": "Develop the ioctl-based API for vector operations in the file system",
+      "details": "1. Define ioctl command codes and structures\n2. Implement VEXFS_IOCTL_ADD_EMBEDDING\n3. Implement VEXFS_IOCTL_GET_EMBEDDING\n4. Implement VEXFS_IOCTL_UPDATE_EMBEDDING\n5. Implement VEXFS_IOCTL_DELETE_EMBEDDING\n6. Implement VEXFS_IOCTL_VECTOR_SEARCH\n7. Implement VEXFS_IOCTL_HYBRID_SEARCH\n8. Implement VEXFS_IOCTL_MANAGE_INDEX\n\nEnsure proper input validation and error handling. Design the API to be extensible for future operations while maintaining backward compatibility.",
+      "testStrategy": "1. Test each ioctl command with valid and invalid inputs\n2. Verify proper error codes are returned for edge cases\n3. Test permission handling and access control\n4. Benchmark ioctl performance overhead\n5. Validate memory safety during ioctl operations\n6. Test concurrent ioctl calls",
       "priority": "medium",
       "dependencies": [
         3,
-        4
+        6
       ],
       "status": "pending",
-      "subtasks": [
-        {
-          "id": 1,
-          "title": "Design and Implement IPC Protocol",
-          "description": "Create a robust IPC protocol for communication between kernel modules and userspace embedding services",
-          "dependencies": [],
-          "details": "Develop a protocol specification document detailing message formats (using Protocol Buffers or FlatBuffers), communication channels (netlink sockets, shared memory, or character devices), serialization/deserialization mechanisms, and versioning strategy. Implement client and server libraries in C/C++ with proper memory management. Include authentication mechanisms and implement bandwidth throttling to prevent DoS. Define timeout handling and heartbeat mechanisms for connection health monitoring.",
-          "status": "pending"
-        },
-        {
-          "id": 2,
-          "title": "Implement Service Discovery and Management",
-          "description": "Create a service registry and management system for embedding services",
-          "dependencies": [
-            1
-          ],
-          "details": "Develop a service registry that maintains information about available embedding services, their capabilities, and current status. Implement dynamic service registration/deregistration with health checking. Create a configuration system for service parameters using YAML/JSON. Design load balancing mechanisms for distributing requests across multiple service instances. Implement graceful startup/shutdown procedures and service versioning to handle upgrades without downtime.",
-          "status": "pending"
-        },
-        {
-          "id": 3,
-          "title": "Develop Request Handling and Prioritization",
-          "description": "Create a request processing pipeline with prioritization and queueing mechanisms",
-          "dependencies": [
-            1,
-            2
-          ],
-          "details": "Implement a request queue with priority levels (high/medium/low) and fair scheduling algorithm. Create backpressure mechanisms to handle overload conditions. Develop request batching for improved throughput. Implement cancellation mechanisms for in-flight requests. Add instrumentation for performance metrics (latency, throughput, queue depth). Create configurable timeout policies per request type and priority level.",
-          "status": "pending"
-        },
-        {
-          "id": 4,
-          "title": "Implement Error Handling and Recovery Mechanisms",
-          "description": "Design comprehensive error handling and recovery strategies for the embedding service",
-          "dependencies": [
-            1,
-            2,
-            3
-          ],
-          "details": "Create an error classification system (transient vs. permanent failures). Implement retry mechanisms with exponential backoff for transient errors. Develop circuit breaker patterns to prevent cascading failures. Create fallback mechanisms for degraded operation modes. Implement detailed error logging and diagnostics. Design and implement automated recovery procedures for common failure scenarios. Create an alert system for critical failures requiring manual intervention.",
-          "status": "pending"
-        }
-      ]
+      "subtasks": []
+    },
+    {
+      "id": 8,
+      "title": "Develop Userspace Embedding Service IPC",
+      "description": "Create the inter-process communication mechanism between the kernel module and userspace embedding services",
+      "details": "1. Design IPC protocol for kernel-userspace communication\n2. Implement kernel-side IPC endpoints\n3. Create service discovery mechanism\n4. Develop request/response handling\n5. Implement timeout and error handling\n6. Create service registration and management\n\nThe IPC mechanism should be efficient and secure, with proper validation of data crossing the kernel-userspace boundary. Consider using netlink sockets or character devices for communication.",
+      "testStrategy": "1. Test communication latency between kernel and userspace\n2. Verify handling of service unavailability\n3. Test recovery from service crashes\n4. Validate data integrity across the boundary\n5. Test with multiple concurrent embedding services\n6. Verify security of the IPC channel",
+      "priority": "medium",
+      "dependencies": [
+        7
+      ],
+      "status": "pending",
+      "subtasks": []
     },
     {
       "id": 9,
-      "title": "Implement Basic Userspace Embedding Service",
-      "description": "Create a reference implementation of a userspace embedding service that can generate embeddings for common file types.",
-      "details": "1. Implement a userspace daemon that listens for embedding requests\n2. Create handlers for common file types (text, images)\n3. Integrate with a simple embedding model (e.g., MiniLM for text)\n4. Implement IPC communication with the kernel module\n5. Develop request processing and response generation\n6. Create configuration mechanisms for model selection\n7. Implement service registration with the kernel module\n8. Add logging and monitoring capabilities\n\nThe implementation should be modular to allow for easy extension with additional file types and embedding models. Focus on stability and resource efficiency.",
-      "testStrategy": "1. Test embedding generation for various file types\n2. Verify correct communication with the kernel module\n3. Benchmark embedding generation performance\n4. Test service startup and shutdown\n5. Verify resource usage under load\n6. Test with malformed or corrupted files\n7. Validate configuration mechanisms\n8. Test service recovery after crashes",
+      "title": "Implement Caching Mechanisms for Vector Data",
+      "description": "Develop efficient caching strategies for vector embeddings and index structures",
+      "details": "1. Implement kernel memory caches for vector embeddings\n2. Develop caching for ANNS index segments\n3. Create cache eviction policies\n4. Implement prefetching strategies\n5. Develop cache coherence mechanisms\n6. Optimize memory usage for cached vectors\n\nThe caching system should balance memory usage with performance, adapting to available system resources. Implement different caching strategies for different access patterns.",
+      "testStrategy": "1. Benchmark query performance with and without caching\n2. Test cache hit/miss rates under various workloads\n3. Verify memory consumption stays within bounds\n4. Test cache behavior under memory pressure\n5. Validate cache coherence during concurrent operations\n6. Measure cache warm-up time",
       "priority": "medium",
       "dependencies": [
-        8
+        5,
+        6
       ],
       "status": "pending",
       "subtasks": []
@@ -496,9 +175,9 @@
     {
       "id": 10,
       "title": "Develop vexctl Command-Line Tool",
-      "description": "Create a command-line interface tool for interacting with the VexFS file system, providing debugging, administration, and basic query capabilities.",
-      "details": "1. Implement basic file system information commands\n2. Create commands for vector operations:\n   - add-embedding\n   - get-embedding\n   - update-embedding\n   - delete-embedding\n   - search\n   - hybrid-search\n   - manage-index\n3. Develop debugging and diagnostic commands\n4. Implement performance monitoring capabilities\n5. Create configuration management commands\n6. Add batch operation support\n7. Implement output formatting options (JSON, table, etc.)\n8. Develop help and documentation\n\nThe tool should provide a user-friendly interface while exposing the full power of the VexFS API. It will be essential for development, testing, debugging, and basic administration.",
-      "testStrategy": "1. Test each command with various parameters\n2. Verify correct error handling and reporting\n3. Test with large inputs and outputs\n4. Validate output formatting\n5. Test performance of commands\n6. Verify help and documentation accuracy\n7. Test in various shell environments\n8. Validate behavior with edge case parameters",
+      "description": "Create a command-line interface tool for managing and interacting with the VexFS file system",
+      "details": "1. Implement vexctl status command\n2. Develop vexctl add-embedding functionality\n3. Implement vexctl search command\n4. Create vexctl list-indexes command\n5. Implement vexctl create-index functionality\n6. Develop vexctl fsck command\n\nThe tool should provide a user-friendly interface to the file system's vector capabilities. Implement proper error handling and informative output formatting. Use Rust for the implementation to ensure memory safety and performance.",
+      "testStrategy": "1. Test each command with various input parameters\n2. Verify command output format and correctness\n3. Test error handling and reporting\n4. Validate permissions handling\n5. Test performance of operations through the CLI\n6. Verify help documentation and command discovery",
       "priority": "medium",
       "dependencies": [
         7
@@ -508,14 +187,13 @@
     },
     {
       "id": 11,
-      "title": "Implement Data Integrity and Security Features",
-      "description": "Develop security features including access control, data encryption, and vector data integrity mechanisms.",
-      "details": "1. Implement at-rest encryption for file and vector data\n2. Create secure key management mechanisms\n3. Develop POSIX ACL support\n4. Implement checksums for vector data integrity\n5. Create Copy-on-Write (CoW) mechanisms for atomic updates\n6. Implement snapshot capabilities (\"time travel\")\n7. Develop scrubbing mechanisms for data integrity verification\n8. Create secure audit logging\n\nThe implementation should prioritize security without compromising performance. The CoW and snapshot capabilities are particularly important for supporting the \"time travel\" functionality needed for agent memory simulation.",
-      "testStrategy": "1. Test encryption with various key sizes and algorithms\n2. Verify ACL enforcement\n3. Test data integrity after simulated corruption\n4. Validate CoW behavior during concurrent updates\n5. Test snapshot creation and restoration\n6. Verify scrubbing functionality\n7. Test audit logging accuracy\n8. Validate security under various attack scenarios",
-      "priority": "medium",
+      "title": "Implement Security and Access Control",
+      "description": "Develop security features including encryption, access control, and data integrity mechanisms",
+      "details": "1. Implement at-rest encryption for vector data\n2. Develop POSIX permission checks for vector operations\n3. Implement POSIX ACL support\n4. Create capability-based access control for ioctl operations\n5. Implement checksums for data integrity\n6. Develop secure key management for encryption\n\nSecurity implementation should follow kernel security best practices. Ensure proper permission checking for all operations and secure handling of cryptographic materials.",
+      "testStrategy": "1. Test permission enforcement for various user/group combinations\n2. Verify encryption effectiveness with data inspection\n3. Test ACL functionality for complex permission scenarios\n4. Validate checksum verification during data retrieval\n5. Test key rotation procedures\n6. Verify security of ioctl operations with unprivileged users",
+      "priority": "high",
       "dependencies": [
         3,
-        4,
         7
       ],
       "status": "pending",
@@ -523,25 +201,25 @@
     },
     {
       "id": 12,
-      "title": "Optimize Performance for Vector Operations",
-      "description": "Implement performance optimizations for vector operations, including caching, SIMD acceleration, and query optimization.",
-      "details": "1. Implement kernel memory caches for vector embeddings\n2. Create caching for ANNS index segments\n3. Develop SIMD-accelerated vector operations\n4. Implement query optimization techniques\n5. Create memory-mapped (mmap) access to embedding data\n6. Develop batching mechanisms for vector operations\n7. Implement Vector Write-Ahead Log (WAL) for improved ingestion\n8. Create tunable parameters for performance optimization\n\nThe implementation should leverage hardware capabilities where available while maintaining compatibility across different platforms. The mmap functionality is particularly important for enabling efficient access from userspace applications.",
-      "testStrategy": "1. Benchmark vector operations with and without optimizations\n2. Test cache hit rates under various workloads\n3. Verify SIMD acceleration on supported platforms\n4. Measure query performance with different optimization techniques\n5. Test mmap performance for embedding access\n6. Benchmark WAL performance for ingestion\n7. Validate performance tuning parameters\n8. Test performance under concurrent workloads",
+      "title": "Implement Copy-on-Write and Snapshot Capabilities",
+      "description": "Develop Copy-on-Write (CoW) mechanisms for atomic updates and snapshot functionality",
+      "details": "1. Implement CoW for file data updates\n2. Develop CoW for vector embedding modifications\n3. Create snapshot creation and management\n4. Implement snapshot traversal and access\n5. Develop space-efficient delta storage\n6. Create garbage collection for obsolete data\n\nThe CoW implementation should ensure atomic updates while minimizing space overhead. Snapshots should be efficiently stored and quickly accessible.",
+      "testStrategy": "1. Test atomicity of updates during concurrent access\n2. Verify snapshot creation and access\n3. Measure space overhead of CoW operations\n4. Test snapshot performance compared to main file system\n5. Validate garbage collection effectiveness\n6. Test snapshot operations at scale",
       "priority": "medium",
       "dependencies": [
-        5,
-        6
+        3,
+        4
       ],
       "status": "pending",
       "subtasks": []
     },
     {
       "id": 13,
-      "title": "Implement Hybrid Query Optimizer",
-      "description": "Develop a query optimizer for efficiently executing hybrid queries that combine metadata and vector search operations.",
-      "details": "1. Design a simplified query language or API for hybrid queries\n2. Implement a query parser\n3. Create a cost-based optimizer\n4. Develop execution plans for hybrid queries\n5. Implement query execution engine\n6. Create result merging and ranking mechanisms\n7. Develop query caching\n8. Implement query monitoring and statistics\n\nThis is a more advanced feature that may be implemented in a limited form initially. The goal is to provide a thin SQL-like query layer or a DuckDB-style planner accessible via ioctl or the vexctl tool, translating simplified hybrid queries into optimized sequences of metadata and vector operations.",
-      "testStrategy": "1. Test query parsing with various query formats\n2. Verify optimizer plan selection\n3. Benchmark query execution performance\n4. Test result merging and ranking accuracy\n5. Validate query caching effectiveness\n6. Test with complex hybrid queries\n7. Verify performance statistics\n8. Test concurrent query execution",
-      "priority": "low",
+      "title": "Develop Hybrid Query Optimizer",
+      "description": "Implement a query optimizer for hybrid searches combining traditional file attributes with vector similarity",
+      "details": "1. Design query representation format\n2. Implement query parsing and validation\n3. Develop cost-based optimization strategies\n4. Create execution plan generation\n5. Implement result merging and ranking\n6. Develop filter pushdown optimizations\n\nThe query optimizer should efficiently combine traditional metadata filters with vector similarity searches. Implement statistics collection to inform optimization decisions.",
+      "testStrategy": "1. Test query optimization with various query patterns\n2. Benchmark performance against naive execution strategies\n3. Verify result correctness for complex queries\n4. Test optimizer adaptability to data distribution\n5. Validate handling of edge cases (empty results, large result sets)\n6. Measure optimization overhead",
+      "priority": "medium",
       "dependencies": [
         6,
         7
@@ -551,42 +229,30 @@
     },
     {
       "id": 14,
-      "title": "Create Agentic Boot Environment",
-      "description": "Develop bootable semantic substrates for AGI alignment, including pre-mounted and pre-indexed VexFS with vectorized knowledge artifacts.",
-      "details": "1. Create QEMU images with VexFS pre-mounted\n2. Develop scripts for pre-indexing knowledge artifacts\n3. Implement a baseline AI agent that reads/writes from VexFS\n4. Create mechanisms for storing \"thoughts,\" queries, and embeddings\n5. Implement semantic time-travel using filesystem snapshots\n6. Develop safe rollback mechanisms\n7. Create agent memory simulation environment\n8. Implement monitoring and analysis tools\n\nThis environment is not user-facing but rather simulates how future intelligent systems will interact with data semantically and persistently. It leverages the snapshot capabilities developed in task 11 to enable episodic memory and safe rollback.",
-      "testStrategy": "1. Test boot process of semantic substrate images\n2. Verify pre-indexing of knowledge artifacts\n3. Test AI agent interaction with VexFS\n4. Validate storage and retrieval of agent memory\n5. Test semantic time-travel functionality\n6. Verify safe rollback mechanisms\n7. Measure performance of agent memory operations\n8. Test with various knowledge artifact sets",
+      "title": "Implement Packer-based Image Build Pipeline",
+      "description": "Create an automated build pipeline for generating bootable Linux images with VexFS preinstalled",
+      "details": "1. Set up Packer configuration for minimal Linux images\n2. Implement custom kernel compilation with VexFS support\n3. Create provisioning scripts for VexFS module installation\n4. Develop configuration for automatic VexFS mounting\n5. Implement test harness integration\n6. Create image validation procedures\n\nThe build pipeline should produce consistent, reproducible images for development and testing. Include options for different kernel versions and configurations.",
+      "testStrategy": "1. Verify image boot process in QEMU\n2. Test automatic mounting of VexFS\n3. Validate kernel module loading\n4. Test image with different hardware configurations\n5. Verify reproducibility of builds\n6. Measure build time and image size",
       "priority": "low",
       "dependencies": [
-        3,
-        5,
-        6,
-        11
+        1,
+        2,
+        3
       ],
       "status": "pending",
       "subtasks": []
     },
     {
       "id": 15,
-      "title": "Comprehensive Testing and Documentation",
-      "description": "Develop comprehensive testing suites and documentation for the VexFS file system, including performance benchmarks, correctness tests, and user guides.",
-      "details": "1. Develop unit tests for all components\n2. Create integration tests for the complete system\n3. Implement performance benchmarks\n4. Develop POSIX compliance tests\n5. Create stress tests for reliability\n6. Implement fuzz testing for security\n7. Develop correctness tests for vector operations\n8. Create data integrity and crash recovery tests\n\nDocumentation:\n1. API reference for ioctl interface\n2. User guide for vexctl tool\n3. Administrator guide for mounting and managing VexFS\n4. Developer guide for extending VexFS\n5. Performance tuning guide\n6. Security best practices\n7. Use case examples for different applications\n8. Troubleshooting guide\n\nThe testing should be rigorous and comprehensive, given the critical nature of a kernel module. Documentation should be clear, concise, and complete.",
-      "testStrategy": "1. Verify test coverage across all components\n2. Validate test results against expected behavior\n3. Test documentation accuracy and completeness\n4. Gather feedback from test users\n5. Verify benchmark reproducibility\n6. Test documentation examples\n7. Validate troubleshooting procedures\n8. Test in various environments and configurations",
-      "priority": "medium",
+      "title": "Develop Comprehensive Testing Framework",
+      "description": "Create a testing framework for validating VexFS functionality, performance, and compliance",
+      "details": "1. Implement unit tests for kernel module components\n2. Develop integration tests with VFS\n3. Create performance benchmarking suite\n4. Implement POSIX compliance test suite\n5. Develop stress tests and fuzz testing\n6. Create data integrity and crash recovery tests\n\nThe testing framework should provide comprehensive coverage of file system functionality. Implement automated test execution in QEMU environments and reporting of results.",
+      "testStrategy": "1. Run tests in CI/CD pipeline\n2. Verify test coverage metrics\n3. Validate test reproducibility\n4. Test the tests themselves for false positives/negatives\n5. Benchmark test execution time\n6. Verify isolation between test cases",
+      "priority": "high",
       "dependencies": [
-        1,
-        2,
         3,
-        4,
-        5,
-        6,
         7,
-        8,
-        9,
-        10,
-        11,
-        12,
-        13,
-        14
+        10
       ],
       "status": "pending",
       "subtasks": []

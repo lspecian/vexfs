@@ -34,3 +34,10 @@ target/
 # Task files (but keep Task Master tasks directory)
 # tasks.json
 # tasks/
+
+# Added by Claude Task Master
+# Task files
+tasks.json
+tasks/ 
+
+.windsurfrules

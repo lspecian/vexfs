@@ -3,64 +3,21 @@
 # Status: pending
 # Dependencies: 2
 # Priority: high
-# Description: Implement the core file system functionality for managing files and directories, including metadata management and data storage allocation.
+# Description: Implement the core file system operations for managing files and directories
 # Details:
-1. Implement on-disk format for file data storage using blocks or extents
-2. Create inode allocation and management
-3. Implement file creation, deletion, and modification operations
-4. Develop directory entry management
-5. Implement read/write operations for file data
-6. Create metadata storage mechanisms for both traditional and vector-specific metadata
-7. Implement permission checking and access control
-8. Develop space allocation algorithms for file data
-9. Implement basic journaling or transaction mechanism for crash consistency
+1. Implement file operations (read, write, open, close, etc.)
+2. Develop directory operations (create, lookup, unlink, etc.)
+3. Implement inode management
+4. Create block allocation and management system
+5. Implement basic journaling for crash recovery
+6. Design and implement on-disk format
 
-The implementation should support configurable block/extent sizes to balance small file efficiency against large file throughput. Consider drawing inspiration from ZFS and Btrfs for block/extent management strategies.
+The implementation should focus on POSIX compliance while preparing for vector extensions. Use memory-safe abstractions for file operations and ensure proper locking for concurrent access.
 
 # Test Strategy:
-1. Test POSIX compliance for basic file operations
-2. Verify correct handling of file permissions and ownership
-3. Test file data integrity after writes and rereads
-4. Benchmark read/write performance for various file sizes
-5. Test concurrent file operations
-6. Verify crash recovery capabilities
-7. Test edge cases like full file system, maximum file size, etc.
-8. Validate directory operations with large numbers of entries
-
-# Subtasks:
-## 1. Design On-disk Format and Layout [pending]
-### Dependencies: None
-### Description: Define the physical structure of the file system on disk, including superblock, inode tables, data blocks, and free space tracking.
-### Details:
-Create detailed specifications for: 1) Superblock structure with magic number, version, block size, and filesystem metadata; 2) Inode table layout with fixed-size entries; 3) Data block organization with configurable block sizes (4KB-64KB); 4) Free space bitmap/list design; 5) Reserved areas for journaling. Implement serialization/deserialization functions for all structures. Validate with disk layout visualization tools and ensure backward compatibility considerations are documented.
-
-## 2. Implement Inode Management System [pending]
-### Dependencies: 3.1
-### Description: Develop the core inode data structure and associated management functions for file metadata handling.
-### Details:
-Implement: 1) Inode structure with file attributes (permissions, timestamps, size, owner); 2) Direct, indirect, and double-indirect block pointers for large file support; 3) Inode allocation and deallocation algorithms; 4) Inode caching for performance; 5) Reference counting for hard links. Test with edge cases including maximum file size scenarios, concurrent inode allocation, and recovery after crashes. Benchmark inode operations against ext4 for performance comparison.
-
-## 3. Develop File Operations Implementation [pending]
-### Dependencies: 3.2
-### Description: Create the core file operation functions including read, write, truncate, and attribute manipulation.
-### Details:
-Implement: 1) Block-level read/write operations with buffer management; 2) File read/write with proper locking; 3) File creation and deletion; 4) File truncation and extension algorithms; 5) Extended attribute support; 6) Memory-mapped file operations. Ensure proper error handling, atomic operations where needed, and implement O_DIRECT support for database workloads. Validate with fio benchmarks and stress tests targeting sequential and random I/O patterns.
-
-## 4. Create Directory Management System [pending]
-### Dependencies: 3.2
-### Description: Implement directory entry management, lookup operations, and directory structure maintenance.
-### Details:
-Develop: 1) Directory entry format with variable-length names; 2) Fast directory lookup using hashing; 3) Directory creation, modification and deletion operations; 4) Support for large directories (>10K entries) with efficient iteration; 5) Directory entry caching for performance. Implement both linear and hash-based directory formats. Test with deep directory hierarchies, concurrent directory modifications, and recovery scenarios. Benchmark against ext4 directory operations.
-
-## 5. Design and Implement Space Allocation Algorithms [pending]
-### Dependencies: 3.1
-### Description: Create efficient algorithms for block allocation, deallocation, and free space management.
-### Details:
-Implement: 1) Bitmap-based free space tracking; 2) Extent-based allocation for contiguous blocks; 3) Buddy system for efficient variable-size allocations; 4) Block group management for locality; 5) Delayed allocation for performance; 6) Fragmentation reduction techniques. Optimize for both SSDs and HDDs with different allocation strategies. Test with fragmentation analysis tools and long-running workloads. Benchmark space allocation performance and fragmentation levels against ext4 and XFS.
-
-## 6. Develop Journaling and Transaction System [pending]
-### Dependencies: 3.2, 3.3, 3.4, 3.5
-### Description: Implement crash-consistent journaling for metadata and optionally data to ensure filesystem integrity.
-### Details:
-Create: 1) Journal area management with circular buffer; 2) Transaction begin/commit/abort operations; 3) Metadata-only and full data journaling modes; 4) Checkpointing mechanism for journal pruning; 5) Recovery procedures for crash scenarios; 6) Journal compression for space efficiency. Implement both physical and logical journaling options. Test with power-failure simulation, corrupted journal recovery, and performance impact analysis. Validate with fsck equivalent tool to verify filesystem integrity after simulated crashes.
-
+1. Test standard file operations (create, read, write, delete)
+2. Verify directory operations (mkdir, rmdir, ls)
+3. Test concurrent access patterns
+4. Validate crash recovery mechanisms
+5. Benchmark basic file operations against ext4
+6. Verify POSIX compliance with standard test suites

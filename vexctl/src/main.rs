@@ -1,25 +1,14 @@
 use clap::{Parser, Subcommand};
 use std::fs::File;
 use std::os::unix::io::AsRawFd;
-// We will use raw ioctl call for simplicity with a predefined command number.
-// use nix::ioctl_read_bad; 
+use nix::ioctl_none;
 
 // Define the IOCTL command number components, matching the kernel module's ioctl.rs
-const VEXFS_IOCTL_MAGIC: u8 = b'v';
-const VEXFS_IOCTL_CMD_GET_STATUS: u8 = 0x01;
+const VEXFS_IOCTL_MAGIC: u8 = b'V'; // Uppercase V to match kernel module
+const VEXFS_IOCTL_CMD_GET_STATUS: u8 = 0x10; // Match kernel module definition
 
-// Pre-calculate the full IOCTL command number based on common Linux _IO macro behavior.
-// _IO(type, nr) -> ( (IOC_NONE << DIRSHIFT) | (type << TYPESHIFT) | (nr << NRSHIFT) | (0 << SIZESHIFT) )
-// For VEXFS_IOCTL_MAGIC = 'v' (0x76), VEXFS_IOCTL_CMD_GET_STATUS = 1:
-// Assuming IOC_NONE = 0, no size.
-// Typical bit shifts (can vary by arch, but often consistent for _IO):
-// TYPE is 8 bits, NR is 8 bits.
-// Command = (TYPE << 8) | NR
-// So, (0x76 << 8) | 0x01 = 0x7600 | 0x01 = 0x7601
-// If direction and size are involved at higher bits, they are 0 for _IO.
-// So, the number is often directly 0x00007601 (assuming 32-bit command).
-// This matches the placeholder `VEXFS_GET_STATUS_CMD_FULL` in the kernel module.
-const VEXFS_IOCTL_GET_STATUS_FULL_CMD: u32 = 0x00007601;
+// Use nix's ioctl macro to properly define the ioctl command
+ioctl_none!(vexfs_get_status, VEXFS_IOCTL_MAGIC, VEXFS_IOCTL_CMD_GET_STATUS);
 
 
 #[derive(Parser)]
@@ -56,10 +45,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let fd = file.as_raw_fd();
             
-            // Directly use the libc::ioctl call via nix::sys::ioctl::ioctl
-            // The third argument to ioctl can be an int or a pointer. For _IO commands, it's often ignored (or 0).
-            // The return value of the ioctl syscall itself is what we're interested in.
-            match unsafe { nix::sys::ioctl::ioctl(fd, VEXFS_IOCTL_GET_STATUS_FULL_CMD as u64, 0 as *mut _) } {
+            // Use the properly defined ioctl function from nix
+            match unsafe { vexfs_get_status(fd) } {
                 Ok(status_code) => {
                     // status_code is the direct integer return from the ioctl syscall.
                     println!("VexFS status for '{}': {}", path, status_code);

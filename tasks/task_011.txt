@@ -1,27 +1,23 @@
 # Task ID: 11
-# Title: Implement Data Integrity and Security Features
+# Title: Implement Security and Access Control
 # Status: pending
-# Dependencies: 3, 4, 7
-# Priority: medium
-# Description: Develop security features including access control, data encryption, and vector data integrity mechanisms.
+# Dependencies: 3, 7
+# Priority: high
+# Description: Develop security features including encryption, access control, and data integrity mechanisms
 # Details:
-1. Implement at-rest encryption for file and vector data
-2. Create secure key management mechanisms
-3. Develop POSIX ACL support
-4. Implement checksums for vector data integrity
-5. Create Copy-on-Write (CoW) mechanisms for atomic updates
-6. Implement snapshot capabilities ("time travel")
-7. Develop scrubbing mechanisms for data integrity verification
-8. Create secure audit logging
+1. Implement at-rest encryption for vector data
+2. Develop POSIX permission checks for vector operations
+3. Implement POSIX ACL support
+4. Create capability-based access control for ioctl operations
+5. Implement checksums for data integrity
+6. Develop secure key management for encryption
 
-The implementation should prioritize security without compromising performance. The CoW and snapshot capabilities are particularly important for supporting the "time travel" functionality needed for agent memory simulation.
+Security implementation should follow kernel security best practices. Ensure proper permission checking for all operations and secure handling of cryptographic materials.
 
 # Test Strategy:
-1. Test encryption with various key sizes and algorithms
-2. Verify ACL enforcement
-3. Test data integrity after simulated corruption
-4. Validate CoW behavior during concurrent updates
-5. Test snapshot creation and restoration
-6. Verify scrubbing functionality
-7. Test audit logging accuracy
-8. Validate security under various attack scenarios
+1. Test permission enforcement for various user/group combinations
+2. Verify encryption effectiveness with data inspection
+3. Test ACL functionality for complex permission scenarios
+4. Validate checksum verification during data retrieval
+5. Test key rotation procedures
+6. Verify security of ioctl operations with unprivileged users
