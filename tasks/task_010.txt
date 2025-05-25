@@ -1,0 +1,34 @@
+# Task ID: 10
+# Title: Develop vexctl Command-Line Tool
+# Status: pending
+# Dependencies: 7
+# Priority: medium
+# Description: Create a command-line interface tool for interacting with the VexFS file system, providing debugging, administration, and basic query capabilities.
+# Details:
+1. Implement basic file system information commands
+2. Create commands for vector operations:
+   - add-embedding
+   - get-embedding
+   - update-embedding
+   - delete-embedding
+   - search
+   - hybrid-search
+   - manage-index
+3. Develop debugging and diagnostic commands
+4. Implement performance monitoring capabilities
+5. Create configuration management commands
+6. Add batch operation support
+7. Implement output formatting options (JSON, table, etc.)
+8. Develop help and documentation
+
+The tool should provide a user-friendly interface while exposing the full power of the VexFS API. It will be essential for development, testing, debugging, and basic administration.
+
+# Test Strategy:
+1. Test each command with various parameters
+2. Verify correct error handling and reporting
+3. Test with large inputs and outputs
+4. Validate output formatting
+5. Test performance of commands
+6. Verify help and documentation accuracy
+7. Test in various shell environments
+8. Validate behavior with edge case parameters

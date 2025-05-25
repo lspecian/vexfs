@@ -24,6 +24,6 @@ node_modules/
 # OS specific
 .DS_Store
 
-# Task files
-tasks.json
-tasks/ 
+# Task files (but keep Task Master tasks directory)
+# tasks.json
+# tasks/

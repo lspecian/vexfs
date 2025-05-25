@@ -1,0 +1,59 @@
+# Task ID: 5
+# Title: Develop Vector Indexing Module (ANNS)
+# Status: pending
+# Dependencies: 4
+# Priority: high
+# Description: Implement the Approximate Nearest Neighbor Search (ANNS) indexing functionality optimized for in-kernel execution.
+# Details:
+1. Implement at least one ANNS algorithm (HNSW recommended for initial implementation)
+2. Design on-disk serialization format for ANNS indices
+3. Implement index building and update mechanisms
+4. Create efficient partial loading of indices
+5. Develop batch and incremental indexing support
+6. Implement index persistence and recovery
+7. Create tunable parameters for index performance
+8. Optimize for kernel execution environment
+
+The implementation should focus on memory efficiency and performance within kernel constraints. Consider implementing a Vector Write-Ahead Log (WAL) to decouple embedding ingestion from index updates, particularly useful for handling bursts of embedding updates.
+
+# Test Strategy:
+1. Test index building with various vector dimensions and counts
+2. Verify index persistence across mount/unmount cycles
+3. Benchmark search performance with different index configurations
+4. Test incremental index updates
+5. Verify index integrity after crashes or power failures
+6. Test concurrent index operations
+7. Validate memory usage during index operations
+8. Compare search results against reference implementations for accuracy
+
+# Subtasks:
+## 1. Implement HNSW Algorithm with Kernel Optimization [pending]
+### Dependencies: None
+### Description: Develop a kernel-optimized implementation of the Hierarchical Navigable Small World (HNSW) algorithm for approximate nearest neighbor search.
+### Details:
+Implement the core HNSW algorithm with multi-level graph structure. Optimize for kernel execution using SIMD instructions for distance calculations. Implement parallel graph traversal with work queue management. Use memory-aligned data structures for vector storage. Optimize the entry point selection and layer promotion strategy. Benchmark against naive implementation to verify performance gains. Consider CUDA implementation for GPU acceleration if applicable.
+
+## 2. Design On-disk Index Serialization Format [pending]
+### Dependencies: 5.1
+### Description: Create an efficient serialization format for persisting vector indexes to disk with minimal overhead during loading.
+### Details:
+Design a binary serialization format with metadata header containing version, dimensions, and index parameters. Implement memory-mapped file support for direct access without full loading. Create separate sections for graph connectivity and vector data. Develop checksum verification for data integrity. Implement compression for vector data using techniques like product quantization. Design a format that allows for incremental updates without full rewrite. Document the binary format specification for future reference.
+
+## 3. Develop Index Building and Update Mechanisms [pending]
+### Dependencies: 5.1, 5.2
+### Description: Create efficient mechanisms for building indexes from scratch and updating existing indexes with new vectors.
+### Details:
+Implement batch index building with parallel processing for initial creation. Develop incremental update strategy that minimizes graph restructuring. Create optimized insertion algorithm with neighbor recalculation. Implement deletion support with tombstone marking. Design rebalancing mechanism to maintain graph quality after multiple updates. Optimize for cache locality during index construction. Implement progress tracking and resumable building for large indexes. Create benchmarking suite to measure build and update performance.
+
+## 4. Implement Partial Loading and Memory Management [pending]
+### Dependencies: 5.2, 5.3
+### Description: Create a system for partial loading of large indexes and efficient memory management during query execution.
+### Details:
+Implement on-demand loading of index segments based on query patterns. Design LRU cache for frequently accessed portions of the index. Create prefetching mechanism based on graph connectivity. Implement memory budget constraints with adaptive behavior. Develop eviction strategies for least-used portions of the index. Create monitoring tools for memory usage statistics. Implement shared memory support for multi-process access. Optimize for NUMA architectures in multi-socket systems.
+
+## 5. Develop Write-ahead Logging for Index Updates [pending]
+### Dependencies: 5.3, 5.4
+### Description: Implement a write-ahead logging system to ensure durability and crash recovery for index modifications.
+### Details:
+Design log format for recording index modifications (insertions, deletions, updates). Implement log replay mechanism for crash recovery. Create checkpointing system to limit log size and replay time. Develop background compaction process to apply logs to the main index. Implement atomic commit protocol for multi-vector operations. Create log pruning mechanism for completed operations. Design performance optimizations like group commit for high-throughput scenarios. Implement verification tools to ensure index consistency after recovery.
+

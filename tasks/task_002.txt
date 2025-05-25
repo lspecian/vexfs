@@ -1,0 +1,84 @@
+# Task ID: 2
+# Title: Implement VFS Interface Layer
+# Status: pending
+# Dependencies: 1
+# Priority: high
+# Description: Develop the core VFS interface layer that will register VexFS with the Linux Virtual File System and handle standard file system operations.
+# Details:
+1. Implement the necessary VFS operations structure (file_system_type)
+2. Create mount/unmount handlers
+3. Implement superblock operations
+4. Define inode operations structure
+5. Implement file operations structure
+6. Register the file system with the VFS
+7. Implement basic directory operations (lookup, readdir)
+8. Create minimal implementations of required VFS callbacks
+9. Implement module init/exit functions
+
+Code structure should follow Linux kernel conventions while leveraging Rust safety features. Use the no_std environment and appropriate kernel bindings for Rust.
+
+# Test Strategy:
+1. Test mounting and unmounting the file system
+2. Verify basic directory listing functionality
+3. Test creation and deletion of empty files
+4. Validate proper registration with VFS
+5. Check for memory leaks or reference counting issues
+6. Verify proper error handling for edge cases
+7. Test concurrent mount/unmount operations
+
+# Subtasks:
+## 1. Implement File System Registration and Mount Operations [pending]
+### Dependencies: None
+### Description: Create the necessary structures and functions to register VexFS with the Linux kernel and handle mount/unmount operations.
+### Details:
+1. Define a `file_system_type` structure with appropriate callbacks
+2. Implement `init_fs()` and `exit_fs()` for module loading/unloading
+3. Create mount operation handler that initializes superblock
+4. Implement proper error handling for mount failures
+5. Add Rust FFI bindings for `register_filesystem()` and `unregister_filesystem()`
+6. Test with manual filesystem mounting and verify proper registration in `/proc/filesystems`
+
+## 2. Implement Superblock Operations [pending]
+### Dependencies: 2.1
+### Description: Create the superblock structure and associated operations for VexFS.
+### Details:
+1. Define `super_operations` structure with appropriate callbacks
+2. Implement `alloc_inode()`, `destroy_inode()`, `write_super()` functions
+3. Create Rust representation of superblock with necessary metadata
+4. Implement statfs operation to report filesystem statistics
+5. Add proper locking mechanisms for concurrent access
+6. Test superblock initialization and verify filesystem statistics reporting
+
+## 3. Implement Inode Operations [pending]
+### Dependencies: 2.2
+### Description: Create the inode structure and associated operations for file and directory management.
+### Details:
+1. Define `inode_operations` structure with appropriate callbacks
+2. Implement `create()`, `lookup()`, `link()`, `unlink()`, `mkdir()`, `rmdir()` functions
+3. Create Rust representation of inode with necessary metadata
+4. Implement proper permission checking
+5. Add Rust FFI bindings for inode-related kernel functions
+6. Test inode creation, lookup, and basic operations with appropriate error handling
+
+## 4. Implement File Operations [pending]
+### Dependencies: 2.3
+### Description: Create the file operations structure and implement functions for file I/O.
+### Details:
+1. Define `file_operations` structure with appropriate callbacks
+2. Implement `open()`, `read()`, `write()`, `llseek()`, `flush()`, `release()` functions
+3. Create memory management for file handles and buffers
+4. Implement proper locking for concurrent file access
+5. Add Rust FFI bindings for file operation kernel functions
+6. Test file operations with various access patterns and verify proper data integrity
+
+## 5. Implement Directory Operations [pending]
+### Dependencies: 2.3, 2.4
+### Description: Create the directory operations and implement functions for directory traversal and manipulation.
+### Details:
+1. Define `dir_operations` structure with appropriate callbacks
+2. Implement `readdir()` function to iterate directory entries
+3. Create proper dentry management and caching
+4. Implement `fsync()` for directories
+5. Add Rust FFI bindings for directory operation kernel functions
+6. Test directory traversal, creation, and deletion with proper error handling
+
