@@ -3,11 +3,46 @@
 //! This module implements kernel-compatible similarity functions (L2, Cosine, Inner Product)
 //! with SIMD optimization for high-performance vector search operations.
 
-#![no_std]
+
 
 use core::mem;
-use crate::anns::DistanceMetric;
 use crate::vector_storage::VectorDataType;
+
+// Import libm for no_std math functions
+#[cfg(not(feature = "kernel"))]
+use libm::{sqrtf, powf};
+
+// Use kernel's sqrt equivalent for kernel mode
+#[cfg(feature = "kernel")]
+fn sqrtf(x: f32) -> f32 {
+    // Use kernel's builtin sqrt
+    unsafe { core::intrinsics::sqrtf32(x) }
+}
+
+#[cfg(feature = "kernel")]
+fn powf(base: f32, exp: f32) -> f32 {
+    // Simple power implementation for kernel
+    if exp == 2.0 {
+        base * base
+    } else {
+        base // Fallback
+    }
+}
+
+/// Distance metrics for vector similarity calculation
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DistanceMetric {
+    /// Euclidean (L2) distance
+    Euclidean,
+    /// Cosine distance (1 - cosine_similarity)
+    Cosine,
+    /// Manhattan (L1) distance
+    Manhattan,
+    /// Dot product (for inner product similarity)
+    Dot,
+    /// Hamming distance (for binary vectors)
+    Hamming,
+}
 
 /// Maximum vector dimensions for SIMD optimization
 pub const SIMD_MAX_DIMENSIONS: usize = 4096;
@@ -164,7 +199,7 @@ impl VectorMetrics {
             sum_squares += diff * diff;
         }
         
-        Ok(sum_squares.sqrt())
+        Ok(sqrtf(sum_squares))
     }
     
     /// SSE2-optimized Euclidean distance
@@ -196,7 +231,7 @@ impl VectorMetrics {
             sum_squares += diff * diff;
         }
         
-        Ok(sum_squares.sqrt())
+        Ok(sqrtf(sum_squares))
     }
     
     /// Scalar Euclidean distance fallback
@@ -208,7 +243,7 @@ impl VectorMetrics {
             sum_squares += diff * diff;
         }
         
-        Ok(sum_squares.sqrt())
+        Ok(sqrtf(sum_squares))
     }
     
     /// Calculate cosine distance with SIMD optimization
@@ -259,8 +294,8 @@ impl VectorMetrics {
             norm2_sq += v2 * v2;
         }
         
-        let norm1 = norm1_sq.sqrt();
-        let norm2 = norm2_sq.sqrt();
+        let norm1 = sqrtf(norm1_sq);
+        let norm2 = sqrtf(norm2_sq);
         
         if norm1 == 0.0 || norm2 == 0.0 {
             return Err(MetricsError::DivisionByZero);
@@ -284,8 +319,8 @@ impl VectorMetrics {
             norm2_sq += v2 * v2;
         }
         
-        let norm1 = norm1_sq.sqrt();
-        let norm2 = norm2_sq.sqrt();
+        let norm1 = sqrtf(norm1_sq);
+        let norm2 = sqrtf(norm2_sq);
         
         if norm1 == 0.0 || norm2 == 0.0 {
             return Err(MetricsError::DivisionByZero);
@@ -461,7 +496,7 @@ impl VectorMetrics {
             }
         }
         
-        let norm = norm_sq.sqrt();
+        let norm = sqrtf(norm_sq);
         if norm == 0.0 {
             return Err(MetricsError::DivisionByZero);
         }
@@ -510,7 +545,7 @@ impl ApproximateMetrics {
         }
         
         // Scale by step factor
-        (sum_squares * step as f32).sqrt()
+        sqrtf(sum_squares * step as f32)
     }
     
     /// Fast approximate cosine distance
@@ -530,8 +565,8 @@ impl ApproximateMetrics {
             norm2_sq += v2 * v2;
         }
         
-        let norm1 = (norm1_sq * step as f32).sqrt();
-        let norm2 = (norm2_sq * step as f32).sqrt();
+        let norm1 = sqrtf(norm1_sq * step as f32);
+        let norm2 = sqrtf(norm2_sq * step as f32);
         
         if norm1 == 0.0 || norm2 == 0.0 {
             return 1.0;
@@ -548,6 +583,16 @@ const _: () = {
     assert!(SIMD_WIDTH_F32 * mem::size_of::<f32>() <= SIMD_ALIGNMENT);
 };
 
+/// Global calculate_distance function for convenience
+pub fn calculate_distance(
+    vec1: &[f32],
+    vec2: &[f32],
+    metric: DistanceMetric,
+) -> Result<f32, MetricsError> {
+    let mut metrics = VectorMetrics::new(false);
+    metrics.calculate_distance(vec1, vec2, metric)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -559,7 +604,7 @@ mod tests {
         let vec2 = [4.0, 5.0, 6.0];
         
         let distance = metrics.euclidean_distance(&vec1, &vec2).unwrap();
-        let expected = ((4.0-1.0).powi(2) + (5.0-2.0).powi(2) + (6.0-3.0).powi(2)).sqrt();
+        let expected = sqrtf((4.0f32-1.0f32).powi(2) + (5.0f32-2.0f32).powi(2) + (6.0f32-3.0f32).powi(2));
         
         assert!((distance - expected).abs() < 1e-6);
     }
@@ -581,7 +626,7 @@ mod tests {
         let vec2 = [4.0, 5.0, 6.0];
         
         let distance = metrics.manhattan_distance(&vec1, &vec2).unwrap();
-        let expected = (4.0-1.0).abs() + (5.0-2.0).abs() + (6.0-3.0).abs();
+        let expected = (4.0f32-1.0f32).abs() + (5.0f32-2.0f32).abs() + (6.0f32-3.0f32).abs();
         
         assert!((distance - expected).abs() < 1e-6);
     }
@@ -593,7 +638,7 @@ mod tests {
         
         metrics.normalize_vector(&mut vector).unwrap();
         
-        let norm = (vector[0].powi(2) + vector[1].powi(2) + vector[2].powi(2)).sqrt();
+        let norm = sqrtf(vector[0].powi(2) + vector[1].powi(2) + vector[2].powi(2));
         assert!((norm - 1.0).abs() < 1e-6);
     }
 }

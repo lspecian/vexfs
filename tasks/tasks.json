@@ -256,6 +256,22 @@
       ],
       "status": "pending",
       "subtasks": []
+    },
+    {
+      "id": 16,
+      "title": "Fix VexFS Compilation Errors and Establish C Bindings",
+      "description": "Resolve 155 compilation errors blocking development and implement C bindings to enable userspace testing without kernel dependencies.",
+      "details": "1. Analyze and categorize all 155 compilation errors\n2. Fix type compatibility issues between Rust and kernel C code\n3. Resolve memory management conflicts between Rust's ownership model and kernel memory allocation\n4. Correct unsafe code blocks that violate Rust safety guarantees\n5. Implement proper error handling for kernel interactions\n6. Create C header files defining the VexFS interface\n7. Develop C binding layer using Rust's FFI capabilities:\n   - Implement `extern \"C\"` functions for all core VexFS operations\n   - Create proper type conversions between Rust and C data structures\n   - Ensure memory safety across language boundaries\n   - Handle error propagation between languages\n8. Develop a shared library (libvexfs.so) exposing VexFS functionality\n9. Create static library version (libvexfs.a) for linking\n10. Document all C API functions with clear parameter descriptions and error codes\n11. Implement proper versioning for the C API\n12. Create minimal examples demonstrating C API usage\n13. Ensure thread safety in the C binding implementation\n14. Optimize performance-critical paths in the binding layer\n\nThe C bindings should allow userspace applications to interact with VexFS functionality without requiring kernel module loading, enabling faster development cycles and easier testing. The binding layer should maintain Rust's safety guarantees while providing a familiar C interface.",
+      "testStrategy": "1. Create a comprehensive test suite that verifies each compilation error is resolved:\n   - Implement automated build verification in CI pipeline\n   - Add regression tests to prevent reintroduction of fixed errors\n\n2. Develop unit tests for the C binding layer:\n   - Test each API function with valid inputs\n   - Test error handling with invalid inputs\n   - Verify memory management across language boundaries\n   - Test thread safety with concurrent access\n\n3. Create integration tests using the C API:\n   - Implement test applications that exercise all API functions\n   - Verify correct behavior matches kernel implementation\n   - Test performance characteristics compared to direct kernel access\n\n4. Implement fuzz testing for the C API:\n   - Use AFL or similar tools to find edge cases\n   - Focus on memory safety and error handling\n\n5. Verify userspace testing capabilities:\n   - Create a test harness that runs without kernel module\n   - Validate identical behavior between userspace and kernel implementations\n   - Measure performance differences between implementations\n\n6. Document test coverage and results:\n   - Generate coverage reports for both Rust and C code\n   - Create performance benchmarks comparing direct and binding access",
+      "status": "done",
+      "dependencies": [
+        1,
+        2,
+        3,
+        7
+      ],
+      "priority": "high",
+      "subtasks": []
     }
   ]
 }

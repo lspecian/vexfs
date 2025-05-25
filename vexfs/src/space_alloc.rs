@@ -3,7 +3,7 @@
 //! This module implements block allocation, deallocation, and free space management
 //! algorithms for VexFS, including bitmap-based allocation and extent-based tracking.
 
-#![no_std]
+
 
 use crate::ondisk::*;
 use core::mem;

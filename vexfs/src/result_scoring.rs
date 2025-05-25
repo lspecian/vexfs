@@ -3,7 +3,7 @@
 //! This module provides comprehensive scoring, ranking and validation for search results,
 //! including confidence calculation, result fusion, and quality assessment.
 
-#![no_std]
+
 
 extern crate alloc;
 use alloc::{vec::Vec, collections::BTreeMap};

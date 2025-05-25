@@ -9,6 +9,12 @@ edition = "2021"
 # Kernel development requires no_std (commented out for testing)
 # kernel = { git = "https://github.com/Rust-for-Linux/linux.git", branch = "rust-next" }
 
+# Math functions for no_std environments
+libm = "0.2"
+
+# Allocator for userspace testing in no_std
+linked_list_allocator = "0.10"
+
 [lib]
 crate-type = ["staticlib"]
 
@@ -31,3 +37,4 @@ opt-level = 0
 default = ["std"]
 std = []
 kernel = []
+c_bindings = []  # New feature for current C FFI approach

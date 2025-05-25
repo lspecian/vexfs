@@ -3,18 +3,18 @@
 //! This module implements the user-facing vector search interface leveraging the ANNS infrastructure,
 //! providing similarity metrics, query processing, and result filtering.
 
-#![no_std]
+
 
 extern crate alloc;
 use alloc::{vec::Vec, collections::BTreeMap};
 use core::cmp::Ordering;
 
-use crate::anns::{DistanceMetric, HnswIndex, SearchResult};
+use crate::anns::{DistanceMetric, AnnsIndex, SearchResult};
 use crate::vector_metrics::{VectorMetrics, MetricsError};
-use crate::vector_storage::{VectorStorage, VectorHeader, VectorDataType};
+use crate::vector_handlers::VectorStorage;
+use crate::vector_storage::{VectorHeader, VectorDataType};
 use crate::knn_search::{KnnSearchEngine, KnnResult, SearchParams, MetadataFilter, KnnError};
 use crate::result_scoring::{ResultScorer, ScoringParams, ScoredResult, ScoringError};
-use crate::inode_mgmt::VexfsInode;
 
 /// Maximum number of results that can be returned from a search
 pub const MAX_SEARCH_RESULTS: usize = 10000;
@@ -194,7 +194,7 @@ pub struct VectorSearchEngine {
 
 impl VectorSearchEngine {
     /// Create new vector search engine
-    pub fn new(storage: VectorStorage, options: SearchOptions) -> Result<Self, SearchError> {
+    pub fn new(storage: Box<dyn VectorStorage<Error = String>>, options: SearchOptions) -> Result<Self, SearchError> {
         let knn_engine = KnnSearchEngine::new(storage)?;
         let scoring_params = options.scoring_params.clone().unwrap_or_default();
         let result_scorer = ResultScorer::new(scoring_params);
@@ -208,7 +208,7 @@ impl VectorSearchEngine {
     }
     
     /// Set HNSW index for approximate search
-    pub fn set_hnsw_index(&mut self, index: HnswIndex) {
+    pub fn set_hnsw_index(&mut self, index: AnnsIndex) {
         self.knn_engine.set_hnsw_index(index);
     }
     
@@ -337,7 +337,7 @@ impl VectorSearchEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vector_storage::VectorStorage;
+    use crate::vector_handlers::VectorStorage;
 
     #[test]
     fn test_search_query_default() {

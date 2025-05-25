@@ -3,16 +3,17 @@
 //! This module implements efficient k-NN search with metadata-based filtering support,
 //! integrating with the ANNS module and vector storage system.
 
-#![no_std]
+
 
 extern crate alloc;
 use alloc::{vec::Vec, collections::BinaryHeap};
 use core::cmp::Ordering;
 
-use crate::anns::{DistanceMetric, HnswIndex, SearchResult};
+use crate::anns::{DistanceMetric, AnnsIndex, SearchResult};
 use crate::vector_metrics::{VectorMetrics, MetricsError, ApproximateMetrics};
-use crate::vector_storage::{VectorStorage, VectorHeader, VectorDataType};
-use crate::inode_mgmt::VexfsInode;
+use crate::vector_handlers::{VectorStorage, VectorEmbedding};
+use crate::vector_storage::{VectorHeader, VectorDataType};
+use crate::ondisk::VexfsInode;
 
 /// Maximum number of results that can be returned
 pub const MAX_KNN_RESULTS: usize = 10000;
@@ -227,9 +228,9 @@ pub struct KnnSearchEngine {
     /// Vector metrics calculator
     metrics: VectorMetrics,
     /// Vector storage system
-    storage: VectorStorage,
+    storage: Box<dyn VectorStorage<Error = String>>,
     /// HNSW index for approximate search
-    hnsw_index: Option<HnswIndex>,
+    hnsw_index: Option<AnnsIndex>,
     /// Search result buffer
     result_buffer: Vec<KnnResult>,
     /// Candidate buffer for filtering
@@ -238,7 +239,7 @@ pub struct KnnSearchEngine {
 
 impl KnnSearchEngine {
     /// Create new k-NN search engine
-    pub fn new(storage: VectorStorage) -> Result<Self, KnnError> {
+    pub fn new(storage: Box<dyn VectorStorage<Error = String>>) -> Result<Self, KnnError> {
         Ok(Self {
             metrics: VectorMetrics::new(true),
             storage,
@@ -249,7 +250,7 @@ impl KnnSearchEngine {
     }
     
     /// Set HNSW index for approximate search
-    pub fn set_hnsw_index(&mut self, index: HnswIndex) {
+    pub fn set_hnsw_index(&mut self, index: AnnsIndex) {
         self.hnsw_index = Some(index);
     }
     
@@ -292,7 +293,7 @@ impl KnnSearchEngine {
         let search_k = search_k.min(MAX_CANDIDATES);
         
         // Perform HNSW search
-        let candidates = hnsw.search(query, search_k, params.metric)
+        let candidates = hnsw.search(query, search_k, None)
             .map_err(|_| KnnError::IndexError)?;
         
         self.candidate_buffer.extend(candidates);
@@ -557,7 +558,7 @@ impl KnnSearchEngine {
     /// Get search statistics
     pub fn get_search_stats(&self) -> SearchStats {
         SearchStats {
-            total_vectors: self.storage.get_vector_count().unwrap_or(0),
+            total_vectors: self.storage.get_vector_count().unwrap_or(0) as u64,
             index_available: self.hnsw_index.is_some(),
             last_search_candidates: self.candidate_buffer.len(),
             last_search_results: self.result_buffer.len(),

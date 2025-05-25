@@ -3,7 +3,7 @@
 //! This module implements crash-consistent journaling for filesystem integrity,
 //! providing atomic operations and recovery mechanisms for VexFS.
 
-#![no_std]
+
 
 use crate::ondisk::*;
 use core::mem;
@@ -140,7 +140,7 @@ pub struct JournalOperationRecord {
     /// New data checksum (for redo)
     pub new_checksum: u32,
     
-    /// Operation-specific data follows this header
+    // Operation-specific data follows this header
 }
 
 /// Journal superblock

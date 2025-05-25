@@ -3,7 +3,7 @@
 //! This module implements directory entry management and lookup operations
 //! for VexFS directories, including creation, deletion, and traversal.
 
-#![no_std]
+
 
 use crate::ondisk::*;
 use crate::inode_mgmt::*;

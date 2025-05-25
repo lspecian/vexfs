@@ -3,7 +3,7 @@
 //! This module implements the core file operations including read, write, 
 //! truncate, and attribute manipulation for VexFS files.
 
-#![no_std]
+
 
 use crate::ondisk::*;
 use crate::inode_mgmt::*;

@@ -4,15 +4,24 @@
 //! providing the primary API that userspace applications (like vexctl) use to interact with VexFS's
 //! vector capabilities. Implements all 7 core operations with comprehensive security validation.
 
-use kernel::prelude::*;
-use kernel::uaccess::{UserSlicePtr, UserSlicePtrReader, UserSlicePtrWriter};
-use kernel::capability::CAP_SYS_ADMIN;
-use kernel::security::capable;
-use kernel::file::File;
-use kernel::cred::current_cred;
-use kernel::time::ktime_get_ns;
-use crate::anns::{DistanceMetric, SearchResult, AnnsError, HnswIndex};
-use crate::vector_storage::{VectorDataType, VectorStorageError, VectorStorage, VectorHeader};
+// Kernel imports only available when building as kernel module
+#[cfg(feature = "kernel")]
+mod kernel_imports {
+    pub use kernel::prelude::*;
+    pub use kernel::uaccess::{UserSlicePtr, UserSlicePtrReader, UserSlicePtrWriter};
+    pub use kernel::capability::CAP_SYS_ADMIN;
+    pub use kernel::security::capable;
+    pub use kernel::file::File;
+    pub use kernel::cred::current_cred;
+    pub use kernel::time::ktime_get_ns;
+}
+
+#[cfg(feature = "kernel")]
+use kernel_imports::*;
+
+use crate::anns::{DistanceMetric, SearchResult, AnnsError};
+use crate::vector_storage::{VectorDataType, VectorStorageError, VectorHeader};
+use crate::vector_handlers::VectorStorage;
 use crate::vector_search_integration::VectorSearchSubsystem;
 
 extern crate alloc;
@@ -217,33 +226,11 @@ pub struct IndexParameters {
     /// Reserved for future parameters
     pub reserved: [u32; 6],
 }
-/// Error codes for ioctl operations
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[repr(u32)]
-pub enum VectorIoctlError {
-    Success = 0,
-    InvalidParameter = 1,
-    InsufficientMemory = 2,
-    VectorNotFound = 3,
-    VectorAlreadyExists = 4,
-    InvalidVectorData = 5,
-    IndexNotFound = 6,
-    IndexCorrupted = 7,
-    PermissionDenied = 8,
-    InvalidDimensions = 9,
-    UnsupportedDataType = 10,
-    CompressionError = 11,
-    SearchTimeout = 12,
-    InvalidMetadataQuery = 13,
-    StorageError = 14,
-    ChecksumMismatch = 15,
-    SystemError = 16,
-}
 
 /// Response structures for ioctl operations
 
 /// Add embedding response
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 pub struct AddEmbeddingResponse {
     /// Assigned vector ID
@@ -265,7 +252,7 @@ pub struct AddEmbeddingResponse {
 }
 
 /// Get embedding response
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 pub struct GetEmbeddingResponse {
     /// Vector ID retrieved
@@ -295,7 +282,7 @@ pub struct GetEmbeddingResponse {
 }
 
 /// Update embedding response
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 pub struct UpdateEmbeddingResponse {
     /// Updated vector ID
@@ -319,7 +306,7 @@ pub struct UpdateEmbeddingResponse {
 }
 
 /// Delete embedding response
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 pub struct DeleteEmbeddingResponse {
     /// Deleted vector ID
@@ -339,7 +326,7 @@ pub struct DeleteEmbeddingResponse {
 }
 
 /// Index management response
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 pub struct IndexManagementResponse {
     /// Operation that was performed
@@ -607,8 +594,10 @@ impl BatchSearchRequest {
 }
 
 /// Safe buffer operations for user space communication
+#[cfg(feature = "kernel")]
 pub struct SafeUserBuffer;
 
+#[cfg(feature = "kernel")]
 impl SafeUserBuffer {
     /// Safely copy vector data from user space
     pub fn copy_vector_from_user(
@@ -789,7 +778,10 @@ fn validate_data_size(size: u32, dimensions: u32, data_type: VectorDataType) -> 
 }
 
 /// Check if user has required permissions for operation
+#[cfg(feature = "kernel")]
 fn check_permissions(operation: u8) -> Result<(), VectorIoctlError> {
+    use kernel_imports::{capable, CAP_SYS_ADMIN};
+    
     match operation {
         VEXFS_IOCTL_MANAGE_INDEX | VEXFS_IOCTL_DELETE_EMBEDDING => {
             if !capable(CAP_SYS_ADMIN) {
@@ -801,6 +793,13 @@ fn check_permissions(operation: u8) -> Result<(), VectorIoctlError> {
             // This would normally check file ownership and permissions
         }
     }
+    Ok(())
+}
+
+/// Check if user has required permissions for operation (userspace stub)
+#[cfg(not(feature = "kernel"))]
+fn check_permissions(_operation: u8) -> Result<(), VectorIoctlError> {
+    // In userspace testing, allow all operations
     Ok(())
 }
 

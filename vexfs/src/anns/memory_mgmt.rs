@@ -1,643 +1,396 @@
-//! Partial Loading and Memory Management for ANNS
+//! Memory management for ANNS operations
 //! 
-//! This module implements on-demand loading with LRU cache and memory budget
-//! constraints for efficient large-scale vector index management.
+//! This module provides functionality for managing memory allocation
+//! and deallocation for ANNS indices and operations.
 
-#![no_std]
+use std::vec::Vec;
+use core::alloc::{Layout, GlobalAlloc};
+use crate::anns::AnnsError;
 
-use core::{mem, ptr, slice};
-use crate::anns::{AnnsError, HnswNode, HnswLayer, SearchResult};
-
-/// Memory budget configuration
-#[derive(Debug, Clone, Copy)]
-pub struct MemoryBudget {
-    /// Total memory budget in bytes
-    pub total_bytes: u64,
-    /// Reserved memory for core structures
-    pub reserved_bytes: u64,
-    /// Cache memory limit
-    pub cache_limit_bytes: u64,
-    /// Minimum free memory to maintain
-    pub min_free_bytes: u64,
-    /// Page size for memory allocation
-    pub page_size: u32,
+/// Memory pool for managing vector data allocations
+#[derive(Debug)]
+pub struct MemoryPool {
+    pools: Vec<Pool>,
+    total_allocated: u64,
+    max_allocation: u64,
+    current_usage: u64,
 }
 
-impl MemoryBudget {
-    pub fn new(total_mb: u32) -> Self {
-        let total_bytes = total_mb as u64 * 1024 * 1024;
+impl MemoryPool {
+    /// Create a new memory pool
+    pub fn new(max_allocation: u64) -> Self {
         Self {
-            total_bytes,
-            reserved_bytes: total_bytes / 4, // 25% reserved
-            cache_limit_bytes: total_bytes / 2, // 50% for cache
-            min_free_bytes: total_bytes / 8, // 12.5% minimum free
-            page_size: 4096,
+            pools: Vec::new(),
+            total_allocated: 0,
+            max_allocation,
+            current_usage: 0,
         }
     }
 
-    pub fn conservative(total_mb: u32) -> Self {
-        let total_bytes = total_mb as u64 * 1024 * 1024;
-        Self {
-            total_bytes,
-            reserved_bytes: total_bytes / 2, // 50% reserved
-            cache_limit_bytes: total_bytes / 4, // 25% for cache
-            min_free_bytes: total_bytes / 4, // 25% minimum free
-            page_size: 4096,
+    /// Allocate memory from the pool
+    pub fn allocate(&mut self, size: u64) -> Result<MemoryBlock, AnnsError> {
+        if self.current_usage + size > self.max_allocation {
+            return Err(AnnsError::OutOfMemory);
         }
+
+        // Find a suitable pool or create a new one
+        let pool_index = self.find_or_create_pool(size)?;
+        let block = self.pools[pool_index].allocate(size)?;
+        
+        self.current_usage += size;
+        self.total_allocated += size;
+        
+        Ok(block)
     }
 
-    pub fn available_cache_bytes(&self) -> u64 {
-        self.cache_limit_bytes
-    }
-
-    pub fn is_memory_available(&self, requested: u64, current_usage: u64) -> bool {
-        current_usage + requested + self.min_free_bytes <= self.total_bytes
-    }
-}
-
-/// Cache entry for loaded index sections
-#[derive(Debug, Clone, Copy)]
-pub struct CacheEntry {
-    /// Unique identifier for this entry
-    pub id: u64,
-    /// Memory address of cached data
-    pub data_ptr: u64,
-    /// Size of cached data
-    pub size: u32,
-    /// File offset this entry represents
-    pub file_offset: u64,
-    /// Access count for LRU tracking
-    pub access_count: u32,
-    /// Last access timestamp (kernel ticks)
-    pub last_access: u64,
-    /// Entry flags
-    pub flags: CacheFlags,
-    /// Reference count
-    pub ref_count: u16,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct CacheFlags {
-    /// Entry is dirty and needs writeback
-    pub dirty: bool,
-    /// Entry is currently being loaded
-    pub loading: bool,
-    /// Entry is pinned in memory
-    pub pinned: bool,
-    /// Entry contains critical data
-    pub critical: bool,
-}
-
-impl CacheEntry {
-    pub fn new(id: u64, file_offset: u64, size: u32) -> Self {
-        Self {
-            id,
-            data_ptr: 0,
-            size,
-            file_offset,
-            access_count: 0,
-            last_access: 0, // TODO: get kernel ticks
-            flags: CacheFlags {
-                dirty: false,
-                loading: false,
-                pinned: false,
-                critical: false,
-            },
-            ref_count: 0,
+    /// Deallocate memory back to the pool
+    pub fn deallocate(&mut self, block: MemoryBlock) -> Result<(), AnnsError> {
+        // Find the pool this block belongs to
+        for pool in &mut self.pools {
+            if pool.owns_block(&block) {
+                let size = block.size();
+                pool.deallocate(block)?;
+                self.current_usage -= size;
+                return Ok(());
+            }
         }
+        
+        Err(AnnsError::InvalidMemoryBlock)
     }
 
-    pub fn mark_accessed(&mut self) {
-        self.access_count = self.access_count.saturating_add(1);
-        self.last_access = 0; // TODO: get kernel ticks
-    }
-
-    pub fn is_evictable(&self) -> bool {
-        self.ref_count == 0 && !self.flags.pinned && !self.flags.loading
-    }
-}
-
-/// LRU cache for index sections
-pub struct LruCache {
-    /// Cache entries
-    pub entries: [CacheEntry; 1024], // Fixed size for kernel space
-    /// Number of active entries
-    pub entry_count: u32,
-    /// Total memory used by cache
-    pub memory_used: u64,
-    /// Memory budget
-    pub budget: MemoryBudget,
-    /// Cache statistics
-    pub stats: CacheStats,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct CacheStats {
-    pub hits: u64,
-    pub misses: u64,
-    pub evictions: u64,
-    pub load_failures: u64,
-    pub memory_pressure_events: u64,
-    pub peak_memory_usage: u64,
-}
-
-impl CacheStats {
-    pub fn new() -> Self {
-        Self {
-            hits: 0,
-            misses: 0,
-            evictions: 0,
-            load_failures: 0,
-            memory_pressure_events: 0,
-            peak_memory_usage: 0,
-        }
-    }
-
-    pub fn hit_rate(&self) -> f32 {
-        if self.hits + self.misses == 0 {
-            return 0.0;
-        }
-        self.hits as f32 / (self.hits + self.misses) as f32
-    }
-}
-
-impl LruCache {
-    pub fn new(budget: MemoryBudget) -> Self {
-        Self {
-            entries: [CacheEntry::new(0, 0, 0); 1024],
-            entry_count: 0,
-            memory_used: 0,
-            budget,
-            stats: CacheStats::new(),
-        }
-    }
-
-    /// Get cached data by file offset
-    pub fn get(&mut self, file_offset: u64, size: u32) -> Result<*const u8, AnnsError> {
-        // Search for existing entry
-        for i in 0..self.entry_count as usize {
-            let entry = &mut self.entries[i];
-            if entry.file_offset == file_offset && entry.size == size {
-                entry.mark_accessed();
-                self.stats.hits += 1;
-                return Ok(entry.data_ptr as *const u8);
+    /// Find or create a suitable pool for the given size
+    fn find_or_create_pool(&mut self, size: u64) -> Result<usize, AnnsError> {
+        // Try to find an existing pool with enough space
+        for (index, pool) in self.pools.iter().enumerate() {
+            if pool.can_allocate(size) {
+                return Ok(index);
             }
         }
 
-        // Cache miss - need to load
-        self.stats.misses += 1;
-        self.load_entry(file_offset, size)
+        // Create a new pool
+        let pool_size = (size * 2).max(4096); // At least 4KB pools
+        let pool = Pool::new(pool_size)?;
+        self.pools.push(pool);
+        
+        Ok(self.pools.len() - 1)
     }
 
-    /// Load a new entry into cache
-    fn load_entry(&mut self, file_offset: u64, size: u32) -> Result<*const u8, AnnsError> {
-        // Check if we have space
-        if !self.budget.is_memory_available(size as u64, self.memory_used) {
-            self.evict_entries(size as u64)?;
+    /// Get current memory usage
+    pub fn current_usage(&self) -> u64 {
+        self.current_usage
+    }
+
+    /// Get total allocated memory
+    pub fn total_allocated(&self) -> u64 {
+        self.total_allocated
+    }
+
+    /// Get maximum allocation limit
+    pub fn max_allocation(&self) -> u64 {
+        self.max_allocation
+    }
+
+    /// Get number of pools
+    pub fn pool_count(&self) -> usize {
+        self.pools.len()
+    }
+
+    /// Reset the memory pool (deallocate all memory)
+    pub fn reset(&mut self) {
+        self.pools.clear();
+        self.current_usage = 0;
+        // Note: total_allocated is cumulative and not reset
+    }
+
+    /// Check if the pool can allocate the requested size
+    pub fn can_allocate(&self, size: u64) -> bool {
+        self.current_usage + size <= self.max_allocation
+    }
+}
+
+/// Individual memory pool
+#[derive(Debug)]
+struct Pool {
+    buffer: Vec<u8>,
+    allocated_blocks: Vec<BlockInfo>,
+    free_space: u64,
+    total_size: u64,
+}
+
+impl Pool {
+    /// Create a new pool with the specified size
+    fn new(size: u64) -> Result<Self, AnnsError> {
+        let mut buffer = Vec::new();
+        buffer.try_reserve(size as usize).map_err(|_| AnnsError::OutOfMemory)?;
+        buffer.resize(size as usize, 0);
+
+        Ok(Self {
+            buffer,
+            allocated_blocks: Vec::new(),
+            free_space: size,
+            total_size: size,
+        })
+    }
+
+    /// Allocate a block from this pool
+    fn allocate(&mut self, size: u64) -> Result<MemoryBlock, AnnsError> {
+        if size > self.free_space {
+            return Err(AnnsError::OutOfMemory);
         }
 
-        // Find free slot or create new entry
-        let entry_idx = if self.entry_count < self.entries.len() as u32 {
-            let idx = self.entry_count as usize;
-            self.entry_count += 1;
-            idx
-        } else {
-            // Find LRU entry to replace
-            self.find_lru_entry()?
+        // Find a suitable offset (simple linear allocation for now)
+        let offset = self.find_free_offset(size)?;
+        
+        let block_info = BlockInfo {
+            offset,
+            size,
+            is_allocated: true,
         };
 
-        // TODO: Actual memory allocation and file loading would happen here
-        // For now, simulate with dummy pointer
-        let data_ptr = 0x2000000 + (entry_idx as u64 * 0x10000); // Simulate allocation
-
-        self.entries[entry_idx] = CacheEntry::new(
-            file_offset | ((size as u64) << 32), // Combine as unique ID
-            file_offset,
+        let block = MemoryBlock {
+            ptr: unsafe { self.buffer.as_mut_ptr().add(offset as usize) },
             size,
-        );
-        self.entries[entry_idx].data_ptr = data_ptr;
-        self.entries[entry_idx].ref_count = 1;
-        self.entries[entry_idx].mark_accessed();
+            pool_id: self as *const Pool as u64,
+        };
 
-        self.memory_used += size as u64;
-        if self.memory_used > self.stats.peak_memory_usage {
-            self.stats.peak_memory_usage = self.memory_used;
-        }
+        self.allocated_blocks.push(block_info);
+        self.free_space -= size;
 
-        Ok(data_ptr as *const u8)
+        Ok(block)
     }
 
-    /// Evict entries to free memory
-    fn evict_entries(&mut self, needed_bytes: u64) -> Result<(), AnnsError> {
-        let mut freed_bytes = 0u64;
-        let mut evicted_indices = [usize::MAX; 64]; // Track evicted indices
-        let mut evicted_count = 0;
+    /// Deallocate a block
+    fn deallocate(&mut self, block: MemoryBlock) -> Result<(), AnnsError> {
+        // Find and remove the block
+        let block_index = self.allocated_blocks.iter()
+            .position(|info| info.offset == self.ptr_to_offset(block.ptr))
+            .ok_or(AnnsError::InvalidMemoryBlock)?;
 
-        // Find evictable entries, prioritize by LRU
-        while freed_bytes < needed_bytes && evicted_count < evicted_indices.len() {
-            let lru_idx = self.find_lru_evictable_entry()?;
-            
-            freed_bytes += self.entries[lru_idx].size as u64;
-            evicted_indices[evicted_count] = lru_idx;
-            evicted_count += 1;
-
-            self.stats.evictions += 1;
-
-            // Stop if we have enough space
-            if freed_bytes >= needed_bytes {
-                break;
-            }
-        }
-
-        // Actually evict the entries
-        for i in 0..evicted_count {
-            let idx = evicted_indices[i];
-            if idx != usize::MAX {
-                self.evict_entry(idx)?;
-            }
-        }
-
-        if freed_bytes < needed_bytes {
-            self.stats.memory_pressure_events += 1;
-            return Err(AnnsError::OutOfMemory);
-        }
+        let block_info = self.allocated_blocks.remove(block_index);
+        self.free_space += block_info.size;
 
         Ok(())
     }
 
-    /// Find LRU entry index
-    fn find_lru_entry(&self) -> Result<usize, AnnsError> {
-        if self.entry_count == 0 {
-            return Err(AnnsError::OutOfMemory);
-        }
+    /// Check if this pool can allocate the requested size
+    fn can_allocate(&self, size: u64) -> bool {
+        size <= self.free_space
+    }
 
-        let mut lru_idx = 0;
-        let mut oldest_access = u64::MAX;
+    /// Check if this pool owns the given block
+    fn owns_block(&self, block: &MemoryBlock) -> bool {
+        let buffer_start = self.buffer.as_ptr() as u64;
+        let buffer_end = buffer_start + self.total_size;
+        let block_ptr = block.ptr as u64;
+        
+        block_ptr >= buffer_start && block_ptr < buffer_end
+    }
 
-        for i in 0..self.entry_count as usize {
-            if self.entries[i].last_access < oldest_access {
-                oldest_access = self.entries[i].last_access;
-                lru_idx = i;
+    /// Find a free offset for allocation
+    fn find_free_offset(&self, size: u64) -> Result<u64, AnnsError> {
+        let mut offset = 0u64;
+        
+        // Sort allocated blocks by offset
+        let mut sorted_blocks = self.allocated_blocks.clone();
+        sorted_blocks.sort_by_key(|block| block.offset);
+
+        for block in &sorted_blocks {
+            if offset + size <= block.offset {
+                return Ok(offset);
             }
+            offset = block.offset + block.size;
         }
 
-        Ok(lru_idx)
+        // Check if there's space at the end
+        if offset + size <= self.total_size {
+            Ok(offset)
+        } else {
+            Err(AnnsError::OutOfMemory)
+        }
     }
 
-    /// Find LRU evictable entry
-    fn find_lru_evictable_entry(&self) -> Result<usize, AnnsError> {
-        let mut lru_idx = None;
-        let mut oldest_access = u64::MAX;
-
-        for i in 0..self.entry_count as usize {
-            if self.entries[i].is_evictable() && self.entries[i].last_access < oldest_access {
-                oldest_access = self.entries[i].last_access;
-                lru_idx = Some(i);
-            }
-        }
-
-        lru_idx.ok_or(AnnsError::OutOfMemory)
-    }
-
-    /// Evict a specific entry
-    fn evict_entry(&mut self, index: usize) -> Result<(), AnnsError> {
-        if index >= self.entry_count as usize {
-            return Err(AnnsError::InvalidParameters);
-        }
-
-        let entry = &mut self.entries[index];
-        
-        // TODO: Handle dirty entries (write back to disk)
-        if entry.flags.dirty {
-            // Would perform writeback here
-        }
-
-        // TODO: Free actual memory
-        self.memory_used -= entry.size as u64;
-
-        // Compact entries array
-        for i in index..self.entry_count as usize - 1 {
-            self.entries[i] = self.entries[i + 1];
-        }
-        self.entry_count -= 1;
-
-        Ok(())
-    }
-
-    /// Pin an entry in memory
-    pub fn pin_entry(&mut self, file_offset: u64, size: u32) -> Result<(), AnnsError> {
-        for i in 0..self.entry_count as usize {
-            let entry = &mut self.entries[i];
-            if entry.file_offset == file_offset && entry.size == size {
-                entry.flags.pinned = true;
-                return Ok(());
-            }
-        }
-        Err(AnnsError::VectorNotFound)
-    }
-
-    /// Unpin an entry
-    pub fn unpin_entry(&mut self, file_offset: u64, size: u32) -> Result<(), AnnsError> {
-        for i in 0..self.entry_count as usize {
-            let entry = &mut self.entries[i];
-            if entry.file_offset == file_offset && entry.size == size {
-                entry.flags.pinned = false;
-                return Ok(());
-            }
-        }
-        Err(AnnsError::VectorNotFound)
-    }
-
-    /// Get cache statistics
-    pub fn get_stats(&self) -> CacheStats {
-        self.stats
-    }
-
-    /// Clear cache
-    pub fn clear(&mut self) {
-        self.entry_count = 0;
-        self.memory_used = 0;
-        // Keep statistics for analysis
+    /// Convert pointer to offset within the pool
+    fn ptr_to_offset(&self, ptr: *mut u8) -> u64 {
+        let buffer_start = self.buffer.as_ptr() as u64;
+        let ptr_addr = ptr as u64;
+        ptr_addr - buffer_start
     }
 }
 
-/// Partial index loader for on-demand loading
-pub struct PartialLoader {
-    /// LRU cache for loaded sections
-    pub cache: LruCache,
-    /// File descriptor or handle for index file
-    pub file_handle: u64, // Placeholder for actual file handle
-    /// Index file size
-    pub file_size: u64,
-    /// Loading configuration
-    pub config: LoadingConfig,
-    /// Loader statistics
-    pub stats: LoaderStats,
+/// Information about an allocated block
+#[derive(Debug, Clone)]
+struct BlockInfo {
+    offset: u64,
+    size: u64,
+    is_allocated: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct LoadingConfig {
-    /// Prefetch size for sequential access
-    pub prefetch_size: u32,
-    /// Enable readahead for improved performance
-    pub readahead: bool,
-    /// Maximum concurrent loads
-    pub max_concurrent_loads: u8,
-    /// I/O timeout in milliseconds
-    pub io_timeout_ms: u32,
+/// A memory block allocated from a pool
+#[derive(Debug)]
+pub struct MemoryBlock {
+    ptr: *mut u8,
+    size: u64,
+    pool_id: u64,
 }
 
-impl LoadingConfig {
-    pub fn default() -> Self {
+impl MemoryBlock {
+    /// Get the pointer to the allocated memory
+    pub fn as_ptr(&self) -> *mut u8 {
+        self.ptr
+    }
+
+    /// Get the size of the allocated block
+    pub fn size(&self) -> u64 {
+        self.size
+    }
+
+    /// Get a slice to the allocated memory
+    pub unsafe fn as_slice(&self) -> &[u8] {
+        core::slice::from_raw_parts(self.ptr, self.size as usize)
+    }
+
+    /// Get a mutable slice to the allocated memory
+    pub unsafe fn as_mut_slice(&mut self) -> &mut [u8] {
+        core::slice::from_raw_parts_mut(self.ptr, self.size as usize)
+    }
+
+    /// Get the pool ID this block belongs to
+    pub fn pool_id(&self) -> u64 {
+        self.pool_id
+    }
+}
+
+// MemoryBlock is not automatically Send/Sync due to raw pointer
+unsafe impl Send for MemoryBlock {}
+unsafe impl Sync for MemoryBlock {}
+
+/// Memory allocator for vector operations
+pub struct VectorAllocator {
+    pool: MemoryPool,
+    alignment: usize,
+}
+
+impl VectorAllocator {
+    /// Create a new vector allocator
+    pub fn new(max_memory: u64, alignment: usize) -> Self {
         Self {
-            prefetch_size: 64 * 1024, // 64KB
-            readahead: true,
-            max_concurrent_loads: 2,
-            io_timeout_ms: 1000,
+            pool: MemoryPool::new(max_memory),
+            alignment,
         }
     }
 
-    pub fn sequential_optimized() -> Self {
-        Self {
-            prefetch_size: 256 * 1024, // 256KB
-            readahead: true,
-            max_concurrent_loads: 1,
-            io_timeout_ms: 2000,
+    /// Allocate memory for a vector
+    pub fn allocate_vector(&mut self, dimension: u32, element_size: usize) -> Result<MemoryBlock, AnnsError> {
+        let size = (dimension as u64) * (element_size as u64);
+        let aligned_size = self.align_size(size);
+        self.pool.allocate(aligned_size)
+    }
+
+    /// Deallocate vector memory
+    pub fn deallocate_vector(&mut self, block: MemoryBlock) -> Result<(), AnnsError> {
+        self.pool.deallocate(block)
+    }
+
+    /// Align size to the required alignment
+    fn align_size(&self, size: u64) -> u64 {
+        let alignment = self.alignment as u64;
+        (size + alignment - 1) & !(alignment - 1)
+    }
+
+    /// Get memory statistics
+    pub fn stats(&self) -> MemoryStats {
+        MemoryStats {
+            current_usage: self.pool.current_usage(),
+            total_allocated: self.pool.total_allocated(),
+            max_allocation: self.pool.max_allocation(),
+            pool_count: self.pool.pool_count(),
+            alignment: self.alignment,
         }
     }
 
-    pub fn random_access_optimized() -> Self {
-        Self {
-            prefetch_size: 16 * 1024, // 16KB
-            readahead: false,
-            max_concurrent_loads: 4,
-            io_timeout_ms: 500,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct LoaderStats {
-    pub loads_requested: u64,
-    pub loads_completed: u64,
-    pub loads_failed: u64,
-    pub bytes_loaded: u64,
-    pub prefetch_hits: u64,
-    pub io_wait_time_ms: u64,
-}
-
-impl LoaderStats {
-    pub fn new() -> Self {
-        Self {
-            loads_requested: 0,
-            loads_completed: 0,
-            loads_failed: 0,
-            bytes_loaded: 0,
-            prefetch_hits: 0,
-            io_wait_time_ms: 0,
-        }
+    /// Reset the allocator
+    pub fn reset(&mut self) {
+        self.pool.reset();
     }
 }
 
-impl PartialLoader {
-    pub fn new(
-        file_handle: u64,
-        file_size: u64,
-        budget: MemoryBudget,
-        config: LoadingConfig,
-    ) -> Self {
-        Self {
-            cache: LruCache::new(budget),
-            file_handle,
-            file_size,
-            config,
-            stats: LoaderStats::new(),
+/// Memory usage statistics
+#[derive(Debug, Clone)]
+pub struct MemoryStats {
+    pub current_usage: u64,
+    pub total_allocated: u64,
+    pub max_allocation: u64,
+    pub pool_count: usize,
+    pub alignment: usize,
+}
+
+impl MemoryStats {
+    /// Get memory utilization as a percentage
+    pub fn utilization_percent(&self) -> f32 {
+        if self.max_allocation == 0 {
+            0.0
+        } else {
+            (self.current_usage as f32 / self.max_allocation as f32) * 100.0
         }
     }
 
-    /// Load HNSW layers on demand
-    pub fn load_layers(&mut self, layer_offset: u64, layer_count: u32) -> Result<&[HnswLayer], AnnsError> {
-        let size = layer_count * mem::size_of::<HnswLayer>() as u32;
-        
-        if layer_offset + size as u64 > self.file_size {
-            return Err(AnnsError::CorruptedIndex);
-        }
-
-        self.stats.loads_requested += 1;
-
-        let data_ptr = self.cache.get(layer_offset, size)?;
-        
-        self.stats.loads_completed += 1;
-        self.stats.bytes_loaded += size as u64;
-
-        // Convert raw pointer to typed slice
-        unsafe {
-            let layers_ptr = data_ptr as *const HnswLayer;
-            Ok(slice::from_raw_parts(layers_ptr, layer_count as usize))
-        }
+    /// Check if memory usage is critical (>90%)
+    pub fn is_critical(&self) -> bool {
+        self.utilization_percent() > 90.0
     }
 
-    /// Load HNSW nodes on demand
-    pub fn load_nodes(&mut self, node_offset: u64, node_count: u32) -> Result<&[HnswNode], AnnsError> {
-        let size = node_count * mem::size_of::<HnswNode>() as u32;
-        
-        if node_offset + size as u64 > self.file_size {
-            return Err(AnnsError::CorruptedIndex);
-        }
-
-        self.stats.loads_requested += 1;
-
-        let data_ptr = self.cache.get(node_offset, size)?;
-        
-        self.stats.loads_completed += 1;
-        self.stats.bytes_loaded += size as u64;
-
-        unsafe {
-            let nodes_ptr = data_ptr as *const HnswNode;
-            Ok(slice::from_raw_parts(nodes_ptr, node_count as usize))
-        }
-    }
-
-    /// Load node connections on demand
-    pub fn load_connections(&mut self, connections_offset: u64, connection_count: u32) -> Result<&[u64], AnnsError> {
-        let size = connection_count * mem::size_of::<u64>() as u32;
-        
-        if connections_offset + size as u64 > self.file_size {
-            return Err(AnnsError::CorruptedIndex);
-        }
-
-        self.stats.loads_requested += 1;
-
-        let data_ptr = self.cache.get(connections_offset, size)?;
-        
-        self.stats.loads_completed += 1;
-        self.stats.bytes_loaded += size as u64;
-
-        unsafe {
-            let connections_ptr = data_ptr as *const u64;
-            Ok(slice::from_raw_parts(connections_ptr, connection_count as usize))
-        }
-    }
-
-    /// Load vector data on demand
-    pub fn load_vector_data(&mut self, data_offset: u64, data_size: u32) -> Result<&[u8], AnnsError> {
-        if data_offset + data_size as u64 > self.file_size {
-            return Err(AnnsError::CorruptedIndex);
-        }
-
-        self.stats.loads_requested += 1;
-
-        let data_ptr = self.cache.get(data_offset, data_size)?;
-        
-        self.stats.loads_completed += 1;
-        self.stats.bytes_loaded += data_size as u64;
-
-        unsafe {
-            Ok(slice::from_raw_parts(data_ptr, data_size as usize))
-        }
-    }
-
-    /// Prefetch data for improved performance
-    pub fn prefetch(&mut self, offset: u64, size: u32) -> Result<(), AnnsError> {
-        // Check if already cached
-        if let Ok(_) = self.cache.get(offset, size) {
-            self.stats.prefetch_hits += 1;
-            return Ok(());
-        }
-
-        // TODO: Implement actual prefetching
-        // This would issue async I/O requests to warm the cache
-        Ok(())
-    }
-
-    /// Get memory usage information
-    pub fn get_memory_usage(&self) -> MemoryUsage {
-        MemoryUsage {
-            cache_used_bytes: self.cache.memory_used,
-            cache_limit_bytes: self.cache.budget.cache_limit_bytes,
-            total_budget_bytes: self.cache.budget.total_bytes,
-            active_entries: self.cache.entry_count,
-            hit_rate: self.cache.stats.hit_rate(),
-        }
-    }
-
-    /// Get loader statistics
-    pub fn get_stats(&self) -> LoaderStats {
-        self.stats
+    /// Check if memory usage is high (>75%)
+    pub fn is_high(&self) -> bool {
+        self.utilization_percent() > 75.0
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct MemoryUsage {
-    pub cache_used_bytes: u64,
-    pub cache_limit_bytes: u64,
-    pub total_budget_bytes: u64,
-    pub active_entries: u32,
-    pub hit_rate: f32,
-}
-
-/// Tests for memory management functionality
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_memory_budget() {
-        let budget = MemoryBudget::new(64); // 64MB
-        assert_eq!(budget.total_bytes, 64 * 1024 * 1024);
-        assert!(budget.available_cache_bytes() > 0);
+    fn test_memory_pool_creation() {
+        let pool = MemoryPool::new(1024);
+        assert_eq!(pool.max_allocation(), 1024);
+        assert_eq!(pool.current_usage(), 0);
+        assert_eq!(pool.pool_count(), 0);
+    }
+
+    #[test]
+    fn test_memory_allocation() {
+        let mut pool = MemoryPool::new(1024);
+        assert!(pool.can_allocate(512));
         
-        let conservative = MemoryBudget::conservative(64);
-        assert!(conservative.cache_limit_bytes < budget.cache_limit_bytes);
+        let block = pool.allocate(512).unwrap();
+        assert_eq!(block.size(), 512);
+        assert_eq!(pool.current_usage(), 512);
     }
 
     #[test]
-    fn test_cache_entry() {
-        let mut entry = CacheEntry::new(1, 1000, 512);
-        assert_eq!(entry.file_offset, 1000);
-        assert_eq!(entry.size, 512);
-        assert_eq!(entry.access_count, 0);
-        assert!(entry.is_evictable());
-
-        entry.mark_accessed();
-        assert_eq!(entry.access_count, 1);
-
-        entry.flags.pinned = true;
-        assert!(!entry.is_evictable());
-    }
-
-    #[test]
-    fn test_lru_cache() {
-        let budget = MemoryBudget::new(1); // 1MB
-        let mut cache = LruCache::new(budget);
+    fn test_vector_allocator() {
+        let mut allocator = VectorAllocator::new(4096, 8);
+        let block = allocator.allocate_vector(128, 4).unwrap();
         
-        assert_eq!(cache.entry_count, 0);
-        assert_eq!(cache.memory_used, 0);
-        assert_eq!(cache.stats.hits, 0);
-        assert_eq!(cache.stats.misses, 0);
+        // Should allocate at least 128 * 4 = 512 bytes, aligned to 8
+        assert!(block.size() >= 512);
+        
+        let stats = allocator.stats();
+        assert!(stats.current_usage > 0);
     }
 
     #[test]
-    fn test_loading_config() {
-        let config = LoadingConfig::default();
-        assert_eq!(config.prefetch_size, 64 * 1024);
-        assert!(config.readahead);
-
-        let sequential = LoadingConfig::sequential_optimized();
-        assert!(sequential.prefetch_size > config.prefetch_size);
-
-        let random = LoadingConfig::random_access_optimized();
-        assert!(random.prefetch_size < config.prefetch_size);
-        assert!(!random.readahead);
-    }
-
-    #[test]
-    fn test_cache_stats() {
-        let mut stats = CacheStats::new();
-        assert_eq!(stats.hit_rate(), 0.0);
-
-        stats.hits = 80;
-        stats.misses = 20;
-        assert!((stats.hit_rate() - 0.8).abs() < 0.001);
+    fn test_memory_stats() {
+        let stats = MemoryStats {
+            current_usage: 750,
+            total_allocated: 1000,
+            max_allocation: 1000,
+            pool_count: 2,
+            alignment: 8,
+        };
+        
+        assert_eq!(stats.utilization_percent(), 75.0);
+        assert!(!stats.is_critical());
+        assert!(stats.is_high());
     }
 }

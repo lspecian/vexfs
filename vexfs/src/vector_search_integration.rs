@@ -3,19 +3,20 @@
 //! This module provides the main integration layer that combines all vector search components
 //! into a cohesive system, including the ioctl interface, search coordination, and result management.
 
-#![no_std]
+
 
 extern crate alloc;
 use alloc::{vec::Vec, collections::BTreeMap, format};
 use core::ptr;
 
-use crate::ioctl::{VexfsIoctlInterface, IoctlCommand, IoctlError};
+use crate::ioctl::{VectorIoctlError};
 use crate::vector_search::{VectorSearchEngine, SearchQuery, SearchOptions, BatchSearchRequest, SearchError};
-use crate::vector_metrics::{VectorMetrics, SimilarityMetric, MetricsConfig, MetricsError};
+use crate::vector_metrics::{VectorMetrics, MetricsError};
 use crate::knn_search::{KnnSearchEngine, SearchParams, MetadataFilter};
 use crate::result_scoring::{ScoredResult, ResultScorer, ScoringParams};
-use crate::vector_storage::{VectorStorage, VectorHeader};
-use crate::anns::{HnswIndex, DistanceMetric};
+use crate::vector_handlers::VectorStorage;
+use crate::vector_storage::VectorHeader;
+use crate::anns::{AnnsIndex, DistanceMetric};
 
 /// Vector search subsystem for VexFS
 pub struct VectorSearchSubsystem {

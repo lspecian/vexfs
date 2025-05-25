@@ -1,5 +1,5 @@
 // Simple test to check ANNS module compilation
-#![no_std]
+
 
 use core::mem;
 

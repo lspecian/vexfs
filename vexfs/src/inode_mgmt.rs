@@ -3,7 +3,7 @@
 //! This module implements the core inode data structure and management functions
 //! including allocation, deallocation, reading, and writing of inodes.
 
-#![no_std]
+
 
 use crate::ondisk::*;
 

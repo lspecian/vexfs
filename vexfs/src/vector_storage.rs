@@ -4,7 +4,7 @@
 //! including on-disk format, allocation mechanisms, file-to-embedding linking, metadata
 //! management, and serialization/compression.
 
-#![no_std]
+
 
 use core::mem;
 

@@ -3,7 +3,7 @@
 //! This module defines the physical structure of the VexFS filesystem,
 //! including the superblock, inode tables, data blocks, and free space tracking.
 
-#![no_std]
+
 
 // Basic type definitions for kernel module compatibility
 pub type c_int = i32;
@@ -288,8 +288,8 @@ pub struct VexfsDirEntry {
     /// File type
     pub file_type: u8,
     
-    /// Name follows here (variable length)
-    /// Use VexfsDirEntry::name() to access safely
+    // Name follows here (variable length)
+    // Use VexfsDirEntry::name() to access safely
 }
 
 /// File types for directory entries
