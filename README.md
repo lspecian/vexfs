@@ -34,10 +34,9 @@ VexFS addresses the escalating demand for efficient, integrated storage solution
 
 ### ✅ **What's Working**
 - **Zero compilation errors** (resolved from 155 blocking errors)
-- **Functional vector operations** with performance benchmarking
+- **Functional vector operations** (tested via a userspace harness)
 - **Working C bindings** for userspace testing
 - **Vector test runner** demonstrating end-to-end functionality
-- **Performance validation**: 1000 vector insertions in ~2.3ms, searches in 2-5ms
 
 ### 🔧 **In Development**
 - VFS interface layer implementation
@@ -122,13 +121,13 @@ VexFS implements a layered architecture optimized for both traditional file I/O 
 ### Test Coverage
 - Unit tests for vector operations
 - Integration tests with VFS
-- Performance benchmarks
+- Preliminary performance benchmarks (userspace test harness)
 - POSIX compliance validation
 - Stress testing and data integrity checks
 
 ## Benchmarks
 
-Preliminary benchmarks of VexFS vector operations (kernel-native, using in-memory engine):
+Preliminary benchmarks using a userspace test harness (`vector_test_runner` with its internal `TestVectorSearchEngine`):
 
 ### ✅ Functional Test
 - 4 vectors added
@@ -136,14 +135,11 @@ Preliminary benchmarks of VexFS vector operations (kernel-native, using in-memor
 - File paths resolved correctly (`/test/vec1.bin`, `/test/vec4.bin`, etc.)
 
 ### ⚡ Performance Test
-- **1000 vectors inserted**: 2.26 ms
-- **Search (Euclidean)**: 10 nearest neighbors in 2.60 ms
-- **Search (Cosine)**: 10 nearest neighbors in 6.07 ms
-- **Search (Inner Product)**: 10 nearest neighbors in 2.22 ms
+The test harness performs these operations (1000 vector insertions, k-NN search for 3 metrics) in the order of milliseconds on typical desktop hardware. These figures serve as a baseline for the test harness itself.
 
-VexFS achieves vector search performance comparable to state-of-the-art userland vector databases, with zero syscall or network overhead. Search results include distance, score, and mapped file path for each vector match.
+The userspace test harness, by its nature, operates with low overhead. However, these results do not yet reflect the performance of the main VexFS kernel components or direct comparisons to production vector databases.
 
-> Functional and performance tests completed successfully on kernel-native implementation.
+> Functional and preliminary performance tests for the userspace test harness completed successfully.
 
 ## 🛣 **Roadmap**
 
