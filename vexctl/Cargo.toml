@@ -1,0 +1,11 @@
+[package]
+name = "vexctl"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = { version = "4.4.8", features = ["derive"] }
+nix = { version = "0.27.1", features = ["ioctl"] }
+libc = "0.2" # For ioctl number definition if needed, nix might cover it.

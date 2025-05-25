@@ -1,0 +1,40 @@
+# Kbuild file for VexFS kernel module
+
+# The final module will be named vexfs.ko
+obj-m += vexfs.o
+
+# Name of the C object file compiled from vexfs_module_entry.c
+VEXFS_C_OBJ := vexfs_module_entry.o
+
+# Path to the Rust static library, relative to this Kbuild file.
+# The Makefile will place libvexfs.a in the current directory $(src).
+VEXFS_RUST_LIB_FILENAME := libvexfs.a
+
+# Specify the objects that make up vexfs.o
+# Kbuild will compile vexfs_module_entry.c to vexfs_module_entry.o.
+# It will then link vexfs_module_entry.o with libvexfs.a to produce vexfs.o,
+# which is then used to create vexfs.ko.
+vexfs-objs := $(VEXFS_C_OBJ) $(VEXFS_RUST_LIB_FILENAME)
+
+# Optional: If there are C header files specific to this module in an 'include' directory
+# ccflags-y += -I$(src)/include
+
+# This Kbuild setup expects:
+# 1. vexfs_module_entry.c to be present in $(src) (current directory).
+#    Kbuild will compile it to vexfs_module_entry.o.
+# 2. $(VEXFS_RUST_LIB_FILENAME) (e.g., libvexfs.a) to be present in $(src).
+#    The main Makefile is responsible for building this with cargo
+#    and copying it here before invoking the kernel build.
+
+# To ensure the linker finds the Rust standard libraries (core, alloc, etc.)
+# and any other crates that libvexfs.a depends on, the RUSTFLAGS or linker
+# arguments might need to be adjusted in the main Makefile when cargo build
+# is invoked, or by passing appropriate LDFLAGS to the kernel's `make` command.
+# However, for a static library `libfoo.a`, the symbols it needs should ideally
+# be self-contained or resolved from other libraries provided to the linker.
+# The `rust-kernel-rdma` example uses `cargo rustc ... -- -C link-arg=...`
+# This is handled by cargo when building libvexfs.a as a staticlib.
+# The kernel linker just needs to link libvexfs.a itself.
+
+# No specific clean actions needed here beyond what `make clean` in kernel dir does for .o files.
+# The main Makefile handles `cargo clean`.
