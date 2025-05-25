@@ -12,6 +12,9 @@ node_modules/
 # Environment variables
 .env
 
+# Roo configuration (contains API keys)
+.roo/
+
 # Editor directories and files
 .idea
 .vscode
