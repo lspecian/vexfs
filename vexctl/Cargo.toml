@@ -2,6 +2,13 @@
 name = "vexctl"
 version = "0.1.0"
 edition = "2021"
+authors = ["VexFS Contributors"]
+description = "Control tool for VexFS - Vector Extended File System"
+repository = "https://github.com/vexfs/vexfs"
+license = "Apache-2.0"
+readme = "../README.md"
+keywords = ["filesystem", "vector", "cli", "control"]
+categories = ["command-line-utilities", "filesystem"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

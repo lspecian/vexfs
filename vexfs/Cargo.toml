@@ -2,6 +2,13 @@
 name = "vexfs"
 version = "0.1.0"
 edition = "2021"
+authors = ["VexFS Contributors"]
+description = "VexFS kernel module and core filesystem implementation"
+repository = "https://github.com/vexfs/vexfs"
+license = "Apache-2.0 OR GPL-2.0-only"
+readme = "../README.md"
+keywords = ["filesystem", "vector", "kernel", "embeddings"]
+categories = ["filesystem", "os", "science"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

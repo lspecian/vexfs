@@ -1,0 +1,41 @@
+VexFS - Vector Extended File System
+Copyright 2025 VexFS Contributors
+
+This project uses a dual licensing structure:
+
+1. Apache License 2.0 (LICENSE) - Applies to:
+   - All userland components and libraries
+   - Command-line tools (vexctl)
+   - API and client libraries
+   - Documentation and examples
+   - Build scripts and configuration files
+
+2. GNU General Public License v2 (LICENSE.kernel) - Applies to:
+   - Linux kernel module components
+   - Kernel-space code and interfaces
+   - Low-level system integration code
+
+The dual licensing ensures:
+- Userland components remain permissively licensed for broad adoption
+- Kernel components comply with Linux kernel licensing requirements
+- Clear separation between user-space and kernel-space code
+
+Component Classification:
+- vexctl/: Apache 2.0
+- src/: Apache 2.0 (userland library)
+- vexfs/src/: Mixed (see individual file headers)
+- vexfs/vexfs_module_entry.c: GPL v2 (kernel module)
+- vexfs/Kbuild, vexfs/Makefile: GPL v2 (kernel build)
+- docs/, test_env/, scripts/: Apache 2.0
+
+Each source file contains appropriate license headers indicating
+which license applies to that specific component.
+
+For the full license texts, see:
+- LICENSE (Apache 2.0)
+- LICENSE.kernel (GPL v2)
+
+Third-party Dependencies:
+This project may include or depend on third-party libraries and
+components, each subject to their own license terms. See individual
+dependency documentation for specific licensing information.
