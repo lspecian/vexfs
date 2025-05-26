@@ -48,3 +48,6 @@ tasks/
 .roomodes
 .taskmasterconfig
 scripts/
+# Large VM images
+test_env/vm/images/*.qcow2
+test_env/vm/images/*.img
