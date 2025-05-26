@@ -1,0 +1,16 @@
+[target.x86_64-unknown-linux-gnu]
+rustflags = [
+    "-C", "relocation-model=static",
+    "-C", "code-model=kernel",
+    "-C", "target-feature=-red-zone",
+    "-C", "target-feature=-mmx",
+    "-C", "target-feature=-sse",
+    "-C", "target-feature=-sse2",
+    "-C", "target-feature=-3dnow",
+    "-C", "target-feature=-3dnowa",
+    "-C", "target-feature=-avx",
+    "-C", "target-feature=-avx2",
+]
+
+[build]
+target = "x86_64-unknown-linux-gnu"

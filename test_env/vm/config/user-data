@@ -1,0 +1,129 @@
+#cloud-config
+
+# User configuration
+users:
+  - default
+  - name: vexfs
+    groups: [sudo, adm, dialout, cdrom, floppy, audio, dip, video, plugdev, netdev]
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFUefWT5WcN45B0Sin78RWnGi9ngRAT0yCNsJ3KRvIxl vexfs-vm-key
+
+# Package updates
+package_update: true
+package_upgrade: true
+
+# Essential packages for VexFS development
+packages:
+  - build-essential
+  - linux-headers-generic
+  - git
+  - vim
+  - htop
+  - tree
+  - curl
+  - wget
+  - dkms
+  - gcc
+  - make
+  - libc6-dev
+  - pkg-config
+  - ssh
+  - rsync
+
+# Install Rust via rustup
+runcmd:
+  # Install rustup for vexfs user
+  - sudo -u vexfs curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sudo -u vexfs sh -s -- -y
+  
+  # Add Rust to PATH for vexfs user
+  - echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> /home/vexfs/.bashrc
+  
+  # Install Rust components needed for kernel development
+  - sudo -u vexfs /home/vexfs/.cargo/bin/rustup component add rust-src
+  - sudo -u vexfs /home/vexfs/.cargo/bin/rustup component add clippy
+  - sudo -u vexfs /home/vexfs/.cargo/bin/rustup component add rustfmt
+  
+  # Create VexFS source mount point
+  - mkdir -p /mnt/vexfs_source
+  - chown vexfs:vexfs /mnt/vexfs_source
+  
+  # Enable debug output
+  - echo 'kernel.printk = 8 4 1 3' >> /etc/sysctl.conf
+  
+  # Create convenience script for mounting source
+  - |
+    cat > /usr/local/bin/mount-vexfs-source << 'SCRIPT_EOF'
+    #!/bin/bash
+    if ! mountpoint -q /mnt/vexfs_source; then
+        mount -t 9p -o trans=virtio,version=9p2000.L vexfs_source /mnt/vexfs_source
+        echo "VexFS source mounted at /mnt/vexfs_source"
+    else
+        echo "VexFS source already mounted"
+    fi
+    SCRIPT_EOF
+  - chmod +x /usr/local/bin/mount-vexfs-source
+  
+  # Create convenience script for building and testing
+  - |
+    cat > /usr/local/bin/vexfs-quick-test << 'SCRIPT_EOF'
+    #!/bin/bash
+    set -e
+    
+    echo "🔧 VexFS Quick Test Suite"
+    echo "========================="
+    
+    # Ensure source is mounted
+    /usr/local/bin/mount-vexfs-source
+    
+    # Navigate to vexfs directory
+    cd /mnt/vexfs_source/vexfs
+    
+    echo "📦 Building kernel module..."
+    make clean
+    make
+    
+    echo "🧪 Testing module loading..."
+    if lsmod | grep -q vexfs; then
+        echo "Unloading existing module..."
+        sudo rmmod vexfs
+    fi
+    
+    echo "Loading module..."
+    sudo insmod vexfs.ko
+    
+    echo "📊 Module status:"
+    lsmod | grep vexfs
+    
+    echo "📋 Recent kernel messages:"
+    dmesg | tail -10
+    
+    echo "🧹 Cleaning up..."
+    sudo rmmod vexfs
+    
+    echo "✅ Quick test completed successfully!"
+    SCRIPT_EOF
+  - chmod +x /usr/local/bin/vexfs-quick-test
+  
+  # Set up auto-mount on login for vexfs user
+  - echo '/usr/local/bin/mount-vexfs-source 2>/dev/null || true' >> /home/vexfs/.bashrc
+
+# SSH configuration
+ssh_pwauth: false
+disable_root: true
+
+# Timezone
+timezone: UTC
+
+# Final message
+final_message: |
+  VexFS Development VM is ready!
+  
+  Access via: ssh -p 2222 -i /home/luis/Development/oss/vexfs/test_env/vm/keys/vexfs_vm_key vexfs@localhost
+  
+  Quick commands:
+  - mount-vexfs-source: Mount host source code
+  - vexfs-quick-test: Build and test kernel module
+  
+  VexFS source will be available at: /mnt/vexfs_source

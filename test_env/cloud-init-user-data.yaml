@@ -1,0 +1,179 @@
+#cloud-config
+# VexFS Development Environment Cloud-Init Configuration
+
+# Set hostname
+hostname: vexfs-dev
+
+# Create user account
+users:
+  - name: vexfs
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: false
+    passwd: $6$rounds=4096$salt$placeholder  # Will be overridden by ssh keys
+    ssh_authorized_keys:
+      - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7... # Placeholder - will be generated
+    groups: sudo,docker
+
+# Package updates and installation
+package_update: true
+package_upgrade: true
+
+packages:
+  # Build essentials
+  - build-essential
+  - gcc
+  - make
+  - cmake
+  - git
+  - curl
+  - wget
+  - vim
+  - htop
+  
+  # Kernel development
+  - linux-headers-generic
+  - linux-source
+  - dkms
+  - bc
+  - kmod
+  - cpio
+  - flex
+  - bison
+  - libssl-dev
+  - libelf-dev
+  
+  # Rust toolchain
+  - rustc
+  - cargo
+  
+  # Development tools
+  - gdb
+  - strace
+  - ltrace
+  - valgrind
+  - perf-tools-unstable
+  
+  # Network and utilities
+  - openssh-server
+  - net-tools
+  - iputils-ping
+  - tcpdump
+  
+  # File system tools
+  - e2fsprogs
+  - dosfstools
+  - ntfs-3g
+
+# Enable services
+services:
+  - name: ssh
+    enabled: true
+    state: started
+
+# Write files
+write_files:
+  - path: /etc/ssh/sshd_config.d/vexfs-dev.conf
+    content: |
+      Port 22
+      PermitRootLogin yes
+      PasswordAuthentication yes
+      PubkeyAuthentication yes
+      X11Forwarding yes
+    permissions: '0644'
+
+  - path: /home/vexfs/.bashrc
+    content: |
+      # VexFS Development Environment
+      export PATH="$HOME/.cargo/bin:$PATH"
+      export KERNEL_SRC="/usr/src/linux-headers-$(uname -r)"
+      
+      # Aliases for VexFS development
+      alias ll='ls -alF'
+      alias la='ls -A'
+      alias l='ls -CF'
+      alias ..='cd ..'
+      alias ...='cd ../..'
+      
+      # VexFS specific aliases
+      alias vexfs-build='cd /mnt/vexfs && make -C vexfs'
+      alias vexfs-test='cd /mnt/vexfs && ./test_env/test_module.sh'
+      alias vexfs-clean='cd /mnt/vexfs/vexfs && make clean'
+      
+      # Welcome message
+      echo "=== VexFS Development Environment ==="
+      echo "VexFS source mounted at: /mnt/vexfs"
+      echo "Kernel headers: $KERNEL_SRC"
+      echo "Rust version: $(rustc --version 2>/dev/null || echo 'Not available')"
+      echo
+      echo "Quick commands:"
+      echo "  vexfs-build  - Build VexFS kernel module"
+      echo "  vexfs-test   - Run module tests"
+      echo "  vexfs-clean  - Clean build artifacts"
+      echo "=================================="
+    permissions: '0644'
+    owner: vexfs:vexfs
+
+  - path: /etc/fstab
+    content: |
+      # VexFS source directory mount
+      vexfs_source /mnt/vexfs 9p trans=virtio,version=9p2000.L,_netdev 0 0
+    append: true
+
+# Run commands during first boot
+runcmd:
+  # Create mount point for VexFS source
+  - mkdir -p /mnt/vexfs
+  
+  # Mount VexFS source (retry with delay if needed)
+  - |
+    for i in {1..10}; do
+      if mount /mnt/vexfs; then
+        echo "VexFS source mounted successfully"
+        break
+      else
+        echo "Mount attempt $i failed, retrying in 2 seconds..."
+        sleep 2
+      fi
+    done
+  
+  # Set up Rust for all users
+  - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+  - source /home/vexfs/.cargo/env
+  
+  # Install additional Rust components for kernel development
+  - /home/vexfs/.cargo/bin/rustup component add rust-src
+  - /home/vexfs/.cargo/bin/rustup target add x86_64-unknown-linux-gnu
+  
+  # Ensure kernel headers are properly linked
+  - |
+    KERNEL_VERSION=$(uname -r)
+    if [ ! -d "/lib/modules/$KERNEL_VERSION/build" ]; then
+      ln -sf "/usr/src/linux-headers-$KERNEL_VERSION" "/lib/modules/$KERNEL_VERSION/build"
+    fi
+  
+  # Set proper ownership for vexfs user
+  - chown -R vexfs:vexfs /home/vexfs
+  
+  # Enable kernel debugging features
+  - echo 'kernel.dmesg_restrict = 0' >> /etc/sysctl.conf
+  - echo 'kernel.kptr_restrict = 0' >> /etc/sysctl.conf
+  - sysctl -p
+  
+  # Create a marker file to indicate setup completion
+  - touch /var/log/vexfs-cloud-init-complete
+  - echo "VexFS development environment setup completed at $(date)" > /var/log/vexfs-setup.log
+
+# Final message
+final_message: |
+  VexFS Development Environment Ready!
+  
+  The system has been configured with:
+  - Kernel development tools and headers
+  - Rust toolchain with kernel development components
+  - VexFS source code mounted at /mnt/vexfs (if available)
+  - Development user 'vexfs' with sudo access
+  
+  Connect via SSH: ssh vexfs@<vm-ip>
+  
+  Cloud-init setup completed in $UPTIME seconds.
