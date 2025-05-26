@@ -19,13 +19,17 @@ libm = "0.2"
 # Allocator for userspace testing
 linked_list_allocator = "0.10"
 
+# Spinlocks for kernel-safe locking
+spin = "0.9"
+
 [lib]
 crate-type = ["staticlib"]
 
-# Add test binary target
+# Add test binary target (only for userspace builds)
 [[bin]]
 name = "vector_test_runner"
 path = "src/bin/vector_test_runner.rs"
+required-features = ["std"]
 
 [profile.release]
 panic = "abort"
@@ -40,4 +44,6 @@ opt-level = 0
 [features]
 default = ["std"]
 std = []
+kernel = []      # Feature for kernel module compilation
+kernel-minimal = ["kernel"]  # Kernel compilation without floating point
 c_bindings = []  # Feature for C FFI approach with kernel module

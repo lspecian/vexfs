@@ -66,6 +66,58 @@ pub enum InodeError {
     AlreadyExists,
 }
 
+/// Handle to an inode for safe access
+pub struct VexfsInodeHandle {
+    /// Inode information
+    pub info: VexfsInodeInfo,
+    
+    /// Whether this handle has write access
+    pub writable: bool,
+    
+    /// Handle ID for tracking
+    pub handle_id: u64,
+}
+
+impl VexfsInodeHandle {
+    /// Create a new inode handle
+    pub fn new(info: VexfsInodeInfo, writable: bool, handle_id: u64) -> Self {
+        Self {
+            info,
+            writable,
+            handle_id,
+        }
+    }
+    
+    /// Get the inode number
+    pub fn ino(&self) -> u64 {
+        self.info.ino
+    }
+    
+    /// Get file size
+    pub fn size(&self) -> u64 {
+        self.info.size()
+    }
+    
+    /// Check if handle has write access
+    pub fn is_writable(&self) -> bool {
+        self.writable
+    }
+    
+    /// Get mutable access to inode info (only if writable)
+    pub fn info_mut(&mut self) -> Option<&mut VexfsInodeInfo> {
+        if self.writable {
+            Some(&mut self.info)
+        } else {
+            None
+        }
+    }
+    
+    /// Get read-only access to inode info
+    pub fn info(&self) -> &VexfsInodeInfo {
+        &self.info
+    }
+}
+
 impl VexfsInodeInfo {
     /// Create a new in-memory inode structure
     pub fn new(ino: u64, mode: u16, uid: u16, gid: u16) -> Self {
@@ -399,6 +451,32 @@ impl VexfsInodeManager {
             self.superblock.s_free_inodes_count,
             self.superblock.s_inodes_count - self.superblock.s_free_inodes_count,
         )
+    }
+    
+    /// Create an inode handle for file operations
+    pub fn get_inode_handle(&mut self, ino: u64, writable: bool) -> Result<VexfsInodeHandle, InodeError> {
+        let inode_info = self.read_inode(ino)?;
+        
+        // Generate a unique handle ID (in real implementation, this would be better)
+        let handle_id = ino; // Simple approach for now
+        
+        Ok(VexfsInodeHandle::new(inode_info, writable, handle_id))
+    }
+    
+    /// Create a new file inode and return a handle
+    pub fn create_file_inode(&mut self, mode: u16, uid: u16, gid: u16) -> Result<VexfsInodeHandle, InodeError> {
+        let inode_info = self.create_inode(mode, uid, gid)?;
+        let handle_id = inode_info.ino;
+        
+        Ok(VexfsInodeHandle::new(inode_info, true, handle_id))
+    }
+    
+    /// Release an inode handle and sync changes
+    pub fn release_inode_handle(&mut self, handle: VexfsInodeHandle) -> Result<(), InodeError> {
+        if handle.info.dirty {
+            self.write_inode(&handle.info)?;
+        }
+        Ok(())
     }
 }
 

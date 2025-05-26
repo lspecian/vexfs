@@ -204,8 +204,12 @@ mod c_bindings {
 // Core modules (available for both kernel and userspace)
 #[cfg(feature = "kernel")]
 mod superblock;
-#[cfg(feature = "kernel")]  
+#[cfg(feature = "kernel")]
 mod inode; // Add inode module
+
+// Shared domain - foundation for all other domains
+#[cfg(any(feature = "kernel", feature = "c_bindings"))]
+pub mod shared;
 
 // These modules are conditionally compiled based on features
 #[cfg(any(feature = "kernel", feature = "c_bindings"))]

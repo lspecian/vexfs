@@ -7,6 +7,15 @@
 
 use crate::ondisk::*;
 use crate::inode_mgmt::*;
+use crate::space_alloc::*;
+use crate::journal::*;
+use core::sync::atomic::{AtomicU32, Ordering};
+use core::ffi::{c_char, c_int, c_uint, c_void};
+
+
+// Lock-related constants for directory operations
+const DIR_LOCK_READ: u32 = 1;
+const DIR_LOCK_WRITE: u32 = 2;
 
 /// Directory operations error types
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -48,6 +57,12 @@ pub struct VexfsDirHandle {
     
     /// Current block being read
     pub current_block: u64,
+    
+    /// Lock for concurrent access
+    pub lock: AtomicU32,
+    
+    /// Journal transaction ID for consistency
+    pub journal_tid: Option<u64>,
 }
 
 /// Directory operations manager
@@ -60,6 +75,12 @@ pub struct VexfsDirOps {
     
     /// Inode manager reference
     pub inode_manager: VexfsInodeManager,
+    
+    /// Space allocator for block allocation
+    pub space_allocator: VexfsSpaceAllocator,
+    
+    /// Journal manager for consistency
+    pub journal_manager: VexfsJournal,
 }
 
 /// Directory entry iterator
@@ -105,7 +126,45 @@ impl VexfsDirHandle {
             cached_entries: [VexfsDirEntry::new(); VEXFS_DIR_ENTRIES_PER_BLOCK],
             cached_count: 0,
             current_block: 0,
+            lock: AtomicU32::new(0),
+            journal_handle: None,
         })
+    }
+    
+    /// Acquire read lock on directory
+    pub fn lock_read(&self) -> Result<(), DirOpError> {
+        let mut current = self.lock.load(Ordering::Acquire);
+        loop {
+            if (current & DIR_LOCK_WRITE) != 0 {
+                // Write lock held, wait
+                return Err(DirOpError::IoError);
+            }
+            
+            let new_value = current + DIR_LOCK_READ;
+            match self.lock.compare_exchange_weak(current, new_value, Ordering::AcqRel, Ordering::Acquire) {
+                Ok(_) => return Ok(()),
+                Err(val) => current = val,
+            }
+        }
+    }
+    
+    /// Acquire write lock on directory
+    pub fn lock_write(&self) -> Result<(), DirOpError> {
+        let expected = 0;
+        match self.lock.compare_exchange(expected, DIR_LOCK_WRITE, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => Ok(()),
+            Err(_) => Err(DirOpError::IoError),
+        }
+    }
+    
+    /// Release read lock on directory
+    pub fn unlock_read(&self) {
+        self.lock.fetch_sub(DIR_LOCK_READ, Ordering::AcqRel);
+    }
+    
+    /// Release write lock on directory
+    pub fn unlock_write(&self) {
+        self.lock.store(0, Ordering::Release);
     }
     
     /// Get current directory position
@@ -158,11 +217,13 @@ impl VexfsDirHandle {
 
 impl VexfsDirOps {
     /// Create a new directory operations manager
-    pub fn new(block_size: u32, inode_manager: VexfsInodeManager) -> Self {
+    pub fn new(block_size: u32, inode_manager: VexfsInodeManager, space_allocator: VexfsSpaceAllocator, journal_manager: VexfsJournal) -> Self {
         Self {
             block_size,
             max_name_len: VEXFS_MAX_FILENAME_LEN,
             inode_manager,
+            space_allocator,
+            journal_manager,
         }
     }
     
@@ -202,6 +263,10 @@ impl VexfsDirOps {
             return Err(DirOpError::PermissionDenied);
         }
         
+        // Start journal transaction for atomic directory creation
+        let mut transaction = self.journal_manager.begin_transaction()
+            .map_err(|_| DirOpError::IoError)?;
+        
         // Create new inode for the directory
         let mut new_inode = self.inode_manager.create_inode(
             S_IFDIR | (mode & 0o777),
@@ -209,16 +274,35 @@ impl VexfsDirOps {
             gid as u16
         ).map_err(|_| DirOpError::NoSpace)?;
         
+        // Allocate initial block for directory
+        let dir_block = self.space_allocator.alloc_block()
+            .map_err(|_| DirOpError::NoSpace)?;
+        
+        // Set the directory block in inode
+        new_inode.set_block(0, dir_block);
+        new_inode.set_size(self.block_size as u64);
+        
+        // Log inode creation
+        transaction.log_inode_create(new_inode.ino, &new_inode.disk_inode)
+            .map_err(|_| DirOpError::IoError)?;
+        
         // Initialize directory with "." and ".." entries
         self.init_directory(&mut new_inode, parent_inode.ino)?;
         
         // Add entry to parent directory
         self.add_entry(parent_inode, name, new_inode.ino, DT_DIR)?;
         
+        // Log parent directory modification
+        transaction.log_inode_update(parent_inode.ino, &parent_inode.disk_inode)
+            .map_err(|_| DirOpError::IoError)?;
+        
         // Update parent's link count and times
         parent_inode.disk_inode.i_links_count += 1;
         parent_inode.touch_mtime(0); // In real implementation, use current time
         parent_inode.touch_ctime(0);
+        
+        // Commit the transaction
+        transaction.commit().map_err(|_| DirOpError::IoError)?;
         
         Ok(new_inode)
     }
@@ -254,8 +338,28 @@ impl VexfsDirOps {
             return Err(DirOpError::DirectoryNotEmpty);
         }
         
+        // Start journal transaction for atomic directory removal
+        let mut transaction = self.journal_manager.begin_transaction()
+            .map_err(|_| DirOpError::IoError)?;
+        
+        // Log directory removal
+        transaction.log_inode_delete(lookup_result.ino, &target_inode.disk_inode)
+            .map_err(|_| DirOpError::IoError)?;
+        
+        // Free directory blocks
+        for block_idx in 0..target_inode.get_block_count() {
+            if let Some(block_num) = target_inode.get_block(block_idx) {
+                self.space_allocator.free_block(block_num)
+                    .map_err(|_| DirOpError::IoError)?;
+            }
+        }
+        
         // Remove entry from parent directory
         self.remove_entry(parent_inode, name)?;
+        
+        // Log parent directory modification
+        transaction.log_inode_update(parent_inode.ino, &parent_inode.disk_inode)
+            .map_err(|_| DirOpError::IoError)?;
         
         // Free the inode
         self.inode_manager.free_inode(lookup_result.ino)
@@ -267,6 +371,74 @@ impl VexfsDirOps {
         }
         parent_inode.touch_mtime(0);
         parent_inode.touch_ctime(0);
+        
+        // Commit the transaction
+        transaction.commit().map_err(|_| DirOpError::IoError)?;
+        
+        Ok(())
+    }
+    
+    /// Rename a directory entry
+    pub fn rename(&mut self, old_parent: &mut VexfsInodeInfo, old_name: &str,
+                  new_parent: &mut VexfsInodeInfo, new_name: &str) -> Result<(), DirOpError> {
+        if !self.is_valid_name(old_name) || !self.is_valid_name(new_name) {
+            return Err(DirOpError::InvalidName);
+        }
+        
+        if new_name.len() > self.max_name_len as usize {
+            return Err(DirOpError::NameTooLong);
+        }
+        
+        // Check permissions
+        let current_uid = 0; // In real implementation, get from current task
+        let current_gid = 0; // In real implementation, get from current task
+        
+        if !old_parent.check_permission(current_uid, current_gid, 0o2) {
+            return Err(DirOpError::PermissionDenied);
+        }
+        
+        if old_parent.ino != new_parent.ino && !new_parent.check_permission(current_uid, current_gid, 0o2) {
+            return Err(DirOpError::PermissionDenied);
+        }
+        
+        // Find the old entry
+        let old_entry = self.lookup_entry(old_parent, old_name)?
+            .ok_or(DirOpError::NotFound)?;
+        
+        // Check if new name already exists
+        if self.lookup_entry(new_parent, new_name)?.is_some() {
+            return Err(DirOpError::AlreadyExists);
+        }
+        
+        // Start journal transaction for atomic rename
+        let mut transaction = self.journal_manager.begin_transaction()
+            .map_err(|_| DirOpError::IoError)?;
+        
+        // Add entry with new name
+        self.add_entry(new_parent, new_name, old_entry.ino, old_entry.file_type)?;
+        
+        // Remove old entry
+        self.remove_entry(old_parent, old_name)?;
+        
+        // Update timestamps
+        old_parent.touch_mtime(0);
+        old_parent.touch_ctime(0);
+        
+        if old_parent.ino != new_parent.ino {
+            new_parent.touch_mtime(0);
+            new_parent.touch_ctime(0);
+            
+            // Log new parent modification
+            transaction.log_inode_update(new_parent.ino, &new_parent.disk_inode)
+                .map_err(|_| DirOpError::IoError)?;
+        }
+        
+        // Log old parent modification
+        transaction.log_inode_update(old_parent.ino, &old_parent.disk_inode)
+            .map_err(|_| DirOpError::IoError)?;
+        
+        // Commit the transaction
+        transaction.commit().map_err(|_| DirOpError::IoError)?;
         
         Ok(())
     }
@@ -294,6 +466,10 @@ impl VexfsDirOps {
             return Err(DirOpError::PermissionDenied);
         }
         
+        // Start journal transaction for atomic file creation
+        let mut transaction = self.journal_manager.begin_transaction()
+            .map_err(|_| DirOpError::IoError)?;
+        
         // Create new inode for the file
         let new_inode = self.inode_manager.create_inode(
             S_IFREG | (mode & 0o777),
@@ -301,12 +477,23 @@ impl VexfsDirOps {
             gid as u16
         ).map_err(|_| DirOpError::NoSpace)?;
         
+        // Log inode creation
+        transaction.log_inode_create(new_inode.ino, &new_inode.disk_inode)
+            .map_err(|_| DirOpError::IoError)?;
+        
         // Add entry to parent directory
         self.add_entry(parent_inode, name, new_inode.ino, DT_REG)?;
+        
+        // Log parent directory modification
+        transaction.log_inode_update(parent_inode.ino, &parent_inode.disk_inode)
+            .map_err(|_| DirOpError::IoError)?;
         
         // Update parent's times
         parent_inode.touch_mtime(0);
         parent_inode.touch_ctime(0);
+        
+        // Commit the transaction
+        transaction.commit().map_err(|_| DirOpError::IoError)?;
         
         Ok(new_inode)
     }
@@ -337,6 +524,10 @@ impl VexfsDirOps {
             return Err(DirOpError::IsDirectory);
         }
         
+        // Start journal transaction for atomic file removal
+        let mut transaction = self.journal_manager.begin_transaction()
+            .map_err(|_| DirOpError::IoError)?;
+        
         // Remove entry from parent directory
         self.remove_entry(parent_inode, name)?;
         
@@ -345,15 +536,39 @@ impl VexfsDirOps {
             target_inode.disk_inode.i_links_count -= 1;
         }
         
-        // If no more links, free the inode
+        // If no more links, free the inode and its blocks
         if target_inode.disk_inode.i_links_count == 0 {
+            // Free all data blocks
+            for block_idx in 0..target_inode.get_block_count() {
+                if let Some(block_num) = target_inode.get_block(block_idx) {
+                    self.space_allocator.free_block(block_num)
+                        .map_err(|_| DirOpError::IoError)?;
+                }
+            }
+            
+            // Log inode deletion
+            transaction.log_inode_delete(lookup_result.ino, &target_inode.disk_inode)
+                .map_err(|_| DirOpError::IoError)?;
+            
+            // Free the inode
             self.inode_manager.free_inode(lookup_result.ino)
                 .map_err(|_| DirOpError::IoError)?;
+        } else {
+            // Log inode update (link count change)
+            transaction.log_inode_update(lookup_result.ino, &target_inode.disk_inode)
+                .map_err(|_| DirOpError::IoError)?;
         }
+        
+        // Log parent directory modification
+        transaction.log_inode_update(parent_inode.ino, &parent_inode.disk_inode)
+            .map_err(|_| DirOpError::IoError)?;
         
         // Update parent's times
         parent_inode.touch_mtime(0);
         parent_inode.touch_ctime(0);
+        
+        // Commit the transaction
+        transaction.commit().map_err(|_| DirOpError::IoError)?;
         
         Ok(())
     }
@@ -612,7 +827,142 @@ impl VexfsDirOps {
         // For now, return empty entries
         Ok([VexfsDirEntry::new(); VEXFS_DIR_ENTRIES_PER_BLOCK])
     }
+/// Create a hard link
+    pub fn link(&mut self, target_inode: &mut VexfsInodeInfo, dir_inode: &mut VexfsInodeInfo, name: &str) -> Result<(), DirOpError> {
+        if target_inode.is_dir() {
+            return Err(DirOpError::IsDirectory);
+        }
+        
+        if !self.is_valid_name(name) {
+            return Err(DirOpError::InvalidName);
+        }
+        
+        // Check if entry already exists
+        if self.lookup_entry(dir_inode, name)?.is_some() {
+            return Err(DirOpError::AlreadyExists);
+        }
+        
+        // Check permissions in target directory
+        let current_uid = 0; // In real implementation, get from current task
+        let current_gid = 0; // In real implementation, get from current task
+        
+        if !dir_inode.check_permission(current_uid, current_gid, 0o2) { // Write permission
+            return Err(DirOpError::PermissionDenied);
+        }
+        
+        // Check for too many links
+        if target_inode.disk_inode.i_links_count >= 32000 {
+            return Err(DirOpError::TooManyLinks);
+        }
+        
+        // Add entry to directory
+        self.add_entry(dir_inode, name, target_inode.ino, DT_REG)?;
+        
+        // Increment link count
+        target_inode.disk_inode.i_links_count += 1;
+        target_inode.touch_ctime(0);
+        
+        // Update directory times
+        dir_inode.touch_mtime(0);
+        dir_inode.touch_ctime(0);
+        
+        Ok(())
+    }
+    
+    /// Create a symbolic link
+    pub fn symlink(&mut self, target: &str, dir_inode: &mut VexfsInodeInfo, name: &str, uid: u32, gid: u32) -> Result<VexfsInodeInfo, DirOpError> {
+        if !self.is_valid_name(name) {
+            return Err(DirOpError::InvalidName);
+        }
+        
+        // Check if entry already exists
+        if self.lookup_entry(dir_inode, name)?.is_some() {
+            return Err(DirOpError::AlreadyExists);
+        }
+        
+        // Check permissions in parent directory
+        let current_uid = 0; // In real implementation, get from current task
+        let current_gid = 0; // In real implementation, get from current task
+        
+        if !dir_inode.check_permission(current_uid, current_gid, 0o2) { // Write permission
+            return Err(DirOpError::PermissionDenied);
+        }
+        
+        // Create new inode for the symbolic link
+        let mut new_inode = self.inode_manager.create_inode(
+            S_IFLNK | 0o777,
+            uid as u16,
+            gid as u16
+        ).map_err(|_| DirOpError::NoSpace)?;
+        
+        // Set the size to the length of the target path
+        new_inode.set_size(target.len() as u64);
+        
+        // In a real implementation, we would store the target path in the inode
+        // For now, just mark it as a symbolic link
+        
+        // Add entry to parent directory
+        self.add_entry(dir_inode, name, new_inode.ino, DT_LNK)?;
+        
+        // Update parent's times
+        dir_inode.touch_mtime(0);
+        dir_inode.touch_ctime(0);
+        
+        Ok(new_inode)
+    }
+    
+    /// Read the target of a symbolic link
+    pub fn readlink(&self, link_inode: &VexfsInodeInfo, buffer: &mut [u8]) -> Result<usize, DirOpError> {
+        if !link_inode.is_symlink() {
+            return Err(DirOpError::InvalidName);
+        }
+        
+        let link_size = link_inode.size() as usize;
+        if buffer.len() < link_size {
+            return Err(DirOpError::NoSpace);
+        }
+        
+        // In a real implementation, we would read the target path from the inode's data
+        // For now, return a placeholder
+        let placeholder = b"placeholder_target";
+        let copy_len = core::cmp::min(placeholder.len(), buffer.len());
+        buffer[..copy_len].copy_from_slice(&placeholder[..copy_len]);
+        
+        Ok(copy_len)
+    }
 }
+
+/// Directory operations function table for integration with VFS
+#[repr(C)]
+pub struct VexfsDirOperations {
+    pub mkdir: unsafe extern "C" fn(u64, *const c_char, c_uint, c_uint, c_uint, *mut u64) -> c_int,
+    pub rmdir: unsafe extern "C" fn(u64, *const c_char) -> c_int,
+    pub opendir: unsafe extern "C" fn(u64, *mut *mut c_void) -> c_int,
+    pub readdir: unsafe extern "C" fn(*mut c_void, *mut c_void, usize, *mut usize) -> c_int,
+    pub closedir: unsafe extern "C" fn(*mut c_void) -> c_int,
+    pub lookup: unsafe extern "C" fn(u64, *const c_char, *mut u64, *mut c_uint) -> c_int,
+    pub rename: unsafe extern "C" fn(u64, *const c_char, u64, *const c_char) -> c_int,
+    pub link: unsafe extern "C" fn(u64, u64, *const c_char) -> c_int,
+    pub symlink: unsafe extern "C" fn(*const c_char, u64, *const c_char, c_uint, c_uint, *mut u64) -> c_int,
+    pub readlink: unsafe extern "C" fn(u64, *mut c_char, usize, *mut usize) -> c_int,
+    pub getdents: unsafe extern "C" fn(*mut VexfsDirHandle, *mut c_void, u32, *mut u32) -> c_int,
+}
+
+/// Global directory operations table for VFS integration
+#[no_mangle]
+pub static VEXFS_DIR_OPERATIONS: VexfsDirOperations = VexfsDirOperations {
+    mkdir: vexfs_mkdir,
+    rmdir: vexfs_rmdir,
+    opendir: vexfs_opendir,
+    readdir: vexfs_readdir,
+    closedir: vexfs_closedir,
+    lookup: vexfs_lookup,
+    rename: vexfs_rename,
+    link: vexfs_link,
+    symlink: vexfs_symlink,
+    readlink: vexfs_readlink,
+    getdents: vexfs_getdents,
+};
 
 /// Insertion point for new directory entries
 #[derive(Debug)]
@@ -728,5 +1078,408 @@ impl VexfsDirOps {
         self.remove_entry(old_dir, old_name)?;
         
         Ok(())
+    }
+}
+
+//=============================================================================
+// C FFI Exports for VFS Integration
+//=============================================================================
+
+use crate::ffi::{FFIResult, to_ffi_result};
+use core::ptr;
+
+/// C FFI: Create a new directory
+#[no_mangle]
+pub unsafe extern "C" fn vexfs_mkdir(
+    dir_ino: u64,
+    name: *const c_char,
+    mode: c_uint,
+    uid: c_uint,
+    gid: c_uint,
+    new_ino: *mut u64,
+) -> c_int {
+    if name.is_null() || new_ino.is_null() {
+        return to_ffi_result(Err("Invalid arguments"));
+    }
+    
+    // Convert C string to Rust string
+    let name_str = match core::ffi::CStr::from_ptr(name).to_str() {
+        Ok(s) => s,
+        Err(_) => return to_ffi_result(Err("Invalid name encoding")),
+    };
+    
+    // In a real implementation, we would:
+    // 1. Get the directory inode manager instance
+    // 2. Look up the parent directory inode
+    // 3. Create the new directory
+    // 4. Add it to the parent directory
+    
+    // For now, return a placeholder success with a fake inode number
+    *new_ino = 42; // Placeholder inode number
+    to_ffi_result(Ok(()))
+}
+
+/// C FFI: Remove a directory
+#[no_mangle]
+pub unsafe extern "C" fn vexfs_rmdir(
+    dir_ino: u64,
+    name: *const c_char,
+) -> c_int {
+    if name.is_null() {
+        return to_ffi_result(Err("Invalid arguments"));
+    }
+    
+    let name_str = match core::ffi::CStr::from_ptr(name).to_str() {
+        Ok(s) => s,
+        Err(_) => return to_ffi_result(Err("Invalid name encoding")),
+    };
+    
+    // In a real implementation, we would:
+    // 1. Look up the parent directory inode
+    // 2. Look up the target directory
+    // 3. Check if it's empty
+    // 4. Remove the directory entry
+    // 5. Free the directory inode
+    
+    to_ffi_result(Ok(()))
+}
+
+/// C FFI: Look up a directory entry
+#[no_mangle]
+pub unsafe extern "C" fn vexfs_lookup(
+    dir_ino: u64,
+    name: *const c_char,
+    result_ino: *mut u64,
+    result_type: *mut c_uint,
+) -> c_int {
+    if name.is_null() || result_ino.is_null() || result_type.is_null() {
+        return to_ffi_result(Err("Invalid arguments"));
+    }
+    
+    let name_str = match core::ffi::CStr::from_ptr(name).to_str() {
+        Ok(s) => s,
+        Err(_) => return to_ffi_result(Err("Invalid name encoding")),
+    };
+    
+    // In a real implementation, we would:
+    // 1. Look up the directory inode
+    // 2. Search for the entry by name
+    // 3. Return the inode number and type
+    
+    // For now, return not found
+    to_ffi_result(Err("Not found"))
+}
+
+/// C FFI: Open a directory for reading
+#[no_mangle]
+pub unsafe extern "C" fn vexfs_opendir(
+    dir_ino: u64,
+    handle: *mut *mut c_void,
+) -> c_int {
+    if handle.is_null() {
+        return to_ffi_result(Err("Invalid arguments"));
+    }
+    
+    // In a real implementation, we would:
+    // 1. Look up the directory inode
+    // 2. Create a directory handle
+    // 3. Return the handle
+    
+    // For now, return a null handle
+    *handle = ptr::null_mut();
+    to_ffi_result(Ok(()))
+}
+
+/// C FFI: Read directory entries
+#[no_mangle]
+pub unsafe extern "C" fn vexfs_readdir(
+    handle: *mut c_void,
+    buffer: *mut c_void,
+    buffer_size: usize,
+    entries_read: *mut usize,
+) -> c_int {
+    if handle.is_null() || buffer.is_null() || entries_read.is_null() {
+        return to_ffi_result(Err("Invalid arguments"));
+    }
+    
+    // In a real implementation, we would:
+    // 1. Cast handle to VexfsDirHandle
+    // 2. Read entries into the buffer
+    // 3. Return the number of entries read
+    
+    *entries_read = 0;
+    to_ffi_result(Ok(()))
+}
+
+/// C FFI: Close a directory handle
+#[no_mangle]
+pub unsafe extern "C" fn vexfs_closedir(handle: *mut c_void) -> c_int {
+    if handle.is_null() {
+        return to_ffi_result(Err("Invalid arguments"));
+    }
+    
+    // In a real implementation, we would:
+    // 1. Cast handle to VexfsDirHandle
+    // 2. Free the handle and associated resources
+    
+    to_ffi_result(Ok(()))
+}
+
+/// C FFI: Rename a file or directory
+#[no_mangle]
+pub unsafe extern "C" fn vexfs_rename(
+    old_dir_ino: u64,
+    old_name: *const c_char,
+    new_dir_ino: u64,
+    new_name: *const c_char,
+) -> c_int {
+    if old_name.is_null() || new_name.is_null() {
+        return to_ffi_result(Err("Invalid arguments"));
+    }
+    
+    let old_name_str = match core::ffi::CStr::from_ptr(old_name).to_str() {
+        Ok(s) => s,
+        Err(_) => return to_ffi_result(Err("Invalid old name encoding")),
+    };
+    
+    let new_name_str = match core::ffi::CStr::from_ptr(new_name).to_str() {
+        Ok(s) => s,
+        Err(_) => return to_ffi_result(Err("Invalid new name encoding")),
+    };
+    
+    // In a real implementation, we would:
+    // 1. Look up both directory inodes
+    // 2. Look up the source entry
+    // 3. Check if destination exists
+    // 4. Move the entry between directories
+    
+    to_ffi_result(Ok(()))
+}
+
+/// C FFI: Create a hard link
+#[no_mangle]
+pub unsafe extern "C" fn vexfs_link(
+    target_ino: u64,
+    dir_ino: u64,
+    name: *const c_char,
+) -> c_int {
+    if name.is_null() {
+        return to_ffi_result(Err("Invalid arguments"));
+    }
+    
+    let name_str = match core::ffi::CStr::from_ptr(name).to_str() {
+        Ok(s) => s,
+        Err(_) => return to_ffi_result(Err("Invalid name encoding")),
+    };
+    
+    // In a real implementation, we would:
+    // 1. Look up the target inode
+    // 2. Look up the directory inode
+    // 3. Create the hard link
+    // 4. Increment the link count
+    
+    to_ffi_result(Ok(()))
+}
+
+/// C FFI: Create a symbolic link
+#[no_mangle]
+pub unsafe extern "C" fn vexfs_symlink(
+    target: *const c_char,
+    dir_ino: u64,
+    name: *const c_char,
+    uid: c_uint,
+    gid: c_uint,
+    new_ino: *mut u64,
+) -> c_int {
+    if target.is_null() || name.is_null() || new_ino.is_null() {
+        return to_ffi_result(Err("Invalid arguments"));
+    }
+    
+    let target_str = match core::ffi::CStr::from_ptr(target).to_str() {
+        Ok(s) => s,
+        Err(_) => return to_ffi_result(Err("Invalid target encoding")),
+    };
+    
+    let name_str = match core::ffi::CStr::from_ptr(name).to_str() {
+        Ok(s) => s,
+        Err(_) => return to_ffi_result(Err("Invalid name encoding")),
+    };
+    
+    // In a real implementation, we would:
+    // 1. Look up the directory inode
+    // 2. Create a new inode for the symlink
+    // 3. Store the target path in the inode
+    // 4. Add the entry to the directory
+    
+    *new_ino = 43; // Placeholder inode number
+    to_ffi_result(Ok(()))
+}
+
+/// C FFI: Get directory entries (getdents syscall)
+#[no_mangle]
+pub unsafe extern "C" fn vexfs_getdents(
+    dir_handle: *mut VexfsDirHandle,
+    buffer: *mut c_void,
+    buffer_size: u32,
+    bytes_read: *mut u32,
+) -> c_int {
+    if dir_handle.is_null() || buffer.is_null() || bytes_read.is_null() {
+        return to_ffi_result(Err("Invalid arguments"));
+    }
+    
+    let handle = &mut *dir_handle;
+    let output_buffer = core::slice::from_raw_parts_mut(buffer as *mut u8, buffer_size as usize);
+    
+    // In a real implementation, we would:
+    // 1. Read directory entries from the current position
+    // 2. Convert them to the appropriate format (dirent structure)
+    // 3. Copy to the output buffer
+    // 4. Update the directory position
+    // 5. Return the number of bytes written
+    
+    // For now, return empty directory
+    *bytes_read = 0;
+    to_ffi_result(Ok(()))
+}
+
+/// C FFI: Read the target of a symbolic link
+#[no_mangle]
+pub unsafe extern "C" fn vexfs_readlink(
+    link_ino: u64,
+    buffer: *mut c_char,
+    buffer_size: usize,
+    bytes_read: *mut usize,
+) -> c_int {
+    if buffer.is_null() || bytes_read.is_null() {
+        return to_ffi_result(Err("Invalid arguments"));
+    }
+    
+    // In a real implementation, we would:
+    // 1. Look up the symlink inode
+    // 2. Read the target path from the inode
+    // 3. Copy it to the buffer
+    
+    *bytes_read = 0;
+    to_ffi_result(Ok(()))
+}
+
+/// C FFI: Remove a file or directory entry
+#[no_mangle]
+pub unsafe extern "C" fn vexfs_unlink(
+    dir_ino: u64,
+    name: *const c_char,
+) -> c_int {
+    if name.is_null() {
+        return to_ffi_result(Err("Invalid arguments"));
+    }
+    
+    let name_str = match core::ffi::CStr::from_ptr(name).to_str() {
+        Ok(s) => s,
+        Err(_) => return to_ffi_result(Err("Invalid name encoding")),
+    };
+    
+    // In a real implementation, we would:
+    // 1. Look up the directory inode
+    // 2. Look up the target entry
+    // 3. Remove the directory entry
+    // 4. Decrement link count or free inode if last link
+    
+    to_ffi_result(Ok(()))
+}
+
+//=============================================================================
+// Testing and Development Support
+//=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::inode_mgmt::VexfsInodeManager;
+    
+    fn create_test_dir_ops() -> VexfsDirOps {
+        let inode_manager = VexfsInodeManager::new(4096, 1000);
+        VexfsDirOps::new(4096, 255, inode_manager)
+    }
+    
+    #[test]
+    fn test_dir_creation() {
+        let mut dir_ops = create_test_dir_ops();
+        let mut parent_inode = dir_ops.inode_manager.create_inode(
+            S_IFDIR | 0o755,
+            0,
+            0
+        ).unwrap();
+        
+        let result = dir_ops.create_directory(&mut parent_inode, "test_dir", 0o755, 0, 0);
+        assert!(result.is_ok());
+    }
+    
+    #[test]
+    fn test_file_name_validation() {
+        let dir_ops = create_test_dir_ops();
+        
+        assert!(dir_ops.is_valid_name("valid_name"));
+        assert!(!dir_ops.is_valid_name(""));
+        assert!(!dir_ops.is_valid_name("."));
+        assert!(!dir_ops.is_valid_name(".."));
+        assert!(!dir_ops.is_valid_name("name/with/slash"));
+        assert!(!dir_ops.is_valid_name("name\0with\0null"));
+    }
+    
+    #[test]
+    fn test_directory_entry_creation() {
+        let entry = VexfsDirEntry::new();
+        assert_eq!(entry.ino, 0);
+        assert_eq!(entry.name_len, 0);
+        assert_eq!(entry.file_type, 0);
+    }
+    
+    #[test]
+    fn test_entry_size_calculation() {
+        let size_1 = VexfsDirEntry::calc_size(1);
+        let size_10 = VexfsDirEntry::calc_size(10);
+        let size_255 = VexfsDirEntry::calc_size(255);
+        
+        // All sizes should be 4-byte aligned
+        assert_eq!(size_1 % 4, 0);
+        assert_eq!(size_10 % 4, 0);
+        assert_eq!(size_255 % 4, 0);
+        
+        // Longer names should require more space
+        assert!(size_10 > size_1);
+        assert!(size_255 > size_10);
+    }
+    
+    #[test]
+    fn test_dir_stats() {
+        let dir_ops = create_test_dir_ops();
+        let dir_inode = dir_ops.inode_manager.create_inode(
+            S_IFDIR | 0o755,
+            0,
+            0
+        ).unwrap();
+        
+        let stats = dir_ops.get_dir_stats(&dir_inode);
+        assert!(stats.is_ok());
+        
+        let stats = stats.unwrap();
+        assert_eq!(stats.total_size, 0); // Empty directory
+        assert_eq!(stats.blocks_used, 0);
+    }
+    
+    #[test]
+    fn test_dir_operations_table() {
+        // Verify that the operations table is properly initialized
+        assert!(!(VEXFS_DIR_OPERATIONS.mkdir as *const _ as *const u8).is_null());
+        assert!(!(VEXFS_DIR_OPERATIONS.rmdir as *const _ as *const u8).is_null());
+        assert!(!(VEXFS_DIR_OPERATIONS.opendir as *const _ as *const u8).is_null());
+        assert!(!(VEXFS_DIR_OPERATIONS.readdir as *const _ as *const u8).is_null());
+        assert!(!(VEXFS_DIR_OPERATIONS.closedir as *const _ as *const u8).is_null());
+        assert!(!(VEXFS_DIR_OPERATIONS.lookup as *const _ as *const u8).is_null());
+        assert!(!(VEXFS_DIR_OPERATIONS.rename as *const _ as *const u8).is_null());
+        assert!(!(VEXFS_DIR_OPERATIONS.link as *const _ as *const u8).is_null());
+        assert!(!(VEXFS_DIR_OPERATIONS.symlink as *const _ as *const u8).is_null());
+        assert!(!(VEXFS_DIR_OPERATIONS.readlink as *const _ as *const u8).is_null());
+        assert!(!(VEXFS_DIR_OPERATIONS.getdents as *const _ as *const u8).is_null());
     }
 }

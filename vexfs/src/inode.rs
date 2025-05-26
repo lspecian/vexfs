@@ -1,6 +1,11 @@
 // Note: Kernel integration handled via C FFI, not direct kernel crate usage
 // These types are defined as stubs for Rust library interface
 
+use crate::{pr_info, pr_err, pr_warn};
+use crate::fs_core::Inode;
+use crate::superblock::Dentry;
+use std::sync::Arc;
+
 // Define VexFS Inode-Specific Structure
 // For now, it's minimal. Could hold directory contents or file metadata later.
 #[repr(C)] // If passed to C or part of a larger C-compatible struct in i_fs_info
@@ -45,7 +50,7 @@ extern "C" fn vexfs_lookup(
     // No other files in the root directory for now.
     // d_add(dentry, None) makes it a negative dentry.
     dentry.d_add_new(None); // Or d_add(dentry, None::<Arc<Inode>>) if available
-    Err(uapi::errno::ENOENT.into()) // No such file or directory
+    Err(crate::shared::errors::VexfsError::FileNotFound) // No such file or directory
 }
 
 extern "C" fn vexfs_getattr(

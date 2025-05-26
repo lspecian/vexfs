@@ -1,4 +1,5 @@
 # Kbuild file for VexFS kernel module
+# Supports both C-only builds and full C+Rust builds
 
 # The final module will be named vexfs.ko
 obj-m += vexfs.o
@@ -6,12 +7,25 @@ obj-m += vexfs.o
 # Name of the C object file compiled from vexfs_module_entry.c
 VEXFS_C_OBJ := vexfs_module_entry.o
 
-# Specify the objects that make up vexfs.o
-# We only include the C object here, and link the Rust library via LDFLAGS
-vexfs-objs := $(VEXFS_C_OBJ)
-
-# Add the Rust static library to the link flags using absolute path
-EXTRA_LDFLAGS += $(src)/libvexfs.a
+# Check if we're doing a C-only build or full build
+# The Makefile will set VEXFS_C_ONLY=1 for C-only builds
+ifndef VEXFS_C_ONLY
+    # Full build: Include pre-created combined Rust object
+    ifneq (,$(wildcard $(src)/vexfs_rust_combined.o))
+        ccflags-y += -DVEXFS_RUST_FFI_ENABLED
+        vexfs-objs := $(VEXFS_C_OBJ) vexfs_rust_combined.o
+        clean-files += vexfs_rust_combined.o
+    else
+        $(warning VexFS: vexfs_rust_combined.o not found, building C-only version)
+        ccflags-y += -DVEXFS_C_ONLY_BUILD
+        vexfs-objs := $(VEXFS_C_OBJ)
+    endif
+else
+    # C-only build: Set compile flag and only use C object
+    ccflags-y += -DVEXFS_C_ONLY_BUILD
+    vexfs-objs := $(VEXFS_C_OBJ)
+    $(info VexFS: Building C-only version without Rust FFI)
+endif
 
 # Optional: If there are C header files specific to this module in an 'include' directory
 # ccflags-y += -I$(src)/include
@@ -19,9 +33,10 @@ EXTRA_LDFLAGS += $(src)/libvexfs.a
 # This Kbuild setup expects:
 # 1. vexfs_module_entry.c to be present in $(src) (current directory).
 #    Kbuild will compile it to vexfs_module_entry.o.
-# 2. $(VEXFS_RUST_LIB_FILENAME) (e.g., libvexfs.a) to be present in $(src).
+# 2. For full builds: libvexfs.a to be present in $(src).
 #    The main Makefile is responsible for building this with cargo
 #    and copying it here before invoking the kernel build.
+# 3. For C-only builds: VEXFS_C_ONLY=1 environment variable set.
 
 # To ensure the linker finds the Rust standard libraries (core, alloc, etc.)
 # and any other crates that libvexfs.a depends on, the RUSTFLAGS or linker

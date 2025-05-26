@@ -56,6 +56,44 @@ pub struct FreeSpaceInfo {
     pub fragmentation: u8,
 }
 
+/// Handle for managing allocated blocks
+#[derive(Debug, Clone, Copy)]
+pub struct BlockHandle {
+    /// Starting block number
+    pub start_block: u64,
+    
+    /// Number of blocks
+    pub block_count: u32,
+    
+    /// Block group this allocation belongs to
+    pub block_group: u32,
+    
+    /// Allocation flags
+    pub flags: u32,
+}
+
+impl BlockHandle {
+    /// Create a new block handle
+    pub fn new(start_block: u64, block_count: u32, block_group: u32) -> Self {
+        Self {
+            start_block,
+            block_count,
+            block_group,
+            flags: 0,
+        }
+    }
+    
+    /// Get the end block (exclusive)
+    pub fn end_block(&self) -> u64 {
+        self.start_block + self.block_count as u64
+    }
+    
+    /// Check if this handle contains the given block
+    pub fn contains_block(&self, block: u64) -> bool {
+        block >= self.start_block && block < self.end_block()
+    }
+}
+
 /// Block group descriptor for group-based allocation
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
@@ -534,7 +572,8 @@ impl VexfsSpaceAllocator {
         group.free_inodes_count = self.superblock.s_inodes_per_group;
         group.used_dirs_count = 0;
         group.flags = 0;
-        group.checksum = self.calculate_group_checksum(group);
+        let checksum = self.calculate_group_checksum(group);
+        group.checksum = checksum;
         
         Ok(())
     }
@@ -587,6 +626,26 @@ impl VexfsSpaceAllocator {
         checksum ^= group.flags as u32;
         
         checksum
+    }
+    
+    /// Allocate blocks specifically for file data
+    pub fn allocate_data_blocks(&mut self, count: u32, inode_hint: Option<u64>) -> Result<BlockHandle, SpaceAllocError> {
+        let hint = if let Some(ino) = inode_hint {
+            // Create allocation hint based on inode number for locality
+            Some(AllocHint::new((ino % 1000) * self.blocks_per_group as u64))
+        } else {
+            None
+        };
+        
+        let result = self.allocate_blocks(count, hint)?;
+        let block_group = self.block_to_group(result.start_block);
+        
+        Ok(BlockHandle::new(result.start_block, result.block_count, block_group))
+    }
+    
+    /// Allocate blocks for a specific file
+    pub fn allocate_for_file(&mut self, count: u32, ino: u64) -> Result<BlockHandle, SpaceAllocError> {
+        self.allocate_data_blocks(count, Some(ino))
     }
 }
 

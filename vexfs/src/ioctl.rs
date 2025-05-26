@@ -9,7 +9,7 @@
 use crate::anns::{DistanceMetric, SearchResult, AnnsError};
 use crate::vector_storage::{VectorDataType, VectorStorageError, VectorHeader};
 use crate::vector_handlers::VectorStorage;
-use crate::vector_search_integration::VectorSearchSubsystem;
+// use crate::vector_search_integration::VectorSearchSubsystem; // Temporarily disabled
 
 extern crate alloc;
 use alloc::{vec::Vec, boxed::Box};
@@ -497,15 +497,15 @@ pub enum VectorIoctlError {
 impl From<AnnsError> for VectorIoctlError {
     fn from(err: AnnsError) -> Self {
         match err {
-            AnnsError::InvalidParameters => VectorIoctlError::InvalidParameters,
-            AnnsError::IndexNotFound => VectorIoctlError::IndexNotFound,
+            AnnsError::InvalidParameter => VectorIoctlError::InvalidParameters,
+            AnnsError::IndexNotInitialized => VectorIoctlError::IndexNotFound,
             AnnsError::VectorNotFound => VectorIoctlError::VectorNotFound,
-            AnnsError::CorruptedIndex => VectorIoctlError::IndexCorrupted,
+            AnnsError::WalCorrupted => VectorIoctlError::IndexCorrupted,
             AnnsError::OutOfMemory => VectorIoctlError::InsufficientMemory,
-            AnnsError::IoError => VectorIoctlError::IoError,
-            AnnsError::InvalidFormat => VectorIoctlError::InvalidFormat,
-            AnnsError::ReadOnly => VectorIoctlError::PermissionDenied,
-            AnnsError::ConcurrentAccess => VectorIoctlError::ConcurrentAccess,
+            AnnsError::IOError => VectorIoctlError::IoError,
+            AnnsError::SerializationError => VectorIoctlError::InvalidFormat,
+            AnnsError::InvalidOperation => VectorIoctlError::PermissionDenied,
+            AnnsError::MemoryAllocationFailed => VectorIoctlError::InsufficientMemory,
             _ => VectorIoctlError::UnknownError,
         }
     }

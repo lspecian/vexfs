@@ -227,6 +227,9 @@ pub struct VexfsTransaction {
     pub start_time: u64,
 }
 
+/// Type alias for compatibility with file_ops.rs import
+pub type JournalTransaction = VexfsTransaction;
+
 /// Journal manager
 pub struct VexfsJournal {
     /// Journal superblock

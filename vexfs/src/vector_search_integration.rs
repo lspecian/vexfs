@@ -37,9 +37,11 @@ pub struct SearchStatistics {
     pub total_searches: u64,
     /// Total search time in microseconds
     pub total_search_time_us: u64,
-    /// Average search time
+    /// Average search time (disabled in kernel-minimal mode)
+    #[cfg(not(feature = "kernel-minimal"))]
     pub avg_search_time_us: f64,
-    /// Cache hit rate
+    /// Cache hit rate (disabled in kernel-minimal mode)
+    #[cfg(not(feature = "kernel-minimal"))]
     pub cache_hit_rate: f32,
     /// Index utilization statistics
     pub index_stats: IndexUtilizationStats,
@@ -48,9 +50,11 @@ pub struct SearchStatistics {
 /// Index utilization statistics
 #[derive(Debug, Clone, Default)]
 pub struct IndexUtilizationStats {
-    /// Percentage of searches that used the HNSW index
+    /// Percentage of searches that used the HNSW index (disabled in kernel-minimal mode)
+    #[cfg(not(feature = "kernel-minimal"))]
     pub hnsw_usage_rate: f32,
-    /// Average index traversal depth
+    /// Average index traversal depth (disabled in kernel-minimal mode)
+    #[cfg(not(feature = "kernel-minimal"))]
     pub avg_traversal_depth: f32,
     /// Index memory usage in bytes
     pub index_memory_usage: usize,
@@ -80,8 +84,11 @@ pub enum VectorSearchIoctlCmd {
 #[repr(C)]
 #[derive(Debug, Clone)]
 pub struct SearchRequest {
-    /// Query vector data pointer
+    /// Query vector data pointer (f32 disabled in kernel-minimal mode)
+    #[cfg(not(feature = "kernel-minimal"))]
     pub vector_data: *const f32,
+    #[cfg(feature = "kernel-minimal")]
+    pub vector_data: *const u8, // Use raw bytes in kernel mode
     /// Vector dimension count
     pub dimensions: u32,
     /// Number of results to return
@@ -126,12 +133,21 @@ pub struct SearchResultC {
     pub vector_id: u64,
     /// Associated file inode
     pub file_inode: u64,
-    /// Distance to query vector
+    /// Distance to query vector (disabled in kernel-minimal mode)
+    #[cfg(not(feature = "kernel-minimal"))]
     pub distance: f32,
-    /// Relevance score
+    #[cfg(feature = "kernel-minimal")]
+    pub distance: u32, // Use fixed-point representation in kernel
+    /// Relevance score (disabled in kernel-minimal mode)
+    #[cfg(not(feature = "kernel-minimal"))]
     pub score: f32,
-    /// Confidence value
+    #[cfg(feature = "kernel-minimal")]
+    pub score: u32, // Use fixed-point representation in kernel
+    /// Confidence value (disabled in kernel-minimal mode)
+    #[cfg(not(feature = "kernel-minimal"))]
     pub confidence: f32,
+    #[cfg(feature = "kernel-minimal")]
+    pub confidence: u32, // Use fixed-point representation in kernel
     /// Vector metadata
     pub metadata: VectorMetadataC,
 }
@@ -385,8 +401,13 @@ impl VectorSearchSubsystem {
     fn update_search_stats(&mut self, search_time_us: u64, result_count: usize) {
         self.search_stats.total_searches += 1;
         self.search_stats.total_search_time_us += search_time_us;
-        self.search_stats.avg_search_time_us = 
-            self.search_stats.total_search_time_us as f64 / self.search_stats.total_searches as f64;
+        
+        // Only calculate floating-point average when not in kernel-minimal mode
+        #[cfg(not(feature = "kernel-minimal"))]
+        {
+            self.search_stats.avg_search_time_us =
+                self.search_stats.total_search_time_us as f64 / self.search_stats.total_searches as f64;
+        }
     }
     
     /// Get current time in microseconds (placeholder)

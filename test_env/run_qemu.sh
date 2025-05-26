@@ -1,5 +1,27 @@
 #!/bin/bash
 
+# VexFS QEMU Testing Environment (Legacy)
+# This script is kept for compatibility but the new vm_control.sh is recommended
+
+echo "⚠️  Legacy script detected!"
+echo "This script is deprecated in favor of the new simplified VM setup."
+echo
+echo "For the new simplified VM environment, use:"
+echo "  ./setup_vm.sh      # Initial setup"
+echo "  ./vm_control.sh    # VM management"
+echo "  ./test_module.sh   # Testing"
+echo
+echo "Continue with legacy Packer-based setup? (y/N)"
+read -r response
+
+if [[ ! "$response" =~ ^[Yy]$ ]]; then
+    echo "Aborting. Use the new scripts for a better experience!"
+    exit 0
+fi
+
+echo "Proceeding with legacy setup..."
+echo
+
 # Variables
 PACKER_OUTPUT_DIR="./packer_output"
 # Find the newest QCOW2 image in the Packer output directory
@@ -11,6 +33,9 @@ EXTRA_DISK_SIZE="100M" # Size for the test VexFS disk
 if [ -z "$VM_IMAGE" ]; then
   echo "Error: No QCOW2 image found in $PACKER_OUTPUT_DIR."
   echo "Please build the VM image using 'packer build vexfs.pkr.hcl' first."
+  echo
+  echo "Or better yet, use the new simplified setup:"
+  echo "  ./setup_vm.sh"
   exit 1
 fi
 

@@ -1,11 +1,65 @@
 // Note: Kernel integration handled via C FFI, not direct kernel crate usage
 // These types are defined as stubs for Rust library interface
 
-// Import inode functions
-use crate::inode;
+use crate::shared::{constants::*, errors::*, types::*};
+use crate::{pr_info, pr_err, pr_warn};
+use crate::fs_core::inode;
 
-// Define a unique magic number for VexFS
-pub const VEXFS_MAGIC: u32 = 0xDEADBEEF; // Example magic number
+#[cfg(not(feature = "kernel"))]
+use std::os::raw::{c_int, c_void};
+
+#[cfg(feature = "kernel")]
+use core::ffi::{c_int, c_void};
+
+// Temporary stub types for compilation - these will be replaced by proper kernel types
+pub struct SuperBlock {
+    pub s_magic: u32,
+    pub s_fs_info: *mut c_void,
+    pub s_op: *const c_void,
+    pub s_root: *mut c_void,
+}
+
+pub struct SuperOperations {
+    pub alloc_inode: Option<extern "C" fn() -> *mut c_void>,
+    pub destroy_inode: Option<extern "C" fn(*mut c_void)>,
+    pub write_inode: Option<extern "C" fn(*mut c_void, *mut c_void) -> c_int>,
+    pub dirty_inode: Option<extern "C" fn(*mut c_void, c_int)>,
+    pub drop_inode: Option<extern "C" fn(*mut c_void) -> c_int>,
+    pub evict_inode: Option<extern "C" fn(*mut c_void)>,
+    pub put_super: Option<extern "C" fn(*mut c_void)>,
+    pub sync_fs: Option<extern "C" fn(*mut c_void, c_int) -> c_int>,
+    pub freeze_fs: Option<extern "C" fn(*mut c_void) -> c_int>,
+    pub unfreeze_fs: Option<extern "C" fn(*mut c_void) -> c_int>,
+    pub statfs: Option<extern "C" fn(*mut c_void, *mut c_void) -> c_int>,
+    pub remount_fs: Option<extern "C" fn(*mut c_void, *mut c_int, *mut c_void) -> c_int>,
+    pub show_options: Option<extern "C" fn(*mut c_void, *mut c_void) -> c_int>,
+}
+
+pub struct Dentry;
+
+impl Dentry {
+    pub fn d_make_root(_inode: std::sync::Arc<crate::fs_core::Inode>) -> Option<*mut c_void> {
+        // Stub implementation
+        Some(std::ptr::null_mut())
+    }
+}
+
+// Helper function to create a root inode for legacy kernel interface
+fn create_root_inode() -> Result<std::sync::Arc<crate::fs_core::Inode>, crate::shared::errors::VexfsError> {
+    use crate::fs_core::InodeManager;
+    use crate::shared::types::InodeNumber;
+    
+    // Create a simple root inode using our new fs_core architecture
+    let inode_manager = InodeManager::new();
+    let root_inode_number = InodeNumber(1); // Root inode is typically inode 1
+    
+    // Create a root directory inode
+    inode_manager.create_inode(root_inode_number, crate::shared::types::FileType::Directory)
+        .map_err(|_| crate::shared::errors::VexfsError::InodeNotFound(1))
+}
+
+// Temporary constants for compilation
+const S_IFDIR: u32 = 0o040000;
 
 // VexFS-specific superblock information
 #[repr(C)] // Ensure C layout compatibility if directly passed via s_fs_info raw pointer
@@ -40,10 +94,10 @@ impl VexfsSuperblock {
 
 // Placeholder for vexfs_statfs if needed by super_block setup
 #[no_mangle]
-extern "C" fn vexfs_statfs(_dentry: *mut bindings::dentry, _kstatfs: *mut bindings::kstatfs) -> c_int {
+extern "C" fn vexfs_statfs(_dentry: *mut c_void, _kstatfs: *mut c_void) -> c_int {
     // In a real implementation, this would fill kstatfs with filesystem statistics.
     // For now, just return 0 (success) or an error code.
-    // pr_info!("VexFS: vexfs_statfs called (dummy)\n");
+    pr_info!("VexFS: vexfs_statfs called (dummy)\n");
     0
 }
 
@@ -85,20 +139,19 @@ pub static VEXFS_SUPER_OPS: SuperOperations = SuperOperations {
 // `silent` indicates whether to suppress error messages.
 pub fn vexfs_fill_super(
     sb: &mut SuperBlock,
-    _data: *mut core::ffi::c_void, // Mount options, unused for now
+    _data: *mut c_void, // Mount options, unused for now
     _silent: c_int,
-) -> Result<()> { // Returning Result for error handling
+) -> VexfsResult<()> { // Returning Result for error handling
     pr_info!("VexFS: vexfs_fill_super called\n");
 
     // 1. Initialize VexfsSuperblock
     // We need to allocate VexfsSuperblock and store it in sb.s_fs_info.
-    // The `kernel` crate might offer helpers for this, e.g., Box::into_raw.
-    // s_fs_info is typically a *mut c_void.
-    let vex_sb = Box::try_new(VexfsSuperblock::new())?;
+    // For now, using a simple Box allocation
+    let vex_sb = Box::new(VexfsSuperblock::new());
     // The VexfsSuperblock instance needs to live as long as the superblock exists.
     // Box::into_raw converts the Box into a raw pointer, leaking its memory.
     // This is a common pattern for s_fs_info, which is then freed in kill_sb.
-    sb.s_fs_info = Box::into_raw(vex_sb) as *mut core::ffi::c_void;
+    sb.s_fs_info = Box::into_raw(vex_sb) as *mut c_void;
 
     // 2. Set up generic superblock fields
     sb.s_magic = VEXFS_MAGIC;
@@ -109,12 +162,13 @@ pub fn vexfs_fill_super(
     // typically `*const struct super_operations` (from C bindings).
     // We take a reference to our static `VEXFS_SUPER_OPS`, cast it to a raw pointer
     // of the correct type (`*const bindings::super_operations`).
-    sb.s_op = &VEXFS_SUPER_OPS as *const SuperOperations as *const bindings::super_operations;
+    sb.s_op = &VEXFS_SUPER_OPS as *const SuperOperations as *const c_void;
     pr_info!("VexFS: sb.s_op set.\n");
 
     // 3. Get root inode and set sb.s_root
     pr_info!("VexFS: Attempting to get root inode...\n");
-    let root_inode_arc = match inode::vexfs_get_inode(sb, bindings::S_IFDIR) {
+    // Create a root inode using our new fs_core InodeManager
+    let root_inode_arc = match create_root_inode() {
         Ok(inode_arc) => inode_arc,
         Err(e) => {
             pr_err!("VexFS: Failed to get root inode: {:?}\n", e);
@@ -122,7 +176,7 @@ pub fn vexfs_fill_super(
             unsafe {
                 let _ = Box::from_raw(sb.s_fs_info as *mut VexfsSuperblock);
             }
-            sb.s_fs_info = core::ptr::null_mut();
+            sb.s_fs_info = std::ptr::null_mut();
             return Err(e);
         }
     };
@@ -139,8 +193,8 @@ pub fn vexfs_fill_super(
             unsafe {
                 let _ = Box::from_raw(sb.s_fs_info as *mut VexfsSuperblock);
             }
-            sb.s_fs_info = core::ptr::null_mut();
-            return Err(-12); // ENOMEM equivalent, handled by C FFI bridge
+            sb.s_fs_info = std::ptr::null_mut();
+            return Err(VexfsError::IoError("Failed to create root dentry".to_string()));
         }
     };
     
@@ -161,7 +215,7 @@ pub fn vexfs_kill_sb(sb: &mut SuperBlock) {
             // _vex_sb_box goes out of scope here and memory is freed.
             pr_info!("VexFS: VexfsSuperblock (s_fs_info) freed.\n");
         }
-        sb.s_fs_info = core::ptr::null_mut();
+        sb.s_fs_info = std::ptr::null_mut();
     } else {
         pr_warn!("VexFS: vexfs_kill_sb: s_fs_info was null, nothing to free.\n");
     }

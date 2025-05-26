@@ -13,8 +13,7 @@ categories = ["filesystem", "science", "data-structures"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# Kernel development requires no_std (commented out for testing)
-# kernel = { git = "https://github.com/Rust-for-Linux/linux.git", branch = "rust-next" }
+# Note: VexFS uses C FFI approach for kernel integration, not Rust-for-Linux
 
 # Dependencies for no_std compatibility
 hashbrown = { version = "0.14", default-features = false }
@@ -23,10 +22,10 @@ hashbrown = { version = "0.14", default-features = false }
 crate-type = ["staticlib"]
 path = "src/lib.rs"
 
-# Add test binary target
-[[bin]]
-name = "vector_test_runner"
-path = "src/bin/vector_test_runner.rs"
+# Test binaries will be added as development progresses
+# [[bin]]
+# name = "vector_test_runner"
+# path = "src/bin/vector_test_runner.rs"
 
 [profile.release]
 panic = "abort"
