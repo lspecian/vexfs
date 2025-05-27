@@ -590,7 +590,7 @@ impl DirectoryOperations {
         let _target_lock = acquire_write_lock_guard(context.lock_manager,entry.inode_number)?;
         
         // Check if directory is empty
-        let mut target_dir = Directory::from_inode((**target_dir_inode).clone());
+        let mut target_dir = Directory::from_inode((*target_dir_inode).clone());
         if !target_dir.is_empty() {
             return Err(VexfsError::DirectoryNotEmpty);
         }
@@ -660,7 +660,7 @@ impl DirectoryOperations {
         let _target_lock = acquire_write_lock_guard(context.lock_manager,target_inode)?;
         
         // Load directory and check if name exists
-        let mut directory = Directory::from_inode((**dir).clone());
+        let mut directory = Directory::from_inode(dir.as_ref().clone());
         if directory.find_entry(name)?.is_some() {
             return Err(VexfsError::FileExists);
         }
@@ -719,7 +719,7 @@ impl DirectoryOperations {
         let _dir_lock = acquire_write_lock_guard(context.lock_manager,dir_inode)?;
         
         // Load directory and check if name exists
-        let mut directory = Directory::from_inode((**dir).clone());
+        let mut directory = Directory::from_inode(dir.as_ref().clone());
         if directory.find_entry(name)?.is_some() {
             return Err(VexfsError::FileExists);
         }
@@ -760,12 +760,16 @@ pub fn create_directory(
     mode: u32,
     user: &UserContext
 ) -> Result<Directory> {
-    DirectoryOperations::create_directory(parent_inode, name, mode, user)
+    // TODO: Create OperationContext from UserContext - needs managers
+    // This is a placeholder implementation
+    Err(VexfsError::NotImplemented("create_directory wrapper needs OperationContext".to_string()))
 }
 
 /// Read directory entries
 pub fn read_directory(inode_number: InodeNumber, user: &UserContext) -> Result<Vec<DirectoryEntry>> {
-    DirectoryOperations::read_directory(inode_number, user)
+    // TODO: Create OperationContext from UserContext - needs managers
+    // This is a placeholder implementation
+    Err(VexfsError::NotImplemented("read_directory wrapper needs OperationContext".to_string()))
 }
 
 /// Look up an entry in a directory
@@ -774,7 +778,9 @@ pub fn lookup_entry(
     name: &str,
     user: &UserContext
 ) -> Result<DirectoryEntry> {
-    DirectoryOperations::lookup_entry(dir_inode, name, user)
+    // TODO: Create OperationContext from UserContext - needs managers
+    // This is a placeholder implementation
+    Err(VexfsError::NotImplemented("lookup_entry wrapper needs OperationContext".to_string()))
 }
 
 /// Rename/move an entry
@@ -785,12 +791,16 @@ pub fn rename_entry(
     new_name: &str,
     user: &UserContext
 ) -> Result<()> {
-    DirectoryOperations::rename_entry(old_dir_inode, old_name, new_dir_inode, new_name, user)
+    // TODO: Create OperationContext from UserContext - needs managers
+    // This is a placeholder implementation
+    Err(VexfsError::NotImplemented("rename_entry wrapper needs OperationContext".to_string()))
 }
 
 /// Delete a directory
 pub fn delete_directory(parent_inode: InodeNumber, name: &str, user: &UserContext) -> Result<()> {
-    DirectoryOperations::delete_directory(parent_inode, name, user)
+    // TODO: Create OperationContext from UserContext - needs managers
+    // This is a placeholder implementation
+    Err(VexfsError::NotImplemented("delete_directory wrapper needs OperationContext".to_string()))
 }
 
 /// Create a hard link
@@ -800,7 +810,9 @@ pub fn create_hard_link(
     name: &str,
     user: &UserContext
 ) -> Result<()> {
-    DirectoryOperations::create_hard_link(target_inode, dir_inode, name, user)
+    // TODO: Create OperationContext from UserContext - needs managers
+    // This is a placeholder implementation
+    Err(VexfsError::NotImplemented("create_hard_link wrapper needs OperationContext".to_string()))
 }
 
 /// Create a symbolic link
@@ -810,7 +822,9 @@ pub fn create_symbolic_link(
     name: &str,
     user: &UserContext
 ) -> Result<()> {
-    DirectoryOperations::create_symbolic_link(target_path, dir_inode, name, user)
+    // TODO: Create OperationContext from UserContext - needs managers
+    // This is a placeholder implementation
+    Err(VexfsError::NotImplemented("create_symbolic_link wrapper needs OperationContext".to_string()))
 }
 
 // Wrapper functions to match the interface expected by operations.rs
