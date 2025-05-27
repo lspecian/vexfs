@@ -364,12 +364,12 @@ impl DirectoryOperations {
         }
         
         // Check read permission
-        if !can_list_directory(&dir_inode, user)? {
-            return Err(VexfsError::PermissionDenied);
+        if !can_list_directory(&dir_inode, &context.user) {
+            return Err(VexfsError::PermissionDenied("Permission denied".to_string()));
         }
         
         // Acquire read lock
-        let _lock = acquire_read_lock_guard(inode_number)?;
+        let _lock = acquire_read_lock_guard(context.lock_manager, inode_number)?;
         
         // Load and return entries
         let mut directory = Directory::from_inode(dir_inode);
