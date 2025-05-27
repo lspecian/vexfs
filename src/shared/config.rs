@@ -192,7 +192,7 @@ impl Default for VectorConfig {
             max_dimensions: VEXFS_MAX_VECTOR_DIMS as u16,
             default_metric: SimilarityMetric::Euclidean,
             hnsw: HnswConfig::default(),
-            max_vectors_per_file: VEXFS_MAX_VECTORS_PER_FILE,
+            max_vectors_per_file: VEXFS_MAX_VECTORS_PER_FILE as u32,
             compression_enabled: false,
             cache_size: VEXFS_DEFAULT_VECTOR_CACHE_SIZE,
             async_indexing: true,
@@ -629,77 +629,16 @@ pub fn init_config(config: VexfsConfig) -> VexfsResult<()> {
     Ok(())
 }
 
-/// Default configuration instance
-static DEFAULT_CONFIG: VexfsConfig = VexfsConfig {
-    filesystem: FilesystemConfig {
-        block_size: VEXFS_DEFAULT_BLOCK_SIZE as u32,
-        max_file_size: VEXFS_MAX_FILE_SIZE,
-        max_inodes: VEXFS_MAX_INODES,
-        compression_enabled: false,
-        encryption_enabled: false,
-        default_file_mode: VEXFS_DEFAULT_FILE_MODE,
-        default_dir_mode: VEXFS_DEFAULT_DIR_MODE,
-        atime_threshold: VEXFS_ATIME_UPDATE_THRESHOLD,
-        strict_validation: true,
-    },
-    vector: VectorConfig {
-        indexing_enabled: true,
-        max_dimensions: VEXFS_MAX_VECTOR_DIMENSIONS,
-        default_metric: crate::shared::types::DistanceMetric::Euclidean,
-        hnsw_params: HnswConfig {
-            max_connections: VEXFS_DEFAULT_HNSW_M,
-            max_connections_layer0: VEXFS_DEFAULT_HNSW_M_L,
-            ef_search: VEXFS_DEFAULT_EF_SEARCH,
-            ef_construction: VEXFS_DEFAULT_EF_CONSTRUCTION,
-            random_seed: VEXFS_DEFAULT_RANDOM_SEED,
-        },
-        quantization: QuantizationConfig {
-            enabled: false,
-            bits_per_component: 8,
-            training_threshold: 10000,
-        },
-        memory: MemoryConfig {
-            cache_size: VEXFS_DEFAULT_INDEX_CACHE_SIZE,
-            page_size: VEXFS_DEFAULT_PAGE_SIZE,
-            cache_line_size: VEXFS_DEFAULT_CACHE_LINE_SIZE,
-            prealloc_size: 64 * 1024 * 1024,
-        },
-        io: IoConfig {
-            queue_depth: VEXFS_DEFAULT_IO_QUEUE_DEPTH,
-            readahead_size: VEXFS_DEFAULT_READAHEAD_SIZE,
-            batch_enabled: true,
-            max_batch_size: VEXFS_DEFAULT_MAX_BATCH_SIZE,
-            timeout_ms: VEXFS_DEFAULT_IO_TIMEOUT_MS,
-            io_threads: VEXFS_DEFAULT_IO_THREADS as u32,
-        },
-        search: SearchConfig {
-            parallel_enabled: true,
-            max_threads: 4,
-            result_cache_size: 1000,
-            timeout_ms: (VEXFS_DEFAULT_TIMEOUT_SECS as u64 * 1000) as u32,
-        },
-    },
-    debug: DebugConfig {
-        enable_logging: false,
-        log_level: crate::shared::types::LogLevel::Info,
-        enable_metrics: false,
-        enable_tracing: false,
-        memory_tracking: false,
-    },
-    kernel: KernelConfig {
-        module_name: "vexfs".to_string(),
-        max_open_files: 65536,
-        sync_interval: 30,
-        readahead_enabled: true,
-        writeback_enabled: true,
-    },
-};
+/// Get default configuration instance
+fn get_default_config() -> VexfsConfig {
+    VexfsConfig::default()
+}
 
 /// Get global configuration
 #[cfg(not(feature = "kernel"))]
-pub fn get_config() -> &'static VexfsConfig {
+pub fn get_config() -> VexfsConfig {
     unsafe {
-        GLOBAL_CONFIG.as_ref().unwrap_or(&DEFAULT_CONFIG)
+        GLOBAL_CONFIG.clone().unwrap_or_else(|| get_default_config())
     }
 }
 

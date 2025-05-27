@@ -45,17 +45,23 @@ impl Dentry {
 }
 
 // Helper function to create a root inode for legacy kernel interface
-fn create_root_inode() -> Result<std::sync::Arc<crate::fs_core::Inode>, crate::shared::errors::VexfsError> {
-    use crate::fs_core::InodeManager;
-    use crate::shared::types::InodeNumber;
+fn create_root_inode() -> Result<std::sync::Arc<crate::fs_core::Inode>> {
+    use crate::fs_core::Inode;
+    use crate::shared::types::{InodeNumber, FileType, FileMode};
+    use std::sync::Arc;
     
-    // Create a simple root inode using our new fs_core architecture
-    let inode_manager = InodeManager::new();
-    let root_inode_number = InodeNumber(1); // Root inode is typically inode 1
+    // For now, create a simple root inode directly without storage manager
+    // TODO: Integrate with proper storage manager when available
+    let root_inode_number: InodeNumber = 1; // Root inode is typically inode 1
+    let root_inode = Inode::new(
+        root_inode_number,
+        FileType::Directory,
+        FileMode::new(0o755), // Standard directory permissions
+        0, // root uid
+        0, // root gid
+    );
     
-    // Create a root directory inode
-    inode_manager.create_inode(root_inode_number, crate::shared::types::FileType::Directory)
-        .map_err(|_| crate::shared::errors::VexfsError::InodeNotFound(1))
+    Ok(Arc::new(root_inode))
 }
 
 // Temporary constants for compilation
@@ -141,7 +147,7 @@ pub fn vexfs_fill_super(
     sb: &mut SuperBlock,
     _data: *mut c_void, // Mount options, unused for now
     _silent: c_int,
-) -> VexfsResult<()> { // Returning Result for error handling
+) -> Result<()> { // Returning Result for error handling
     pr_info!("VexFS: vexfs_fill_super called\n");
 
     // 1. Initialize VexfsSuperblock
@@ -181,7 +187,7 @@ pub fn vexfs_fill_super(
         }
     };
 
-    pr_info!("VexFS: Root inode obtained successfully. Ino: {}\n", root_inode_arc.i_ino);
+    pr_info!("VexFS: Root inode obtained successfully. Ino: {}\n", root_inode_arc.ino);
 
     // Create the root dentry
     // Dentry::d_make_root takes Arc<Inode>
@@ -194,7 +200,7 @@ pub fn vexfs_fill_super(
                 let _ = Box::from_raw(sb.s_fs_info as *mut VexfsSuperblock);
             }
             sb.s_fs_info = std::ptr::null_mut();
-            return Err(VexfsError::IoError("Failed to create root dentry".to_string()));
+            return Err(VexfsError::InternalError("Failed to create root dentry".to_string()));
         }
     };
     

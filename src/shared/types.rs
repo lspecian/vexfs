@@ -230,7 +230,7 @@ pub struct Vector {
 }
 
 impl Vector {
-    pub fn new(dimensions: VectorDimension, data: Vec<VectorComponent>) -> Result<Self, &'static str> {
+    pub fn new(dimensions: VectorDimension, data: Vec<VectorComponent>) -> core::result::Result<Self, &'static str> {
         if data.len() != dimensions as usize {
             return Err("Vector data length does not match dimensions");
         }
@@ -485,7 +485,7 @@ pub struct IoRequest {
     pub offset: u64,
     pub size: u32,
     pub buffer: *mut u8, // Raw pointer for kernel compatibility
-    pub callback: Option<fn(result: Result<u32, i32>)>,
+    pub callback: Option<fn(result: core::result::Result<u32, i32>)>,
 }
 
 impl IoRequest {
@@ -511,7 +511,7 @@ impl IoRequest {
         }
     }
 
-    pub fn with_callback(mut self, callback: fn(result: Result<u32, i32>)) -> Self {
+    pub fn with_callback(mut self, callback: fn(result: core::result::Result<u32, i32>)) -> Self {
         self.callback = Some(callback);
         self
     }
