@@ -394,7 +394,7 @@ impl DirectoryOperations {
     pub fn lookup_entry(
         dir_inode: InodeNumber,
         name: &str,
-        user: &UserContext
+        context: &mut OperationContext
     ) -> Result<DirectoryEntry> {
         // Get the directory inode
         let inode = get_inode(context.inode_manager,dir_inode)?;
@@ -405,12 +405,12 @@ impl DirectoryOperations {
         }
         
         // Check access permission (need execute to search directory)
-        if !can_access_directory(&inode, user)? {
-            return Err(VexfsError::PermissionDenied);
+        if !can_access_directory(&inode, &context.user) {
+            return Err(VexfsError::PermissionDenied("Permission denied".to_string()));
         }
         
         // Acquire read lock
-        let _lock = acquire_read_lock_guard(dir_inode)?;
+        let _lock = acquire_read_lock_guard(context.lock_manager, dir_inode)?;
         
         // Load directory and search for entry
         let mut directory = Directory::from_inode(inode);
@@ -441,7 +441,7 @@ impl DirectoryOperations {
         old_name: &str,
         new_dir_inode: InodeNumber,
         new_name: &str,
-        user: &UserContext
+        context: &mut OperationContext
     ) -> Result<()> {
         // Validate names
         if old_name == "." || old_name == ".." || new_name == "." || new_name == ".." {
@@ -460,17 +460,17 @@ impl DirectoryOperations {
         // Acquire locks (always lock in order of inode number to prevent deadlock)
         let (_lock1, _lock2) = if old_dir_inode <= new_dir_inode {
             (
-                acquire_write_lock_guard(old_dir_inode)?,
+                acquire_write_lock_guard(context.lock_manager, old_dir_inode)?,
                 if old_dir_inode != new_dir_inode {
-                    Some(acquire_write_lock_guard(new_dir_inode)?)
+                    Some(acquire_write_lock_guard(context.lock_manager,new_dir_inode)?)
                 } else {
                     None
                 }
             )
         } else {
             (
-                acquire_write_lock_guard(new_dir_inode)?,
-                Some(acquire_write_lock_guard(old_dir_inode)?)
+                acquire_write_lock_guard(context.lock_manager,new_dir_inode)?,
+                Some(acquire_write_lock_guard(context.lock_manager,old_dir_inode)?)
             )
         };
         
@@ -549,7 +549,7 @@ impl DirectoryOperations {
     pub fn delete_directory(
         parent_inode: InodeNumber,
         name: &str,
-        user: &UserContext
+        context: &mut OperationContext
     ) -> Result<()> {
         // Validate name
         if name == "." || name == ".." {
@@ -565,7 +565,7 @@ impl DirectoryOperations {
         }
         
         // Acquire write lock on parent
-        let _parent_lock = acquire_write_lock_guard(parent_inode)?;
+        let _parent_lock = acquire_write_lock_guard(context.lock_manager,parent_inode)?;
         
         // Load parent directory and find the target
         let mut parent_dir = Directory::from_inode(parent_dir_inode);
@@ -587,7 +587,7 @@ impl DirectoryOperations {
         }
         
         // Acquire write lock on target directory
-        let _target_lock = acquire_write_lock_guard(entry.inode_number)?;
+        let _target_lock = acquire_write_lock_guard(context.lock_manager,entry.inode_number)?;
         
         // Check if directory is empty
         let mut target_dir = Directory::from_inode(target_dir_inode);
@@ -632,7 +632,7 @@ impl DirectoryOperations {
         target_inode: InodeNumber,
         dir_inode: InodeNumber,
         name: &str,
-        user: &UserContext
+        context: &mut OperationContext
     ) -> Result<()> {
         // Get target inode
         let mut target = get_inode(context.inode_manager,target_inode)?;
@@ -656,8 +656,8 @@ impl DirectoryOperations {
         }
         
         // Acquire locks
-        let _dir_lock = acquire_write_lock_guard(dir_inode)?;
-        let _target_lock = acquire_write_lock_guard(target_inode)?;
+        let _dir_lock = acquire_write_lock_guard(context.lock_manager,dir_inode)?;
+        let _target_lock = acquire_write_lock_guard(context.lock_manager,target_inode)?;
         
         // Load directory and check if name exists
         let mut directory = Directory::from_inode(dir);
@@ -699,7 +699,7 @@ impl DirectoryOperations {
         target_path: &str,
         dir_inode: InodeNumber,
         name: &str,
-        user: &UserContext
+        context: &mut OperationContext
     ) -> Result<()> {
         // Get directory inode
         let dir = get_inode(context.inode_manager,dir_inode)?;
@@ -715,7 +715,7 @@ impl DirectoryOperations {
         }
         
         // Acquire directory lock
-        let _dir_lock = acquire_write_lock_guard(dir_inode)?;
+        let _dir_lock = acquire_write_lock_guard(context.lock_manager,dir_inode)?;
         
         // Load directory and check if name exists
         let mut directory = Directory::from_inode(dir);
