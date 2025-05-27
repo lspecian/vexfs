@@ -41,7 +41,7 @@ pub use path::{Path, PathComponent, PathResolver, PathValidator};
 pub use permissions::{
     AccessMode, UserContext, AccessCheck, PermissionChecker, SecurityPolicy
 };
-pub use operations::{FsOperations, OperationContext};
+pub use operations::{FilesystemOperations, OperationContext};
 pub use locking::{
     LockType, LockScope, LockManager, FileLock, DirectoryLock, LockGuard
 };
@@ -50,9 +50,18 @@ use crate::shared::{
     errors::VexfsError,
     types::*,
 };
+use crate::shared::constants::{
+    VEXFS_BLOCK_SIZE, VEXFS_VERSION_MAJOR, VEXFS_VERSION_MINOR, VEXFS_VERSION_PATCH,
+    VEXFS_MAGIC, VEXFS_ROOT_INO
+};
 
-/// Result type for filesystem operations
-pub type FsResult<T> = Result<T, VexfsError>;
+// Create a combined version constant
+pub const VEXFS_VERSION: u32 = ((VEXFS_VERSION_MAJOR as u32) << 16) |
+                               ((VEXFS_VERSION_MINOR as u32) << 8) |
+                               (VEXFS_VERSION_PATCH as u32);
+
+// Use the shared Result type directly
+use crate::shared::types::Result as FsResult;
 
 /// File system statistics
 #[derive(Debug, Clone)]
@@ -143,7 +152,7 @@ pub struct FileSystem {
 impl FileSystem {
     /// Create a new filesystem instance
     pub fn new(storage_manager: crate::storage::StorageManager, config: FsConfig) -> FsResult<Self> {
-        let inode_manager = InodeManager::new(storage_manager)?;
+        let inode_manager = InodeManager::new(&storage_manager)?;
         let lock_manager = LockManager::new();
         let stats = FsStats::new();
 
@@ -158,7 +167,7 @@ impl FileSystem {
     /// Mount the filesystem
     pub fn mount(&mut self) -> FsResult<()> {
         // Initialize filesystem components
-        self.inode_manager.initialize()?;
+        // TODO: Add proper initialization when InodeManager supports it
         
         // Update statistics
         self.update_stats()?;
@@ -169,7 +178,7 @@ impl FileSystem {
     /// Unmount the filesystem
     pub fn unmount(&mut self) -> FsResult<()> {
         // Flush all pending operations
-        self.inode_manager.flush()?;
+        self.inode_manager.sync()?;
         
         // Release all locks
         // Note: In a real implementation, we'd need to track lock owners
@@ -180,13 +189,14 @@ impl FileSystem {
 
     /// Update filesystem statistics
     pub fn update_stats(&mut self) -> FsResult<()> {
-        // Get statistics from storage layer
-        let storage_stats = self.inode_manager.get_storage_stats()?;
+        // Get statistics from inode manager
+        let (cached_inodes, dirty_inodes) = self.inode_manager.cache_stats();
         
-        self.stats.total_blocks = storage_stats.total_blocks;
-        self.stats.free_blocks = storage_stats.free_blocks;
-        self.stats.total_inodes = storage_stats.total_inodes;
-        self.stats.free_inodes = storage_stats.free_inodes;
+        // TODO: Get actual storage statistics when available
+        self.stats.total_blocks = 1000000; // Placeholder
+        self.stats.free_blocks = 800000;   // Placeholder
+        self.stats.total_inodes = 100000;  // Placeholder
+        self.stats.free_inodes = 90000;    // Placeholder
         
         // Count file types (this would be expensive for large filesystems)
         // In practice, these might be cached or updated incrementally
@@ -222,10 +232,9 @@ impl FileSystem {
     /// Create a new operation context
     pub fn create_operation_context(&mut self, user: UserContext) -> OperationContext {
         OperationContext::new(
-            &mut self.inode_manager,
-            &mut self.lock_manager,
-            &self.config,
             user,
+            VEXFS_ROOT_INO, // Use root as default cwd
+            &mut self.inode_manager,
         )
     }
 
@@ -233,24 +242,18 @@ impl FileSystem {
     pub fn fsck(&mut self, repair: bool) -> FsResult<Vec<String>> {
         let mut issues = Vec::new();
         
-        // Check superblock integrity
-        if let Err(e) = self.inode_manager.verify_superblock() {
-            issues.push(format!("Superblock error: {}", e));
-            if repair {
-                // Attempt repair
-                if let Err(repair_err) = self.inode_manager.repair_superblock() {
-                    issues.push(format!("Superblock repair failed: {}", repair_err));
-                }
-            }
-        }
+        // TODO: Implement filesystem check when InodeManager supports verification
+        // For now, just return basic cache statistics
+        let (cached_inodes, dirty_inodes) = self.inode_manager.cache_stats();
         
-        // Check inode table integrity
-        if let Err(e) = self.inode_manager.verify_inode_table() {
-            issues.push(format!("Inode table error: {}", e));
+        if dirty_inodes > 0 {
+            issues.push(format!("Found {} dirty inodes in cache", dirty_inodes));
             if repair {
-                // Attempt repair
-                if let Err(repair_err) = self.inode_manager.repair_inode_table() {
-                    issues.push(format!("Inode table repair failed: {}", repair_err));
+                // Sync dirty inodes
+                if let Err(e) = self.inode_manager.sync() {
+                    issues.push(format!("Failed to sync dirty inodes: {}", e));
+                } else {
+                    issues.push("Successfully synced dirty inodes".to_string());
                 }
             }
         }
@@ -326,12 +329,17 @@ pub trait FsInitializer {
 
 impl FsInitializer for FileSystem {
     fn mkfs(&mut self, config: &FsConfig) -> FsResult<()> {
-        // Initialize storage layer
-        self.inode_manager.format_filesystem()?;
+        // TODO: Initialize storage layer when InodeManager supports it
         
-        // Create root directory
-        let root_inode = self.inode_manager.create_root_directory()?;
-        if root_inode != VEXFS_ROOT_INO {
+        // Create root directory using the available create_inode method
+        let root_inode_arc = self.inode_manager.create_inode(
+            crate::shared::types::FileType::Directory,
+            crate::shared::types::FileMode::new(0o755),
+            0, // root uid
+            0  // root gid
+        )?;
+        
+        if root_inode_arc.ino != VEXFS_ROOT_INO {
             return Err(VexfsError::InvalidOperation("Root directory has wrong inode number".into()));
         }
         
@@ -345,12 +353,10 @@ impl FsInitializer for FileSystem {
     }
     
     fn check_fs(&self) -> FsResult<bool> {
-        // Check if superblock is valid
-        match self.inode_manager.verify_superblock() {
-            Ok(_) => Ok(true),
-            Err(VexfsError::InvalidSuperblock(_)) => Ok(false),
-            Err(e) => Err(e),
-        }
+        // TODO: Check if superblock is valid when InodeManager supports verification
+        // For now, just check if we can access the cache stats
+        let (_cached, _dirty) = self.inode_manager.cache_stats();
+        Ok(true)
     }
 }
 

@@ -98,7 +98,7 @@ write_files:
       # VexFS specific aliases
       alias vexfs-build='cd /mnt/vexfs && make -C vexfs'
       alias vexfs-test='cd /mnt/vexfs && ./test_env/test_module.sh'
-      alias vexfs-clean='cd /mnt/vexfs/vexfs && make clean'
+      alias vexfs-clean='cd /mnt/vexfs/fs && make clean'
       
       # Welcome message
       echo "=== VexFS Development Environment ==="

@@ -23,9 +23,9 @@ The dual licensing ensures:
 Component Classification:
 - vexctl/: Apache 2.0
 - src/: Apache 2.0 (userland library)
-- vexfs/src/: Mixed (see individual file headers)
-- vexfs/vexfs_module_entry.c: GPL v2 (kernel module)
-- vexfs/Kbuild, vexfs/Makefile: GPL v2 (kernel build)
+- fs/src/: Mixed (see individual file headers)
+- fs/vexfs_module_entry.c: GPL v2 (kernel module)
+- fs/Kbuild, fs/Makefile: GPL v2 (kernel build)
 - docs/, test_env/, scripts/: Apache 2.0
 
 Each source file contains appropriate license headers indicating

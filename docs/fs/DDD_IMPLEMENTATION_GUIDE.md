@@ -8,7 +8,7 @@ This document provides the step-by-step implementation guide for executing the D
 
 ### Complete File Structure
 ```
-vexfs/src/
+fs/src/
 ├── lib.rs                          # Updated main library file
 ├── shared/
 │   ├── mod.rs                      # Shared domain module
@@ -110,20 +110,20 @@ vexfs/src/
 #### Step 1.1: Create Domain Module Structure
 ```bash
 # Create domain directories (already done)
-mkdir -p vexfs/src/{shared,storage,fs_core,vector_domain,interfaces,legacy}
+mkdir -p fs/src/{shared,storage,fs_core,vector_domain,interfaces,legacy}
 
 # Create subdirectories
-mkdir -p vexfs/src/shared/{types,utils,traits}
-mkdir -p vexfs/src/storage/{entities,services,repositories}
-mkdir -p vexfs/src/fs_core/{entities,services,repositories}
-mkdir -p vexfs/src/vector_domain/{entities,services,repositories}
-mkdir -p vexfs/src/interfaces/{entities,services,adapters}
+mkdir -p fs/src/shared/{types,utils,traits}
+mkdir -p fs/src/storage/{entities,services,repositories}
+mkdir -p fs/src/fs_core/{entities,services,repositories}
+mkdir -p fs/src/vector_domain/{entities,services,repositories}
+mkdir -p fs/src/interfaces/{entities,services,adapters}
 ```
 
 #### Step 1.2: Create Module Declaration Files
 Each `mod.rs` file needs to be created with proper module declarations:
 
-**vexfs/src/shared/mod.rs**
+**fs/src/shared/mod.rs**
 ```rust
 //! Shared utilities and types across all VexFS domains
 
@@ -136,7 +136,7 @@ pub use types::{constants::*, errors::*, results::*};
 pub use traits::common::*;
 ```
 
-**vexfs/src/storage/mod.rs**
+**fs/src/storage/mod.rs**
 ```rust
 //! Storage domain for block management, journaling, and persistence
 
@@ -152,34 +152,34 @@ pub use services::{block_service::*, journal_service::*, alloc_service::*};
 #### Step 1.3: Move Legacy Files
 ```bash
 # Move existing monolithic files to legacy directory
-mv vexfs/src/file_ops.rs vexfs/src/legacy/
-mv vexfs/src/dir_ops.rs vexfs/src/legacy/
-mv vexfs/src/ondisk.rs vexfs/src/legacy/
+mv fs/src/file_ops.rs fs/src/legacy/
+mv fs/src/dir_ops.rs fs/src/legacy/
+mv fs/src/ondisk.rs fs/src/legacy/
 ```
 
 ### Phase 2: Shared Domain Implementation (Day 2-3)
 
 #### Step 2.1: Extract Constants
-Create `vexfs/src/shared/types/constants.rs` with all constants from:
+Create `fs/src/shared/types/constants.rs` with all constants from:
 - `ondisk.rs` lines 24-100 (filesystem constants)
 - `file_ops.rs` lines 41-58, 250-295 (file type and operation constants)
 - `dir_ops.rs` lines 23-25 (directory constants)
 
 #### Step 2.2: Unify Error Types
-Create `vexfs/src/shared/types/errors.rs` consolidating error types from:
+Create `fs/src/shared/types/errors.rs` consolidating error types from:
 - `ffi.rs` VexfsError enum
 - `dir_ops.rs` DirOpError enum
 - Add vector domain error types
 - Add storage domain error types
 
 #### Step 2.3: Extract Locking Primitives
-Create `vexfs/src/shared/utils/locking.rs` with:
+Create `fs/src/shared/utils/locking.rs` with:
 - VexfsSpinLock from `file_ops.rs` lines 62-87
 - VexfsInodeLock from `file_ops.rs` lines 89-141
 - Additional domain coordination locks
 
 #### Step 2.4: Define Common Traits
-Create `vexfs/src/shared/traits/common.rs` with:
+Create `fs/src/shared/traits/common.rs` with:
 - OnDiskSerialize trait from `ondisk.rs`
 - Entity trait for domain entities
 - Repository trait for data access
@@ -188,13 +188,13 @@ Create `vexfs/src/shared/traits/common.rs` with:
 ### Phase 3: Storage Domain Implementation (Day 3-5)
 
 #### Step 3.1: Extract Superblock Entity
-Create `vexfs/src/storage/entities/superblock.rs`:
+Create `fs/src/storage/entities/superblock.rs`:
 - VexfsSuperblock from `ondisk.rs`
 - Superblock operations and validation
 - On-disk serialization implementation
 
 #### Step 3.2: Extract Allocation Entities
-Create `vexfs/src/storage/entities/allocation.rs`:
+Create `fs/src/storage/entities/allocation.rs`:
 - VexfsGroupDesc from `ondisk.rs`
 - Block and inode allocation tracking
 - Space management utilities
@@ -208,25 +208,25 @@ Create storage services that coordinate entity operations:
 ### Phase 4: Filesystem Core Implementation (Day 5-7)
 
 #### Step 4.1: Extract Inode Entity
-Create `vexfs/src/fs_core/entities/inode.rs`:
+Create `fs/src/fs_core/entities/inode.rs`:
 - VexfsInode from `ondisk.rs`
 - Inode operations and metadata management
 - Block pointer handling
 
 #### Step 4.2: Extract File Entity
-Create `vexfs/src/fs_core/entities/file.rs`:
+Create `fs/src/fs_core/entities/file.rs`:
 - VexfsFileHandle from `file_ops.rs` lines 237-247
 - File operations (read, write, truncate)
 - File metadata management
 
 #### Step 4.3: Extract Directory Entity
-Create `vexfs/src/fs_core/entities/directory.rs`:
+Create `fs/src/fs_core/entities/directory.rs`:
 - VexfsDirHandle from `dir_ops.rs` lines 44-73
 - VexfsDirEntry from `ondisk.rs`
 - Directory operations and entry management
 
 #### Step 4.4: Extract Permission Entity
-Create `vexfs/src/fs_core/entities/permission.rs`:
+Create `fs/src/fs_core/entities/permission.rs`:
 - Permission checking logic from `file_ops.rs` lines 260-285
 - Access control implementation
 - Security validation
@@ -248,19 +248,19 @@ Move existing vector-related modules to vector_domain:
 ### Phase 6: Interface Domain Implementation (Day 9-10)
 
 #### Step 6.1: Extract VFS Interface
-Create `vexfs/src/interfaces/entities/vfs_operation.rs`:
+Create `fs/src/interfaces/entities/vfs_operation.rs`:
 - VFS operation abstractions
 - POSIX compatibility layer
 - Kernel interface definitions
 
 #### Step 6.2: Extract FFI Bindings
-Create `vexfs/src/interfaces/entities/ffi_binding.rs`:
+Create `fs/src/interfaces/entities/ffi_binding.rs`:
 - C FFI interface definitions from `ffi.rs`
 - Type marshalling and conversion
 - Error code translation
 
 #### Step 6.3: Extract IOCTL Interface
-Create `vexfs/src/interfaces/entities/ioctl_command.rs`:
+Create `fs/src/interfaces/entities/ioctl_command.rs`:
 - IOCTL command definitions from `ioctl.rs`
 - Command processing and validation
 - User-kernel communication
@@ -295,7 +295,7 @@ pub use vector_domain::entities::*;
 #### Step 7.2: Create Domain Facades
 Create high-level domain facades that coordinate cross-domain operations:
 
-**vexfs/src/fs_core/filesystem_facade.rs**
+**fs/src/fs_core/filesystem_facade.rs**
 ```rust
 use crate::storage::services::*;
 use crate::fs_core::entities::*;
@@ -321,7 +321,7 @@ impl FilesystemFacade {
 #### Step 7.3: Implement Domain Events
 Create event system for cross-domain communication:
 
-**vexfs/src/shared/events/mod.rs**
+**fs/src/shared/events/mod.rs**
 ```rust
 pub enum DomainEvent {
     FileCreated { inode: u64, path: String },
@@ -410,7 +410,7 @@ impl EventBus {
 
 #### 1. Legacy Compatibility Layer
 ```rust
-// vexfs/src/legacy/mod.rs
+// fs/src/legacy/mod.rs
 //! Legacy compatibility layer for gradual migration
 
 pub mod file_ops;
@@ -425,7 +425,7 @@ pub use ondisk::*;
 
 #### 2. Gradual Migration Pattern
 ```rust
-// vexfs/src/fs_core/entities/file.rs
+// fs/src/fs_core/entities/file.rs
 use crate::legacy::file_ops as legacy;
 
 impl VexfsFile {
@@ -455,7 +455,7 @@ full_ddd = ["new_domains"]
 
 #### 1. Domain Unit Tests
 ```rust
-// vexfs/src/fs_core/entities/tests/file_tests.rs
+// fs/src/fs_core/entities/tests/file_tests.rs
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -475,7 +475,7 @@ mod tests {
 
 #### 2. Integration Tests
 ```rust
-// vexfs/tests/integration/domain_integration.rs
+// fs/tests/integration/domain_integration.rs
 #[test]
 fn test_cross_domain_file_creation() {
     let mut facade = FilesystemFacade::new();
@@ -486,7 +486,7 @@ fn test_cross_domain_file_creation() {
 
 #### 3. Regression Tests
 ```rust
-// vexfs/tests/regression/legacy_compatibility.rs
+// fs/tests/regression/legacy_compatibility.rs
 #[test]
 fn test_legacy_file_ops_compatibility() {
     // Ensure new implementation produces same results as legacy

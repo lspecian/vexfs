@@ -29,6 +29,7 @@ use crate::shared::{
     constants::*,
 };
 use super::{FsResult, InodeManager};
+use super::inode::Inode;
 
 /// Access mode flags for permission checking
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

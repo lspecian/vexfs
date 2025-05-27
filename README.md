@@ -47,8 +47,8 @@ VexFS addresses the escalating demand for efficient, integrated storage solution
 ## 📁 **Project Structure**
 
 ```
-vexfs/
-├── vexfs/                    # Core kernel module implementation
+fs/
+├── fs/                    # Core kernel module implementation
 │   ├── src/                 # Rust source code
 │   │   ├── lib.rs          # Main library entry point
 │   │   ├── vector_*.rs     # Vector storage and search modules
@@ -199,7 +199,7 @@ cargo run --bin vector_test_runner
 - [Development Workflow](docs/DEVELOPMENT_WORKFLOW.md)
 - [VM Testing Strategy](test_env/VM_TESTING_STRATEGY.md)
 - [Implementation Plan](scripts/IMPLEMENTATION_PLAN.md)
-- [Vector Storage Implementation](vexfs/VECTOR_STORAGE.md)
+- [Vector Storage Implementation](fs/VECTOR_STORAGE.md)
 
 ## 📝 **License**
 

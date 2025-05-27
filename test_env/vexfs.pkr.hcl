@@ -114,7 +114,7 @@ build {
   }
 
   provisioner "file" {
-    source      = "../../vexfs/" # Path to the vexfs directory relative to test_env directory
+    source      = "../../fs/" # Path to the vexfs directory relative to test_env directory
     destination = "/usr/src/vexfs_temp" # Temporary location
     direction   = "upload"
   }
