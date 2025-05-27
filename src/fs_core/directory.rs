@@ -8,14 +8,17 @@ use crate::shared::errors::VexfsError;
 use crate::shared::types::{
     InodeNumber, FileType, Result, Timestamp
 };
-use crate::shared::constants::{VEXFS_ROOT_INODE, VEXFS_MAX_NAME_LENGTH};
+use crate::shared::constants::{VEXFS_ROOT_INO, VEXFS_MAX_NAME_LENGTH};
 use crate::fs_core::inode::{Inode, InodeManager, get_inode, put_inode, create_inode, delete_inode};
 use crate::fs_core::permissions::{
     UserContext, can_access_directory, can_list_directory,
     can_create_in_directory, can_delete_from_directory,
     permission_bits, check_read_permission, check_write_permission, check_create_permission, check_delete_permission
 };
-use crate::fs_core::locking::{acquire_inode_lock, LockType, LockManager};
+use crate::fs_core::locking::{
+    acquire_inode_lock, acquire_read_lock_guard, acquire_write_lock_guard,
+    LockType, LockManager
+};
 use crate::fs_core::operations::OperationContext;
 
 #[cfg(not(feature = "kernel"))]
@@ -169,11 +172,11 @@ impl Directory {
         if self.entries.is_empty() {
             self.entries.push(DirectoryEntry::current_dir(self.inode.ino));
             // For root directory, .. points to itself
-            let parent_inode = if self.inode.ino == VEXFS_ROOT_INODE {
-                VEXFS_ROOT_INODE
+            let parent_inode = if self.inode.ino == VEXFS_ROOT_INO {
+                VEXFS_ROOT_INO
             } else {
                 // TODO: Get actual parent inode from storage
-                VEXFS_ROOT_INODE // Placeholder
+                VEXFS_ROOT_INO // Placeholder
             };
             self.entries.push(DirectoryEntry::parent_dir(parent_inode));
         }
@@ -249,24 +252,24 @@ pub struct DirectoryOperations;
 
 impl DirectoryOperations {
     /// Create a new directory
-    /// 
+    ///
     /// Creates a new directory with the specified mode and ownership.
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `parent_inode` - Inode number of the parent directory
     /// * `name` - Name of the new directory
     /// * `mode` - Directory permission mode
-    /// * `user` - User context for permission checking
-    /// 
+    /// * `context` - Operation context containing managers and user info
+    ///
     /// # Returns
-    /// 
+    ///
     /// Returns the created Directory entity or an error.
     pub fn create_directory(
         parent_inode: InodeNumber,
         name: &str,
         mode: u32,
-        user: &UserContext
+        context: &mut OperationContext
     ) -> Result<Directory> {
         // Validate name
         if name.is_empty() || name.len() > VEXFS_MAX_NAME_LENGTH {
@@ -278,7 +281,7 @@ impl DirectoryOperations {
         }
         
         // Get parent directory
-        let parent_dir_inode = get_inode(parent_inode)?;
+        let parent_dir_inode = get_inode(context.inode_manager, parent_inode)?;
         
         // Check if parent is actually a directory
         if !parent_dir_inode.is_directory() {
@@ -286,15 +289,13 @@ impl DirectoryOperations {
         }
         
         // Check permission to create in parent directory
-        if !can_create_in_directory(&parent_dir_inode, user)? {
-            return Err(VexfsError::PermissionDenied);
-        }
+        check_create_permission(&parent_dir_inode, &context.user)?;
         
         // Acquire write lock on parent directory
-        let _parent_lock = acquire_write_lock_guard(parent_inode)?;
+        let _parent_lock = acquire_write_lock_guard(context.lock_manager, parent_inode)?;
         
         // Load parent directory and check if name already exists
-        let mut parent_dir = Directory::from_inode(parent_dir_inode);
+        let mut parent_dir = Directory::from_inode((*parent_dir_inode).clone());
         if parent_dir.find_entry(name)?.is_some() {
             return Err(VexfsError::FileExists);
         }
