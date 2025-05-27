@@ -190,7 +190,7 @@ impl FileSystem {
     /// Update filesystem statistics
     pub fn update_stats(&mut self) -> FsResult<()> {
         // Get statistics from inode manager
-        let (cached_inodes, dirty_inodes) = self.inode_manager.cache_stats();
+        let (_cached_inodes, _dirty_inodes) = self.inode_manager.cache_stats();
         
         // TODO: Get actual storage statistics when available
         self.stats.total_blocks = 1000000; // Placeholder
@@ -235,6 +235,7 @@ impl FileSystem {
             user,
             VEXFS_ROOT_INO, // Use root as default cwd
             &mut self.inode_manager,
+            &mut self.lock_manager,
         )
     }
 
@@ -244,7 +245,7 @@ impl FileSystem {
         
         // TODO: Implement filesystem check when InodeManager supports verification
         // For now, just return basic cache statistics
-        let (cached_inodes, dirty_inodes) = self.inode_manager.cache_stats();
+        let (_cached_inodes, dirty_inodes) = self.inode_manager.cache_stats();
         
         if dirty_inodes > 0 {
             issues.push(format!("Found {} dirty inodes in cache", dirty_inodes));

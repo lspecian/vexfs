@@ -196,13 +196,13 @@ impl PermissionChecker {
         // Determine which permission bits to check
         let effective_mode = if is_owner {
             // Owner permissions (bits 8-6)
-            AccessMode::from_octal((inode.mode.permissions() >> 6) & 7)
+            AccessMode::from_octal(((inode.mode.permissions() >> 6) & 7) as u16)
         } else if is_group_member {
             // Group permissions (bits 5-3)
-            AccessMode::from_octal((inode.mode.permissions() >> 3) & 7)
+            AccessMode::from_octal(((inode.mode.permissions() >> 3) & 7) as u16)
         } else {
             // Other permissions (bits 2-0)
-            AccessMode::from_octal(inode.mode.permissions() & 7)
+            AccessMode::from_octal((inode.mode.permissions() & 7) as u16)
         };
 
         // Check each requested permission
@@ -409,45 +409,72 @@ impl PermissionChecker {
 
 // Public helper functions that were being imported
 pub fn can_read(inode: &Inode, user: &UserContext) -> bool {
-    match PermissionChecker::check_access(&mut InodeManager::new(&crate::storage::StorageManager::default()).unwrap(), inode.ino, user, AccessMode::Read) {
-        Ok(check) => check.allowed,
-        Err(_) => false,
+    // Simplified permission check without InodeManager dependency
+    let is_owner = user.uid == inode.uid;
+    let is_group_member = user.is_in_group(inode.gid);
+    
+    if user.is_superuser {
+        return true;
+    }
+    
+    let mode = inode.mode.permissions();
+    if is_owner {
+        (mode >> 6) & 4 != 0
+    } else if is_group_member {
+        (mode >> 3) & 4 != 0
+    } else {
+        mode & 4 != 0
     }
 }
 
 pub fn can_write(inode: &Inode, user: &UserContext) -> bool {
-    match PermissionChecker::check_access(&mut InodeManager::new(&crate::storage::StorageManager::default()).unwrap(), inode.ino, user, AccessMode::Write) {
-        Ok(check) => check.allowed,
-        Err(_) => false,
+    // Simplified permission check without InodeManager dependency
+    let is_owner = user.uid == inode.uid;
+    let is_group_member = user.is_in_group(inode.gid);
+    
+    if user.is_superuser {
+        return true;
+    }
+    
+    let mode = inode.mode.permissions();
+    if is_owner {
+        (mode >> 6) & 2 != 0
+    } else if is_group_member {
+        (mode >> 3) & 2 != 0
+    } else {
+        mode & 2 != 0
     }
 }
 
 pub fn can_access_directory(inode: &Inode, user: &UserContext) -> bool {
-    match PermissionChecker::check_access(&mut InodeManager::new(&crate::storage::StorageManager::default()).unwrap(), inode.ino, user, AccessMode::Execute) {
-        Ok(check) => check.allowed,
-        Err(_) => false,
+    // Simplified permission check without InodeManager dependency
+    let is_owner = user.uid == inode.uid;
+    let is_group_member = user.is_in_group(inode.gid);
+    
+    if user.is_superuser {
+        return true;
+    }
+    
+    let mode = inode.mode.permissions();
+    if is_owner {
+        (mode >> 6) & 1 != 0
+    } else if is_group_member {
+        (mode >> 3) & 1 != 0
+    } else {
+        mode & 1 != 0
     }
 }
 
 pub fn can_list_directory(inode: &Inode, user: &UserContext) -> bool {
-    match PermissionChecker::check_access(&mut InodeManager::new(&crate::storage::StorageManager::default()).unwrap(), inode.ino, user, AccessMode::Read) {
-        Ok(check) => check.allowed,
-        Err(_) => false,
-    }
+    can_read(inode, user)
 }
 
 pub fn can_create_in_directory(inode: &Inode, user: &UserContext) -> bool {
-    match PermissionChecker::check_access(&mut InodeManager::new(&crate::storage::StorageManager::default()).unwrap(), inode.ino, user, AccessMode::Write) {
-        Ok(check) => check.allowed,
-        Err(_) => false,
-    }
+    can_write(inode, user) && can_access_directory(inode, user)
 }
 
 pub fn can_delete_from_directory(inode: &Inode, user: &UserContext) -> bool {
-    match PermissionChecker::check_access(&mut InodeManager::new(&crate::storage::StorageManager::default()).unwrap(), inode.ino, user, AccessMode::Write) {
-        Ok(check) => check.allowed,
-        Err(_) => false,
-    }
+    can_write(inode, user) && can_access_directory(inode, user)
 }
 
 pub fn permission_bits(mode: FileMode) -> u16 {
