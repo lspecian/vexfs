@@ -9,7 +9,7 @@ Task 5 "Develop Vector Indexing Module (ANNS)" has been successfully implemented
 The ANNS module is implemented as a modular system with 5 core components:
 
 ```
-vexfs/src/anns/
+fs/src/anns/
 ├── mod.rs          # Main module interface and AnnsIndex
 ├── hnsw.rs         # HNSW algorithm implementation
 ├── serialization.rs # Index persistence and serialization
@@ -263,7 +263,7 @@ index.recover_from_wal()?;
 ## File Structure Created
 
 ```
-vexfs/src/anns/
+fs/src/anns/
 ├── mod.rs          (1,400+ lines) - Main ANNS interface and AnnsIndex implementation
 ├── hnsw.rs         (450+ lines)   - HNSW algorithm with SIMD optimization
 ├── serialization.rs (580+ lines)  - Binary serialization and memory mapping

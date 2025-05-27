@@ -120,7 +120,7 @@ timezone: UTC
 final_message: |
   VexFS Development VM is ready!
   
-  Access via: ssh -p 2222 -i /home/luis/Development/oss/vexfs/test_env/vm/keys/vexfs_vm_key vexfs@localhost
+  Access via: ssh -p 2222 -i /home/luis/Development/oss/fs/test_env/vm/keys/vexfs_vm_key vexfs@localhost
   
   Quick commands:
   - mount-vexfs-source: Mount host source code
