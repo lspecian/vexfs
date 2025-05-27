@@ -139,6 +139,47 @@ impl FileMode {
     }
 }
 
+// Implement bitwise operations for FileMode
+impl std::ops::BitAnd<u32> for FileMode {
+    type Output = FileMode;
+    
+    fn bitand(self, rhs: u32) -> Self::Output {
+        FileMode(self.0 & rhs)
+    }
+}
+
+impl std::ops::BitOr<u32> for FileMode {
+    type Output = FileMode;
+    
+    fn bitor(self, rhs: u32) -> Self::Output {
+        FileMode(self.0 | rhs)
+    }
+}
+
+impl std::ops::BitAnd<FileMode> for FileMode {
+    type Output = FileMode;
+    
+    fn bitand(self, rhs: FileMode) -> Self::Output {
+        FileMode(self.0 & rhs.0)
+    }
+}
+
+impl std::ops::BitOr<FileMode> for FileMode {
+    type Output = FileMode;
+    
+    fn bitor(self, rhs: FileMode) -> Self::Output {
+        FileMode(self.0 | rhs.0)
+    }
+}
+
+impl std::ops::Not for FileMode {
+    type Output = u32;
+    
+    fn not(self) -> Self::Output {
+        !self.0
+    }
+}
+
 /// Block address structure for efficient block management
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockAddress {

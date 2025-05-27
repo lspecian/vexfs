@@ -340,7 +340,7 @@ impl FsInitializer for FileSystem {
         )?;
         
         if root_inode_arc.ino != VEXFS_ROOT_INO {
-            return Err(VexfsError::InvalidOperation("Root directory has wrong inode number".into()));
+            return Err(VexfsError::InvalidOperation("Root directory has wrong inode number".to_string()));
         }
         
         // Update configuration

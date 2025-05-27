@@ -103,9 +103,9 @@ impl StorageManager {
         cache_size: usize,
     ) -> VexfsResult<Self> {
         let block_manager = BlockManager::new(device)?;
-        let allocator = SpaceAllocator::new(&layout)?;
+        let allocator = SpaceAllocator::new(layout.total_blocks, layout.block_size, layout.blocks_per_group)?;
         let journal = VexfsJournal::new(layout.block_size, layout.journal_blocks);
-        let persistence = PersistenceManager::new(layout.block_size)?;
+        let persistence = PersistenceManager::new(layout.block_size, true);
         let superblock = SuperblockManager::new()?;
         let cache = BlockCacheManager::new(
             cache_size / layout.block_size as usize,
@@ -155,10 +155,10 @@ impl StorageManager {
         self.layout.validate()?;
         
         // Replay journal if needed
-        self.journal.borrow_mut().replay(&mut self.block_manager.borrow_mut())?;
+        self.journal.borrow_mut().replay()?;
         
         // Initialize allocator with current state
-        self.allocator.borrow_mut().load_state(&mut self.block_manager.borrow_mut())?;
+        self.allocator.borrow_mut().load_state()?;
         
         Ok(())
     }
@@ -168,8 +168,8 @@ impl StorageManager {
         // Sync all dirty data
         self.sync_all()?;
         
-        // Checkpoint journal
-        self.journal.borrow_mut().checkpoint(&mut self.block_manager.borrow_mut())?;
+        // Sync journal (checkpoint functionality)
+        self.journal.borrow_mut().sync()?;
         
         // Update superblock
         self.superblock.borrow_mut().update_and_sync(&mut self.block_manager.borrow_mut())?;
@@ -196,10 +196,10 @@ impl StorageManager {
     /// Write block through cache and journal
     pub fn write_block(&self, block: BlockNumber, data: Vec<u8>) -> VexfsResult<()> {
         // Start transaction
-        let txn = self.journal.borrow_mut().begin_transaction()?;
+        let txn = self.journal.borrow_mut().begin_transaction(0)?;
         
-        // Journal the write
-        self.journal.borrow_mut().log_block_write(&txn, block, &data)?;
+        // Journal the write (simplified - just log the transaction)
+        self.journal.borrow_mut().log_block_write(txn, block, 0, &[], &data)?;
         
         // Write to cache
         self.cache.borrow_mut().write_block(block, data)?;
@@ -212,30 +212,46 @@ impl StorageManager {
 
     /// Allocate blocks
     pub fn allocate_blocks(&self, count: u32, hint: Option<BlockNumber>) -> VexfsResult<Vec<BlockNumber>> {
-        let request = AllocationRequest::new(count, hint);
-        let result = self.allocator.borrow_mut().allocate_blocks(request)?;
+        use crate::storage::allocation::AllocationHint;
+        
+        let allocation_hint = hint.map(|h| AllocationHint {
+            preferred_start: h,
+            goal_block: h,
+            flags: 0,
+            min_contiguous: count,
+            max_search_distance: 1000,
+        });
+        
+        let result = self.allocator.borrow_mut().allocate_blocks(count, allocation_hint)?;
+        
+        // Convert AllocationResult to Vec<BlockNumber>
+        let blocks: Vec<BlockNumber> = (result.start_block..result.start_block + result.block_count as u64).collect();
         
         // Journal the allocation
-        let txn = self.journal.borrow_mut().begin_transaction()?;
-        for &block in &result.blocks {
-            self.journal.borrow_mut().log_block_allocation(&txn, block)?;
+        let txn = self.journal.borrow_mut().begin_transaction(0)?;
+        for &block in &blocks {
+            // Use log_block_write for allocation logging
+            self.journal.borrow_mut().log_block_write(txn, block, 0, &[], &[])?;
         }
         self.journal.borrow_mut().commit_transaction(txn)?;
         
-        Ok(result.blocks)
+        Ok(blocks)
     }
 
     /// Free blocks
     pub fn free_blocks(&self, blocks: &[BlockNumber]) -> VexfsResult<()> {
         // Journal the deallocation
-        let txn = self.journal.borrow_mut().begin_transaction()?;
+        let txn = self.journal.borrow_mut().begin_transaction(0)?;
         for &block in blocks {
-            self.journal.borrow_mut().log_block_deallocation(&txn, block)?;
+            // Use log_block_write for deallocation logging
+            self.journal.borrow_mut().log_block_write(txn, block, 0, &[], &[])?;
         }
         self.journal.borrow_mut().commit_transaction(txn)?;
         
         // Free the blocks
-        self.allocator.borrow_mut().free_blocks(blocks)?;
+        for &block in blocks {
+            self.allocator.borrow_mut().free(block, 1)?;
+        }
         
         // Invalidate cache entries
         for &block in blocks {
@@ -254,10 +270,10 @@ impl StorageManager {
         }
         
         // Sync journal
-        self.journal.borrow_mut().sync(&mut self.block_manager.borrow_mut())?;
+        self.journal.borrow_mut().sync()?;
         
         // Sync allocator state
-        self.allocator.borrow_mut().sync(&mut self.block_manager.borrow_mut())?;
+        self.allocator.borrow_mut().sync()?;
         
         Ok(())
     }
@@ -265,17 +281,17 @@ impl StorageManager {
     /// Get storage statistics
     pub fn get_stats(&self) -> StorageStats {
         let cache_stats = self.cache.borrow().get_stats();
-        let alloc_stats = self.allocator.borrow().get_stats();
         let journal_stats = self.journal.borrow().get_stats();
+        let alloc_info = self.allocator.borrow().free_space_info();
         
         StorageStats {
             total_blocks: self.layout.total_blocks,
-            free_blocks: alloc_stats.free_blocks,
-            used_blocks: alloc_stats.used_blocks,
+            free_blocks: alloc_info.free_blocks,
+            used_blocks: alloc_info.total_blocks - alloc_info.free_blocks,
             cache_hit_rate: cache_stats.hit_rate,
             cache_utilization: cache_stats.utilization,
-            journal_utilization: journal_stats.utilization,
-            fragmentation: alloc_stats.fragmentation,
+            journal_utilization: (journal_stats.total_space - journal_stats.free_space) as f32 / journal_stats.total_space as f32 * 100.0,
+            fragmentation: alloc_info.fragmentation as f32,
         }
     }
 

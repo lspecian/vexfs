@@ -100,6 +100,21 @@ impl Inode {
         self.file_type == FileType::Symlink
     }
 
+    /// Check if inode is a directory (alias for is_dir)
+    pub fn is_directory(&self) -> bool {
+        self.is_dir()
+    }
+
+    /// Check if inode is a regular file (alias for is_file)
+    pub fn is_regular_file(&self) -> bool {
+        self.is_file()
+    }
+
+    /// Check if inode is a vector file
+    pub fn is_vector_file(&self) -> bool {
+        self.file_type == FileType::VectorFile
+    }
+
     /// Mark inode as dirty (needs to be written to disk)
     pub fn mark_dirty(&mut self) {
         self.dirty = true;

@@ -228,7 +228,7 @@ impl LockManager {
     /// Release a lock
     pub fn unlock(&mut self, lock_id: LockId) -> FsResult<()> {
         let scope = self.active_locks.remove(&lock_id)
-            .ok_or_else(|| VexfsError::InvalidOperation)?;
+            .ok_or(VexfsError::InvalidOperation("operation failed".to_string()))?;
 
         self.lock_owners.remove(&lock_id);
 

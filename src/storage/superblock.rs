@@ -188,7 +188,7 @@ impl OnDiskSerializable for VexfsSuperblock {
 
     fn validate(&self) -> VexfsResult<()> {
         // Check magic number
-        if self.s_magic != VEXFS_MAGIC {
+        if self.s_magic != VEXFS_MAGIC as u64 {
             return Err(VexfsError::InvalidMagic);
         }
 
@@ -199,14 +199,14 @@ impl OnDiskSerializable for VexfsSuperblock {
 
         // Check block size is power of 2 and within bounds
         if !self.s_block_size.is_power_of_two() || 
-           self.s_block_size < VEXFS_MIN_BLOCK_SIZE || 
-           self.s_block_size > VEXFS_MAX_BLOCK_SIZE {
+           self.s_block_size < VEXFS_MIN_BLOCK_SIZE as u32 ||
+           self.s_block_size > VEXFS_MAX_BLOCK_SIZE as u32 {
             return Err(VexfsError::InvalidData("invalid block size".to_string()));
         }
 
         // Check inode size
-        if self.s_inode_size < VEXFS_MIN_INODE_SIZE || 
-           self.s_inode_size > VEXFS_MAX_INODE_SIZE {
+        if self.s_inode_size < VEXFS_MIN_INODE_SIZE as u16 ||
+           self.s_inode_size > VEXFS_MAX_INODE_SIZE as u16 {
             return Err(VexfsError::InvalidData("invalid inode size".to_string()));
         }
 
@@ -252,8 +252,8 @@ impl VexfsSuperblock {
     ) -> VexfsResult<Self> {
         // Validate parameters
         if !block_size.is_power_of_two() || 
-           block_size < VEXFS_MIN_BLOCK_SIZE || 
-           block_size > VEXFS_MAX_BLOCK_SIZE {
+           block_size < VEXFS_MIN_BLOCK_SIZE as u32 ||
+           block_size > VEXFS_MAX_BLOCK_SIZE as u32 {
             return Err(VexfsError::InvalidArgument("invalid block size".to_string()));
         }
 
@@ -264,20 +264,20 @@ impl VexfsSuperblock {
         let group_count = (blocks_count + blocks_per_group as u64 - 1) / blocks_per_group as u64;
 
         let mut sb = Self {
-            s_magic: VEXFS_MAGIC,
+            s_magic: VEXFS_MAGIC as u64,
             s_blocks_count: blocks_count,
             s_free_blocks_count: blocks_count,
             s_inodes_count: inodes_count,
             s_free_inodes_count: inodes_count,
             s_block_size: block_size,
-            s_inode_size: VEXFS_DEFAULT_INODE_SIZE,
+            s_inode_size: VEXFS_DEFAULT_INODE_SIZE as u16,
             s_version_major: VEXFS_VERSION_MAJOR,
             s_version_minor: VEXFS_VERSION_MINOR,
             s_mkfs_time: current_time(),
             s_mount_time: 0,
             s_wtime: current_time(),
             s_mount_count: 0,
-            s_max_mount_count: VEXFS_DEFAULT_MAX_MOUNT_COUNT,
+            s_max_mount_count: VEXFS_DEFAULT_MAX_MOUNT_COUNT as u16,
             s_state: VEXFS_VALID_FS,
             s_errors: VEXFS_ERRORS_CONTINUE,
             s_feature_compat: VEXFS_FEATURE_COMPAT_JOURNAL,
@@ -348,7 +348,7 @@ impl VexfsSuperblock {
         }
 
         self.s_vector_magic = VEXFS_VECTOR_MAGIC;
-        self.s_vector_version = VEXFS_VECTOR_VERSION;
+        self.s_vector_version = VEXFS_VECTOR_VERSION as u16;
         self.s_vector_dimensions = dimensions;
         self.s_vector_algorithm = algorithm;
         self.s_vector_metric = metric;
@@ -481,12 +481,53 @@ pub struct SuperblockManager {
 
 impl SuperblockManager {
     /// Create new superblock manager
-    pub fn new(block_size: u32, backup_enabled: bool) -> Self {
-        Self {
-            persistence: PersistenceManager::new(block_size, true),
+    pub fn new() -> VexfsResult<Self> {
+        Ok(Self {
+            persistence: PersistenceManager::new(4096, true), // Default block size, checksum enabled
+            superblock: None,
+            backup_enabled: true,
+        })
+    }
+
+    /// Create new superblock manager with specific parameters
+    pub fn new_with_params(block_size: u32, backup_enabled: bool) -> VexfsResult<Self> {
+        Ok(Self {
+            persistence: PersistenceManager::new(block_size, true), // Checksum enabled
             superblock: None,
             backup_enabled,
-        }
+        })
+    }
+
+    /// Initialize superblock for new filesystem
+    pub fn initialize(&mut self, layout: &crate::storage::layout::VexfsLayout) -> VexfsResult<()> {
+        // Calculate total inodes from layout
+        let total_inodes = layout.group_count * layout.inodes_per_group;
+        
+        let sb = VexfsSuperblock::new(
+            layout.total_blocks,
+            total_inodes,
+            layout.block_size,
+            layout.blocks_per_group,
+            layout.inodes_per_group,
+        )?;
+        
+        self.superblock = Some(sb);
+        Ok(())
+    }
+
+    /// Load and validate superblock from storage
+    pub fn load_and_validate(&mut self, block_manager: &mut crate::storage::block::BlockManager) -> VexfsResult<VexfsSuperblock> {
+        // Read superblock from block 0
+        let data = block_manager.read_block(0)?;
+        let sb = self.load_superblock(&data)?;
+        Ok(*sb)
+    }
+
+    /// Update and sync superblock to storage
+    pub fn update_and_sync(&mut self, block_manager: &mut crate::storage::block::BlockManager) -> VexfsResult<()> {
+        let data = self.sync()?;
+        block_manager.write_block(0, &data)?;
+        Ok(())
     }
 
     /// Load superblock from storage

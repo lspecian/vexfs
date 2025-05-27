@@ -145,18 +145,18 @@ pub fn init_shared_domain(config: VexfsConfig) -> VexfsResult<()> {
 
 /// Get the shared domain version
 pub fn get_version() -> (u32, u32, u32) {
-    (VEXFS_VERSION_MAJOR, VEXFS_VERSION_MINOR, VEXFS_VERSION_PATCH)
+    (u32::from(VEXFS_VERSION_MAJOR), u32::from(VEXFS_VERSION_MINOR), u32::from(VEXFS_VERSION_PATCH))
 }
 
 /// Check if the shared domain is compatible with a given version
 pub fn is_version_compatible(major: u32, minor: u32, _patch: u32) -> bool {
     // Major version must match exactly
-    if major != VEXFS_VERSION_MAJOR {
+    if major != u32::from(VEXFS_VERSION_MAJOR) {
         return false;
     }
     
     // Minor version must be <= current (backward compatibility)
-    if minor > VEXFS_VERSION_MINOR {
+    if minor > u32::from(VEXFS_VERSION_MINOR) {
         return false;
     }
     
@@ -166,7 +166,7 @@ pub fn is_version_compatible(major: u32, minor: u32, _patch: u32) -> bool {
 
 /// Validate a magic number
 pub fn validate_magic(magic: u64) -> VexfsResult<()> {
-    if magic != VEXFS_MAGIC {
+    if magic != u64::from(VEXFS_MAGIC) {
         return Err(VexfsError::InvalidMagic);
     }
     Ok(())
@@ -416,24 +416,24 @@ mod tests {
     #[test]
     fn test_version_compatibility() {
         // Same version should be compatible
-        assert!(is_version_compatible(VEXFS_VERSION_MAJOR, VEXFS_VERSION_MINOR, VEXFS_VERSION_PATCH));
+        assert!(is_version_compatible(u32::from(VEXFS_VERSION_MAJOR), u32::from(VEXFS_VERSION_MINOR), u32::from(VEXFS_VERSION_PATCH)));
         
         // Different major version should not be compatible
-        assert!(!is_version_compatible(VEXFS_VERSION_MAJOR + 1, VEXFS_VERSION_MINOR, VEXFS_VERSION_PATCH));
+        assert!(!is_version_compatible(u32::from(VEXFS_VERSION_MAJOR) + 1, u32::from(VEXFS_VERSION_MINOR), u32::from(VEXFS_VERSION_PATCH)));
         
         // Older minor version should be compatible
         if VEXFS_VERSION_MINOR > 0 {
-            assert!(is_version_compatible(VEXFS_VERSION_MAJOR, VEXFS_VERSION_MINOR - 1, VEXFS_VERSION_PATCH));
+            assert!(is_version_compatible(u32::from(VEXFS_VERSION_MAJOR), u32::from(VEXFS_VERSION_MINOR) - 1, u32::from(VEXFS_VERSION_PATCH)));
         }
         
         // Newer minor version should not be compatible
-        assert!(!is_version_compatible(VEXFS_VERSION_MAJOR, VEXFS_VERSION_MINOR + 1, VEXFS_VERSION_PATCH));
+        assert!(!is_version_compatible(u32::from(VEXFS_VERSION_MAJOR), u32::from(VEXFS_VERSION_MINOR) + 1, u32::from(VEXFS_VERSION_PATCH)));
     }
 
     #[test]
     fn test_magic_validation() {
-        assert!(validate_magic(VEXFS_MAGIC).is_ok());
-        assert!(validate_magic(VEXFS_MAGIC + 1).is_err());
+        assert!(validate_magic(u64::from(VEXFS_MAGIC)).is_ok());
+        assert!(validate_magic(u64::from(VEXFS_MAGIC) + 1).is_err());
     }
 
     #[test]

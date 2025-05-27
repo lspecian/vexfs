@@ -9,13 +9,19 @@ use crate::shared::types::{
     InodeNumber, FileType, Result, Timestamp
 };
 use crate::shared::constants::{VEXFS_ROOT_INODE, VEXFS_MAX_NAME_LENGTH};
-use crate::fs_core::inode::{Inode, get_inode, put_inode, create_inode, delete_inode};
+use crate::fs_core::inode::{Inode, InodeManager, get_inode, put_inode, create_inode, delete_inode};
 use crate::fs_core::permissions::{
-    UserContext, can_access_directory, can_list_directory, 
+    UserContext, can_access_directory, can_list_directory,
     can_create_in_directory, can_delete_from_directory,
-    permission_bits
+    permission_bits, check_read_permission, check_write_permission, check_create_permission, check_delete_permission
 };
-use crate::fs_core::locking::{acquire_write_lock_guard, acquire_read_lock_guard};
+use crate::fs_core::locking::{acquire_inode_lock, LockType, LockManager};
+use crate::fs_core::operations::OperationContext;
+
+#[cfg(not(feature = "kernel"))]
+use std::sync::Arc;
+#[cfg(feature = "kernel")]
+use alloc::sync::Arc;
 
 #[cfg(not(feature = "std"))]
 use alloc::{vec::Vec, string::String, format};
@@ -43,12 +49,12 @@ impl DirectoryEntry {
         }
         
         if name.is_empty() {
-            return Err(VexfsError::InvalidArgument);
+            return Err(VexfsError::InvalidArgument("invalid directory entry".to_string()));
         }
         
         // Check for invalid characters
         if name.contains('\0') || name.contains('/') {
-            return Err(VexfsError::InvalidArgument);
+            return Err(VexfsError::InvalidArgument("invalid characters in name".to_string()));
         }
         
         Ok(Self {
@@ -121,7 +127,7 @@ impl Directory {
     
     /// Get the directory inode number
     pub fn inode_number(&self) -> InodeNumber {
-        self.inode.number
+        self.inode.ino
     }
     
     /// Check if this is a directory
@@ -161,9 +167,9 @@ impl Directory {
         
         // Add . and .. entries if they don't exist
         if self.entries.is_empty() {
-            self.entries.push(DirectoryEntry::current_dir(self.inode.number));
+            self.entries.push(DirectoryEntry::current_dir(self.inode.ino));
             // For root directory, .. points to itself
-            let parent_inode = if self.inode.number == VEXFS_ROOT_INODE {
+            let parent_inode = if self.inode.ino == VEXFS_ROOT_INODE {
                 VEXFS_ROOT_INODE
             } else {
                 // TODO: Get actual parent inode from storage
@@ -214,7 +220,7 @@ impl Directory {
         
         // Don't allow removal of . or ..
         if name == "." || name == ".." {
-            return Err(VexfsError::InvalidArgument);
+            return Err(VexfsError::InvalidArgument("cannot remove . or ..".to_string()));
         }
         
         // Find and remove the entry
@@ -264,11 +270,11 @@ impl DirectoryOperations {
     ) -> Result<Directory> {
         // Validate name
         if name.is_empty() || name.len() > VEXFS_MAX_NAME_LENGTH {
-            return Err(VexfsError::InvalidArgument);
+            return Err(VexfsError::InvalidArgument("invalid name length".to_string()));
         }
         
         if name == "." || name == ".." {
-            return Err(VexfsError::InvalidArgument);
+            return Err(VexfsError::InvalidArgument("cannot create . or .. directories".to_string()));
         }
         
         // Get parent directory
@@ -809,17 +815,17 @@ pub fn create_symbolic_link(
 }
 
 // Wrapper functions to match the interface expected by operations.rs
-use super::InodeManager;
 
 /// Add an entry to a directory (wrapper for operations.rs compatibility)
 pub fn add_entry(
-    _inode_manager: &mut InodeManager,
+    inode_manager: &mut InodeManager,
     dir_inode: InodeNumber,
     entry: DirectoryEntry,
     user: &UserContext,
 ) -> Result<()> {
     // Get the directory inode
-    let dir = get_inode(dir_inode)?;
+    let dir_arc = get_inode(inode_manager, dir_inode)?;
+    let dir = &*dir_arc;
     
     // Check if it's actually a directory
     if !dir.is_directory() {
@@ -827,27 +833,26 @@ pub fn add_entry(
     }
     
     // Check permission to create in directory
-    if !can_create_in_directory(&dir, user) {
-        return Err(VexfsError::PermissionDenied);
-    }
+    check_create_permission(dir, user)?;
     
     // Load directory and add entry
-    let mut directory = Directory::from_inode(dir);
+    let mut directory = Directory::from_inode(dir.clone());
     directory.add_entry(entry)?;
-    directory.sync()?;
+    // TODO: Implement proper sync with inode_manager
     
     Ok(())
 }
 
 /// Remove an entry from a directory (wrapper for operations.rs compatibility)
 pub fn remove_entry(
-    _inode_manager: &mut InodeManager,
+    inode_manager: &mut InodeManager,
     dir_inode: InodeNumber,
     name: &str,
     user: &UserContext,
 ) -> Result<DirectoryEntry> {
     // Get the directory inode
-    let dir = get_inode(dir_inode)?;
+    let dir_arc = get_inode(inode_manager, dir_inode)?;
+    let dir = &*dir_arc;
     
     // Check if it's actually a directory
     if !dir.is_directory() {
@@ -855,35 +860,50 @@ pub fn remove_entry(
     }
     
     // Check permission to delete from directory
-    if !can_delete_from_directory(&dir, user) {
-        return Err(VexfsError::PermissionDenied);
-    }
+    check_delete_permission(dir, user)?;
     
     // Load directory and remove entry
-    let mut directory = Directory::from_inode(dir);
+    let mut directory = Directory::from_inode(dir.clone());
     let removed_entry = directory.remove_entry(name)?;
-    directory.sync()?;
+    // TODO: Implement proper sync with inode_manager
     
     Ok(removed_entry)
 }
 
 /// Read directory entries (wrapper for operations.rs compatibility)
 pub fn read_entries(
-    _inode_manager: &mut InodeManager,
+    inode_manager: &mut InodeManager,
     dir_inode: InodeNumber,
     user: &UserContext,
 ) -> Result<Vec<DirectoryEntry>> {
-    read_directory(dir_inode, user)
+    // Get the directory inode
+    let dir_arc = get_inode(inode_manager, dir_inode)?;
+    let dir = &*dir_arc;
+    
+    // Check if it's actually a directory
+    if !dir.is_directory() {
+        return Err(VexfsError::NotDirectory);
+    }
+    
+    // Check read permission
+    check_read_permission(dir, user)?;
+    
+    // Load directory and return entries
+    let mut directory = Directory::from_inode(dir.clone());
+    let entries = directory.list_entries()?;
+    
+    Ok(entries.clone())
 }
 
 /// Update the ".." entry in a directory (placeholder implementation)
 pub fn update_dotdot_entry(
-    _inode_manager: &mut InodeManager,
+    inode_manager: &mut InodeManager,
     dir_inode: InodeNumber,
     new_parent_inode: InodeNumber,
 ) -> Result<()> {
     // Get the directory inode
-    let dir = get_inode(dir_inode)?;
+    let dir_arc = get_inode(inode_manager, dir_inode)?;
+    let dir = &*dir_arc;
     
     // Check if it's actually a directory
     if !dir.is_directory() {
@@ -891,7 +911,7 @@ pub fn update_dotdot_entry(
     }
     
     // Load directory
-    let mut directory = Directory::from_inode(dir);
+    let mut directory = Directory::from_inode(dir.clone());
     directory.ensure_entries_loaded()?;
     
     // Find and update the ".." entry
@@ -903,6 +923,6 @@ pub fn update_dotdot_entry(
         }
     }
     
-    directory.sync()?;
+    // TODO: Implement proper sync with inode_manager
     Ok(())
 }

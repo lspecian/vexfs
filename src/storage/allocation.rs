@@ -528,6 +528,47 @@ impl SpaceAllocator {
         })
     }
 
+    /// Initialize allocator with layout information
+    pub fn initialize(&mut self) -> VexfsResult<()> {
+        // Initialize block groups with layout information
+        for (group_idx, group) in self.block_groups.iter_mut().enumerate() {
+            let layout = crate::storage::layout::VexfsLayout {
+                block_size: self.bitmap.block_size,
+                total_blocks: self.total_blocks,
+                blocks_per_group: self.blocks_per_group,
+                group_count: self.block_groups.len() as u32,
+                inodes_per_group: self.blocks_per_group, // Default assumption
+                inode_size: 256, // Default inode size
+                journal_blocks: 0, // No journal for allocator init
+                vector_blocks: 0, // No vector blocks for allocator init
+            };
+            group.initialize(group_idx as u32, &layout)?;
+        }
+        Ok(())
+    }
+
+    /// Load allocation state from storage
+    pub fn load_state(&mut self) -> VexfsResult<()> {
+        // TODO: Load bitmap and block group state from disk
+        // For now, assume clean state
+        self.bitmap.mark_clean();
+        Ok(())
+    }
+
+    /// Allocate blocks
+    pub fn allocate_blocks(&mut self, count: u32, hint: Option<AllocationHint>) -> VexfsResult<AllocationResult> {
+        self.allocate(count, hint)
+    }
+
+    /// Sync allocation state to storage
+    pub fn sync(&mut self) -> VexfsResult<()> {
+        // TODO: Write bitmap and block group state to disk
+        if self.bitmap.is_dirty() {
+            self.bitmap.mark_clean();
+        }
+        Ok(())
+    }
+
     /// Allocate blocks
     pub fn allocate(&mut self, count: u32, hint: Option<AllocationHint>) -> VexfsResult<AllocationResult> {
         if count == 0 {
@@ -680,7 +721,7 @@ impl BlockAllocator {
     /// Create new block allocator
     pub fn new(layout: &crate::storage::layout::VexfsLayout) -> VexfsResult<Self> {
         let space_allocator = SpaceAllocator::new(
-            layout.total_blocks(),
+            layout.total_blocks,
             layout.block_size,
             layout.blocks_per_group,
         )?;
