@@ -32,10 +32,10 @@
 - Fix Result type generics (add error types)
 
 #### Phase 3: Missing Definitions (30 minutes)
-- Add `HybridSearchResponse` struct to [`ioctl.rs`](vexfs/src/ioctl.rs:1)
-- Add `ManageIndexResponse` struct to [`ioctl.rs`](vexfs/src/ioctl.rs:1)
-- Add `ManageIndexRequest` struct to [`ioctl.rs`](vexfs/src/ioctl.rs:1)
-- Fix command constant naming in [`inode.rs`](vexfs/src/inode.rs:270)
+- Add `HybridSearchResponse` struct to [`ioctl.rs`](fs/src/ioctl.rs:1)
+- Add `ManageIndexResponse` struct to [`ioctl.rs`](fs/src/ioctl.rs:1)
+- Add `ManageIndexRequest` struct to [`ioctl.rs`](fs/src/ioctl.rs:1)
+- Fix command constant naming in [`inode.rs`](fs/src/inode.rs:270)
 
 ## Alternative Approaches
 

@@ -33,11 +33,13 @@ use crate::storage::StorageManager;
 use super::FsResult;
 
 extern crate alloc;
+use alloc::sync::Arc; // Add Arc import
 use alloc::collections::BTreeMap;
 use core::mem;
+use derivative::Derivative; // Import Derivative
 
 /// In-memory inode representation
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone)] // Keep standard Debug for Inode for now
 pub struct Inode {
     pub ino: InodeNumber,
     pub file_type: FileType,
@@ -162,8 +164,8 @@ pub fn put_inode(manager: &mut InodeManager, inode: Arc<Inode>) -> FsResult<()> 
     manager.put_inode(inode)
 }
 
-pub fn create_inode(manager: &mut InodeManager, file_type: FileType, mode: FileMode) -> FsResult<Arc<Inode>> {
-    manager.create_inode(file_type, mode)
+pub fn create_inode(manager: &mut InodeManager, file_type: FileType, mode: FileMode, uid: UserId, gid: GroupId) -> FsResult<Arc<Inode>> {
+    manager.create_inode(file_type, mode, uid, gid)
 }
 
 pub fn delete_inode(manager: &mut InodeManager, inode_num: InodeNumber) -> FsResult<()> {
@@ -177,7 +179,12 @@ pub fn deallocate_inode_blocks(inode_num: InodeNumber) -> FsResult<()> {
 }
 
 /// Inode manager for allocation, caching, and persistence
+#[derive(Derivative)]
+#[derivative(Debug)] // Apply Derivative Debug
+#[derivative(PartialEq)] // Apply Derivative PartialEq
 pub struct InodeManager {
+    #[derivative(Debug="ignore")] // Ignore for Debug
+    #[derivative(PartialEq="ignore")] // Ignore for PartialEq
     storage: StorageManager,
     inode_cache: BTreeMap<InodeNumber, Inode>,
     next_inode: InodeNumber,
@@ -189,7 +196,7 @@ impl InodeManager {
     /// Create a new inode manager
     pub fn new(storage: &StorageManager) -> FsResult<Self> {
         Ok(Self {
-            storage: storage.clone(),
+            storage: storage.clone(), // Assuming StorageManager is Clone or this needs adjustment
             inode_cache: BTreeMap::new(),
             next_inode: VEXFS_ROOT_INO + 1,
             free_inodes: Vec::new(),
@@ -197,21 +204,34 @@ impl InodeManager {
         })
     }
 
-    /// Allocate a new inode
+    /// Internal helper to create and cache an inode.
+    /// This is called by `allocate_inode`.
+    fn create_and_cache_inode(&mut self, ino: InodeNumber, file_type: FileType, mode: FileMode, uid: UserId, gid: GroupId) {
+        let inode = Inode::new(ino, file_type, mode, uid, gid);
+        self.inode_cache.insert(ino, inode); // Store the Inode directly
+        self.dirty_inodes.insert(ino, true);
+    }
+    
+    /// Allocate a new inode number and create the inode structure.
+    /// The inode is cached and marked dirty.
     pub fn allocate_inode(&mut self, file_type: FileType, mode: FileMode, uid: UserId, gid: GroupId) -> FsResult<InodeNumber> {
         let ino = if let Some(free_ino) = self.free_inodes.pop() {
             free_ino
         } else {
             let ino = self.next_inode;
             self.next_inode += 1;
+            // TODO: Check for inode number overflow and superblock update
             ino
         };
-
-        let inode = Inode::new(ino, file_type, mode, uid, gid);
-        self.inode_cache.insert(ino, inode);
-        self.dirty_inodes.insert(ino, true);
-
+        self.create_and_cache_inode(ino, file_type, mode, uid, gid);
         Ok(ino)
+    }
+
+    /// Create an inode and return an Arc to it.
+    /// This is a higher-level function that uses allocate_inode and get_inode.
+    pub fn create_inode(&mut self, file_type: FileType, mode: FileMode, uid: UserId, gid: GroupId) -> FsResult<Arc<Inode>> {
+        let ino = self.allocate_inode(file_type, mode, uid, gid)?;
+        self.get_inode(ino) // get_inode will now return Arc<Inode>
     }
 
     /// Deallocate an inode
@@ -226,31 +246,49 @@ impl InodeManager {
 
         // Add to free list
         self.free_inodes.push(ino);
+        // TODO: Persist free_inodes list or update bitmap on disk
 
         Ok(())
     }
 
-    /// Get an inode from cache or load from storage
-    pub fn get_inode(&mut self, ino: InodeNumber) -> FsResult<&Inode> {
+    /// Get an Arc<Inode> from cache or load from storage
+    pub fn get_inode(&mut self, ino: InodeNumber) -> FsResult<Arc<Inode>> {
         if !self.inode_cache.contains_key(&ino) {
-            self.load_inode(ino)?;
+            self.load_inode(ino)?; // load_inode will now insert Inode into cache
         }
         
-        self.inode_cache.get(&ino).ok_or_else(|| {
-            VexfsError::InodeNotFound(ino)
-        })
+        // Clone the Inode from cache and wrap in Arc
+        self.inode_cache.get(&ino)
+            .map(|inode_ref| Arc::new(inode_ref.clone())) // Clone Inode and wrap in Arc
+            .ok_or_else(|| VexfsError::InodeNotFound(ino))
     }
 
-    /// Get a mutable reference to an inode
-    pub fn get_inode_mut(&mut self, ino: InodeNumber) -> FsResult<&mut Inode> {
+    /// Get an Arc<Inode> for modification.
+    /// The caller can use Arc::make_mut or clone the inner Inode.
+    /// Marks the inode as dirty.
+    pub fn get_inode_mut(&mut self, ino: InodeNumber) -> FsResult<Arc<Inode>> {
         if !self.inode_cache.contains_key(&ino) {
             self.load_inode(ino)?;
         }
         
         self.dirty_inodes.insert(ino, true);
-        self.inode_cache.get_mut(&ino).ok_or_else(|| {
-            VexfsError::InodeNotFound(ino)
-        })
+        // Clone the Inode from cache and wrap in Arc
+        self.inode_cache.get(&ino)
+            .map(|inode_ref| Arc::new(inode_ref.clone())) // Clone Inode and wrap in Arc
+            .ok_or_else(|| VexfsError::InodeNotFound(ino))
+    }
+
+    /// Put an updated inode (wrapped in Arc) into the cache and mark as dirty.
+    pub fn put_inode(&mut self, inode_arc: Arc<Inode>) -> FsResult<()> {
+        let ino = inode_arc.ino;
+        // To store the Inode, not Arc<Inode>, we dereference and clone.
+        // Or, change inode_cache to store Arc<Inode>.
+        // For now, let's assume inode_cache stores Inode.
+        let mut inode_to_store = (*inode_arc).clone();
+        inode_to_store.mark_dirty(); // Ensure it's marked dirty
+        self.inode_cache.insert(ino, inode_to_store);
+        self.dirty_inodes.insert(ino, true);
+        Ok(())
     }
 
     /// Get inode statistics

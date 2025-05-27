@@ -15,8 +15,8 @@ Applies to all userland components and libraries:
 
 ### GNU General Public License v2
 Applies to kernel module components:
-- **Kernel module entry point** (`vexfs/vexfs_module_entry.c`)
-- **Kernel build files** (`vexfs/Kbuild`, `vexfs/Makefile`)
+- **Kernel module entry point** (`fs/vexfs_module_entry.c`)
+- **Kernel build files** (`fs/Kbuild`, `fs/Makefile`)
 - **Kernel-specific Rust code** (when compiled with `kernel` feature)
 
 ## File-by-File Breakdown
@@ -38,18 +38,18 @@ README.md                   # Project documentation
 ### GPL v2 Licensed Files
 ```
 LICENSE.kernel              # GPL v2 license text
-vexfs/vexfs_module_entry.c  # Kernel module C entry point
-vexfs/Kbuild                # Kernel build configuration
-vexfs/Makefile              # Kernel module makefile
+fs/vexfs_module_entry.c  # Kernel module C entry point
+fs/Kbuild                # Kernel build configuration
+fs/Makefile              # Kernel module makefile
 ```
 
 ### Dual Licensed Files
 ```
-vexfs/src/                  # Core filesystem implementation
-vexfs/Cargo.toml           # Module manifest (dual licensed)
+fs/src/                  # Core filesystem implementation
+fs/Cargo.toml           # Module manifest (dual licensed)
 ```
 
-The `vexfs/src/` directory contains code that can be compiled for both userland testing and kernel module usage. When compiled with the `kernel` feature, these files operate under GPL v2. When compiled for userland testing, they operate under Apache 2.0.
+The `fs/src/` directory contains code that can be compiled for both userland testing and kernel module usage. When compiled with the `kernel` feature, these files operate under GPL v2. When compiled for userland testing, they operate under Apache 2.0.
 
 ## License Headers
 
@@ -107,12 +107,12 @@ cargo build --features std    # Apache 2.0 licensing
 
 ### Kernel Module Compilation
 ```bash
-# In vexfs/ directory
+# In fs/ directory
 make                          # GPL v2 licensing
 ```
 
 ### Mixed Environment Testing
-The project supports testing kernel logic in userland while maintaining proper licensing boundaries. The `vexfs/src/` code is structured to be license-aware based on compilation target.
+The project supports testing kernel logic in userland while maintaining proper licensing boundaries. The `fs/src/` code is structured to be license-aware based on compilation target.
 
 ## Contributing Guidelines
 
@@ -123,8 +123,8 @@ The project supports testing kernel logic in userland while maintaining proper l
 
 ### Code Organization
 - Place userland-only code in `src/` or `vexctl/`
-- Place kernel-only code in `vexfs/` with appropriate C wrappers
-- Place shared algorithms in `vexfs/src/` with conditional compilation
+- Place kernel-only code in `fs/` with appropriate C wrappers
+- Place shared algorithms in `fs/src/` with conditional compilation
 
 ### Third-Party Dependencies
 - **Userland dependencies**: Apache 2.0, MIT, or BSD compatible licenses

@@ -362,6 +362,25 @@ pub fn lock_directory_write(manager: &mut LockManager, inode: InodeNumber) -> Fs
 pub fn unlock_directory(manager: &mut LockManager, lock_id: LockId) -> FsResult<()> {
     manager.unlock(lock_id)
 }
+pub fn acquire_write_lock_guard<'a>(manager: &'a mut LockManager, inode: InodeNumber) -> FsResult<LockGuard<'a>> {
+    // TODO: Review owner/context for lock guards, using 0 as placeholder
+    let lock_id = manager.lock_inode(inode, LockType::Write, 0)?;
+    Ok(LockGuard::new(manager, lock_id))
+}
+
+pub fn acquire_read_lock_guard<'a>(manager: &'a mut LockManager, inode: InodeNumber) -> FsResult<LockGuard<'a>> {
+    // TODO: Review owner/context for lock guards, using 0 as placeholder
+    let lock_id = manager.lock_inode(inode, LockType::Read, 0)?;
+    Ok(LockGuard::new(manager, lock_id))
+}
+
+pub fn acquire_inode_lock(manager: &mut LockManager, inode: InodeNumber, lock_type: LockType, owner: u32) -> FsResult<LockId> {
+    manager.lock_inode(inode, lock_type, owner)
+}
+
+pub fn release_inode_lock(manager: &mut LockManager, lock_id: LockId) -> FsResult<()> {
+    manager.unlock(lock_id)
+}
 
 #[cfg(test)]
 mod tests {

@@ -96,7 +96,7 @@ This will:
 
 ### Mounted Directories
 - **VexFS Source**: `/mnt/vexfs` (live mount via virtfs)
-- **Build Output**: Available in VM at `/mnt/vexfs/vexfs/`
+- **Build Output**: Available in VM at `/mnt/vexfs/fs/`
 
 ### Pre-installed Tools
 - Build essentials (gcc, make, cmake)
@@ -130,7 +130,7 @@ test_env/
 ### 1. Code-Test-Debug Cycle
 ```bash
 # Edit code on host
-vim vexfs/src/ffi.rs
+vim fs/src/ffi.rs
 
 # Test in VM (automatically synced)
 ./test_module.sh
@@ -139,7 +139,7 @@ vim vexfs/src/ffi.rs
 ./vm_control.sh ssh
 # Inside VM:
 dmesg | tail -20
-gdb /mnt/vexfs/vexfs/test_ffi
+gdb /mnt/vexfs/fs/test_ffi
 ```
 
 ### 2. Kernel Module Development
@@ -164,7 +164,7 @@ gdb /mnt/vexfs/vexfs/test_ffi
 ./test_module.sh
 
 # Check specific FFI functions
-./vm_control.sh ssh -c "cd /mnt/vexfs/vexfs && ./test_ffi_integration"
+./vm_control.sh ssh -c "cd /mnt/vexfs/fs && ./test_ffi_integration"
 ```
 
 ## Troubleshooting

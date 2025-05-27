@@ -17,6 +17,8 @@ categories = ["filesystem", "science", "data-structures"]
 
 # Dependencies for no_std compatibility
 hashbrown = { version = "0.14", default-features = false }
+libm = { version = "0.2", default-features = false }
+derivative = "2.2"
 
 [lib]
 crate-type = ["staticlib"]

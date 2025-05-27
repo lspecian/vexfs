@@ -257,7 +257,7 @@ VEXFS_VM_SSH_PORT=2223 ./test_env/run_qemu_simple.sh
 ```bash
 # In VM:
 dmesg | grep -i error           # Check kernel errors
-modinfo /mnt/vexfs-src/vexfs/vexfs.ko  # Verify module info
+modinfo /mnt/vexfs-src/fs/vexfs.ko  # Verify module info
 lsmod | grep -v vexfs           # Check conflicting modules
 ```
 
