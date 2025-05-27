@@ -209,9 +209,9 @@ pub struct InodeManager {
 
 impl InodeManager {
     /// Create a new inode manager
-    pub fn new(storage: &StorageManager) -> FsResult<Self> {
+    pub fn new(storage: StorageManager) -> FsResult<Self> {
         Ok(Self {
-            storage: storage.clone(), // Assuming StorageManager is Clone or this needs adjustment
+            storage,
             inode_cache: BTreeMap::new(),
             next_inode: VEXFS_ROOT_INO + 1,
             free_inodes: Vec::new(),
@@ -266,6 +266,11 @@ impl InodeManager {
         Ok(())
     }
 
+    /// Delete an inode (alias for deallocate_inode)
+    pub fn delete_inode(&mut self, ino: InodeNumber) -> FsResult<()> {
+        self.deallocate_inode(ino)
+    }
+
     /// Get an Arc<Inode> from cache or load from storage
     pub fn get_inode(&mut self, ino: InodeNumber) -> FsResult<Arc<Inode>> {
         if !self.inode_cache.contains_key(&ino) {
@@ -316,13 +321,12 @@ impl InodeManager {
     fn load_inode(&mut self, ino: InodeNumber) -> FsResult<()> {
         // Calculate inode location on disk
         let inode_size = mem::size_of::<Inode>() as u64;
-        let inodes_per_block = VEXFS_DEFAULT_BLOCK_SIZE / inode_size;
+        let inodes_per_block = VEXFS_DEFAULT_BLOCK_SIZE as u64 / inode_size;
         let block_num = (ino - 1) / inodes_per_block;
-        let offset = ((ino - 1) % inodes_per_block) * inode_size;
+        let _offset = ((ino - 1) % inodes_per_block) * inode_size;
 
         // Read inode from storage
-        let mut buffer = vec![0u8; inode_size as usize];
-        self.storage.read_block(block_num, offset, &mut buffer)?;
+        let _buffer = self.storage.read_block(block_num)?;
 
         // TODO: Deserialize inode from buffer
         // For now, create a dummy inode
@@ -340,15 +344,15 @@ impl InodeManager {
 
         // Calculate inode location on disk
         let inode_size = mem::size_of::<Inode>() as u64;
-        let inodes_per_block = VEXFS_DEFAULT_BLOCK_SIZE / inode_size;
+        let inodes_per_block = VEXFS_DEFAULT_BLOCK_SIZE as u64 / inode_size;
         let block_num = (ino - 1) / inodes_per_block;
-        let offset = ((ino - 1) % inodes_per_block) * inode_size;
+        let _offset = ((ino - 1) % inodes_per_block) * inode_size;
 
         // TODO: Serialize inode to buffer
         let buffer = vec![0u8; inode_size as usize];
         
         // Write inode to storage
-        self.storage.write_block(block_num, offset, &buffer)?;
+        self.storage.write_block(block_num, buffer)?;
 
         Ok(())
     }
