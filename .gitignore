@@ -14,7 +14,9 @@ node_modules/
 
 # Roo configuration (contains API keys)
 .roo/
+.roo/mcp.json
 
+.windsurfrules
 # Editor directories and files
 .idea
 .vscode

@@ -149,7 +149,7 @@ impl StorageManager {
     /// Mount filesystem
     pub fn mount(&self) -> VexfsResult<()> {
         // Load and validate superblock
-        let superblock = self.superblock.borrow_mut().load_and_validate(&mut self.block_manager.borrow_mut())?;
+        let _superblock = self.superblock.borrow_mut().load_and_validate(&mut self.block_manager.borrow_mut())?;
         
         // Verify layout compatibility
         self.layout.validate()?;
@@ -180,8 +180,11 @@ impl StorageManager {
     /// Read block through cache
     pub fn read_block(&self, block: BlockNumber) -> VexfsResult<Vec<u8>> {
         // Try cache first
-        if let Some(data) = self.cache.borrow().read_block(block) {
-            return Ok(data);
+        {
+            let mut cache = self.cache.borrow_mut();
+            if let Some(data) = cache.read_block(block) {
+                return Ok(data);
+            }
         }
         
         // Read from device
