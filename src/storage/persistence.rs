@@ -659,4 +659,5 @@ pub use crate::shared::constants::{
 pub type VexfsInode = DiskInode;
 pub type VexfsDirEntry = DiskDirEntry;
 pub type VexfsGroupDesc = DiskGroupDesc;
-pub type OnDiskSerialize = OnDiskSerializable;
+// Note: OnDiskSerializable is a trait, not a type, so we can't create a type alias for it
+// If you need a type alias, you would need to create a concrete type that implements the trait

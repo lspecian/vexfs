@@ -288,6 +288,16 @@ pub fn current_timestamp() -> Timestamp {
     }
 }
 
+/// Get current time (alias for current_timestamp for compatibility)
+pub fn current_time() -> Timestamp {
+    current_timestamp()
+}
+
+/// Get current time as u32 (for compatibility with some modules)
+pub fn get_current_time() -> u32 {
+    (current_timestamp() / VEXFS_TIMESTAMP_PRECISION) as u32
+}
+
 /// Convert timestamp to seconds since epoch
 pub fn timestamp_to_secs(timestamp: Timestamp) -> u64 {
     timestamp / VEXFS_TIMESTAMP_PRECISION
@@ -515,7 +525,7 @@ pub fn validate_block_size(block_size: u32) -> VexfsResult<()> {
         return Err(VexfsError::InvalidArgument("block size must be a power of 2".to_string()));
     }
     
-    if block_size < VEXFS_MIN_BLOCK_SIZE {
+    if block_size < VEXFS_MIN_BLOCK_SIZE as u32 {
         return Err(VexfsError::InvalidArgument(format!(
             "block size {} too small, minimum is {}",
             block_size,
@@ -523,7 +533,7 @@ pub fn validate_block_size(block_size: u32) -> VexfsResult<()> {
         )));
     }
     
-    if block_size > VEXFS_MAX_BLOCK_SIZE {
+    if block_size > VEXFS_MAX_BLOCK_SIZE as u32 {
         return Err(VexfsError::InvalidArgument(format!(
             "block size {} too large, maximum is {}",
             block_size,
@@ -566,44 +576,8 @@ pub fn validate_block_number(block: BlockNumber) -> VexfsResult<()> {
 
 /// Convert error code to string (for debugging)
 pub fn error_to_string(error: &VexfsError) -> String {
-    match error {
-        VexfsError::IOError(msg) => format!("IO Error: {}", msg),
-        VexfsError::CorruptionError(msg) => format!("Corruption Error: {}", msg),
-        VexfsError::InvalidArgument(msg) => format!("Invalid Argument: {}", msg),
-        VexfsError::OutOfSpace => "Out of Space".to_string(),
-        VexfsError::InsufficientPermissions => "Insufficient Permissions".to_string(),
-        VexfsError::FileNotFound => "File Not Found".to_string(),
-        VexfsError::DirectoryNotEmpty => "Directory Not Empty".to_string(),
-        VexfsError::FileExists => "File Exists".to_string(),
-        VexfsError::IsDirectory => "Is Directory".to_string(),
-        VexfsError::NotDirectory => "Not Directory".to_string(),
-        VexfsError::VectorError(kind) => match kind {
-            crate::shared::errors::VectorErrorKind::InvalidDimension { dimension } => {
-                format!("Invalid Vector Dimension: {}", dimension)
-            }
-            crate::shared::errors::VectorErrorKind::DimensionMismatch { expected, found } => {
-                format!("Vector Dimension Mismatch: expected {}, found {}", expected, found)
-            }
-            crate::shared::errors::VectorErrorKind::NormalizationError => {
-                "Vector Normalization Error".to_string()
-            }
-            crate::shared::errors::VectorErrorKind::IndexError => {
-                "Vector Index Error".to_string()
-            }
-            crate::shared::errors::VectorErrorKind::SearchError => {
-                "Vector Search Error".to_string()
-            }
-        },
-        VexfsError::JournalError(msg) => format!("Journal Error: {}", msg),
-        VexfsError::CacheError(msg) => format!("Cache Error: {}", msg),
-        VexfsError::AllocationError(msg) => format!("Allocation Error: {}", msg),
-        VexfsError::ReadOnlyFilesystem => "Read-Only Filesystem".to_string(),
-        VexfsError::DeviceFull => "Device Full".to_string(),
-        VexfsError::UnsupportedOperation => "Unsupported Operation".to_string(),
-        VexfsError::InvalidMagic => "Invalid Magic".to_string(),
-        VexfsError::VersionMismatch => "Version Mismatch".to_string(),
-        VexfsError::ChecksumError => "Checksum Error".to_string(),
-    }
+    // Use the Display implementation which is already comprehensive
+    format!("{}", error)
 }
 
 #[cfg(test)]

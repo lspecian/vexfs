@@ -709,7 +709,7 @@ impl BlockAllocator {
     }
 
     /// Get free blocks count
-    pub fn free_blocks(&self) -> u64 {
+    pub fn get_free_blocks_count(&self) -> u64 {
         self.space_allocator.free_space_info().free_blocks
     }
 

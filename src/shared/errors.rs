@@ -30,7 +30,7 @@ use core::fmt;
 // =======================
 
 /// Main error type for VexFS operations
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum VexfsError {
     // I/O and Storage Errors
     IoError(IoErrorKind),
@@ -84,6 +84,35 @@ pub enum VexfsError {
     InvalidArgument(String),
     OutOfRange(String),
     
+    // Path and Data Errors
+    InvalidData(String),
+    InvalidPath(String),
+    PathTooLong,
+    NameTooLong,
+    
+    // Additional File System Errors
+    NotFound,
+    NotMounted,
+    NoSpace,
+    EntryNotFound,
+    DeviceFull,
+    
+    // Cache and Storage Errors
+    CacheError,
+    CacheLocked,
+    CacheDirty,
+    AllocationError,
+    CorruptionError,
+    ChecksumError,
+    
+    // Version and Operation Errors
+    VersionMismatch,
+    UnsupportedOperation,
+    NeedsFsck,
+    IOError,
+    InsufficientPermissions,
+    Internal(String),
+    
     // Internal Errors
     InternalError(String),
     NotImplemented(String),
@@ -136,9 +165,10 @@ pub enum StorageErrorKind {
 }
 
 /// Vector operation error kinds
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum VectorErrorKind {
     InvalidDimensions(u16),
+    InvalidDimension(u16), // Alias for InvalidDimensions
     DimensionMismatch { expected: u16, found: u16 },
     InvalidComponent(f32),
     VectorTooLarge,
@@ -147,6 +177,8 @@ pub enum VectorErrorKind {
     SerializationError,
     DeserializationError,
     NormalizationError,
+    SearchError,
+    IndexError,
 }
 
 /// Index operation error kinds
@@ -246,6 +278,27 @@ impl fmt::Display for VexfsError {
             VexfsError::InvalidConfiguration => write!(f, "Invalid configuration"),
             VexfsError::InvalidArgument(msg) => write!(f, "Invalid argument: {}", msg),
             VexfsError::OutOfRange(msg) => write!(f, "Value out of range: {}", msg),
+            VexfsError::InvalidData(msg) => write!(f, "Invalid data: {}", msg),
+            VexfsError::InvalidPath(msg) => write!(f, "Invalid path: {}", msg),
+            VexfsError::PathTooLong => write!(f, "Path too long"),
+            VexfsError::NameTooLong => write!(f, "Name too long"),
+            VexfsError::NotFound => write!(f, "Not found"),
+            VexfsError::NotMounted => write!(f, "Not mounted"),
+            VexfsError::NoSpace => write!(f, "No space left"),
+            VexfsError::EntryNotFound => write!(f, "Entry not found"),
+            VexfsError::DeviceFull => write!(f, "Device full"),
+            VexfsError::CacheError => write!(f, "Cache error"),
+            VexfsError::CacheLocked => write!(f, "Cache locked"),
+            VexfsError::CacheDirty => write!(f, "Cache dirty"),
+            VexfsError::AllocationError => write!(f, "Allocation error"),
+            VexfsError::CorruptionError => write!(f, "Corruption error"),
+            VexfsError::ChecksumError => write!(f, "Checksum error"),
+            VexfsError::VersionMismatch => write!(f, "Version mismatch"),
+            VexfsError::UnsupportedOperation => write!(f, "Unsupported operation"),
+            VexfsError::NeedsFsck => write!(f, "Needs fsck"),
+            VexfsError::IOError => write!(f, "I/O error"),
+            VexfsError::InsufficientPermissions => write!(f, "Insufficient permissions"),
+            VexfsError::Internal(msg) => write!(f, "Internal: {}", msg),
             VexfsError::InternalError(msg) => write!(f, "Internal error: {}", msg),
             VexfsError::NotImplemented(msg) => write!(f, "Not implemented: {}", msg),
             VexfsError::Other(msg) => write!(f, "{}", msg),
@@ -296,6 +349,7 @@ impl fmt::Display for VectorErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             VectorErrorKind::InvalidDimensions(dims) => write!(f, "invalid dimensions: {}", dims),
+            VectorErrorKind::InvalidDimension(dims) => write!(f, "invalid dimension: {}", dims),
             VectorErrorKind::DimensionMismatch { expected, found } => {
                 write!(f, "dimension mismatch: expected {}, found {}", expected, found)
             }
@@ -306,6 +360,8 @@ impl fmt::Display for VectorErrorKind {
             VectorErrorKind::SerializationError => write!(f, "vector serialization failed"),
             VectorErrorKind::DeserializationError => write!(f, "vector deserialization failed"),
             VectorErrorKind::NormalizationError => write!(f, "vector normalization failed"),
+            VectorErrorKind::SearchError => write!(f, "vector search error"),
+            VectorErrorKind::IndexError => write!(f, "vector index error"),
         }
     }
 }
@@ -405,6 +461,28 @@ impl VexfsError {
             VexfsError::ResourceBusy => -16,      // EBUSY
             VexfsError::InvalidOperation => -95,  // EOPNOTSUPP
             VexfsError::UnsupportedVersion => -95, // EOPNOTSUPP
+            // New error variants
+            VexfsError::InvalidData(_) => -22,    // EINVAL
+            VexfsError::InvalidPath(_) => -22,    // EINVAL
+            VexfsError::PathTooLong => -36,       // ENAMETOOLONG
+            VexfsError::NameTooLong => -36,       // ENAMETOOLONG
+            VexfsError::NotFound => -2,           // ENOENT
+            VexfsError::NotMounted => -19,        // ENODEV
+            VexfsError::NoSpace => -28,           // ENOSPC
+            VexfsError::EntryNotFound => -2,      // ENOENT
+            VexfsError::DeviceFull => -28,        // ENOSPC
+            VexfsError::CacheError => -5,         // EIO
+            VexfsError::CacheLocked => -16,       // EBUSY
+            VexfsError::CacheDirty => -16,        // EBUSY
+            VexfsError::AllocationError => -12,   // ENOMEM
+            VexfsError::CorruptionError => -5,    // EIO
+            VexfsError::ChecksumError => -5,      // EIO
+            VexfsError::VersionMismatch => -95,   // EOPNOTSUPP
+            VexfsError::UnsupportedOperation => -95, // EOPNOTSUPP
+            VexfsError::NeedsFsck => -5,          // EIO
+            VexfsError::IOError => -5,            // EIO
+            VexfsError::InsufficientPermissions => -13, // EACCES
+            VexfsError::Internal(_) => -22,       // EINVAL
             _ => -22,                             // EINVAL (generic)
         }
     }

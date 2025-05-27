@@ -196,7 +196,7 @@ pub const VEXFS_DEFAULT_HNSW_M: usize = 16;
 pub const VEXFS_DEFAULT_HNSW_M_L: usize = 32;
 
 /// Default HNSW ML parameter (level factor)
-pub const VEXFS_DEFAULT_HNSW_ML: f64 = 1.0 / 2.0_f64.ln();
+pub const VEXFS_DEFAULT_HNSW_ML: f64 = 1.0 / 0.6931471805599453; // 1.0 / ln(2.0)
 
 /// Default EF construction parameter for HNSW
 pub const VEXFS_DEFAULT_EF_CONSTRUCTION: usize = 200;

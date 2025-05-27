@@ -100,7 +100,7 @@ pub use utils::{
     crc32, verify_checksum, checksum_struct,
     
     // Time utilities
-    current_timestamp, timestamp_to_secs, timestamp_to_nsecs, should_update_atime,
+    current_timestamp, current_time, get_current_time, timestamp_to_secs, timestamp_to_nsecs, should_update_atime,
     
     // Math utilities
     min, max, clamp, gcd, lcm,

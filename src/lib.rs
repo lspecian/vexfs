@@ -91,8 +91,7 @@ pub use fs_core::{
     LockType, LockScope, LockManager, FileLock, DirectoryLock, LockGuard,
     // Main filesystem
     FileSystem, FsStats, FsConfig, FsInfo, FsInitializer,
-    // Results
-    FsResult,
+    // Results - using VexfsResult from shared::errors instead
 };
 
 // Re-export macros at crate level
@@ -145,13 +144,13 @@ pub mod vector_test;
 
 // Userspace API for testing and development
 #[cfg(not(feature = "kernel"))]
-pub fn init_vexfs_userspace() -> Result<(), String> {
+pub fn init_vexfs_userspace() -> core::result::Result<(), String> {
     println!("VexFS: Initializing in userspace mode");
     Ok(())
 }
 
 #[cfg(not(feature = "kernel"))]
-pub fn test_vector_operations() -> Result<(), String> {
+pub fn test_vector_operations() -> core::result::Result<(), String> {
     println!("VexFS: Running vector operation tests");
     // Basic vector operations test
     Ok(())
