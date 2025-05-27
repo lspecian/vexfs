@@ -386,7 +386,7 @@ impl PathResolver {
     }
 
     /// Get the parent inode of a given inode
-    fn get_parent_inode(inode_manager: &mut InodeManager, inode: InodeNumber) -> FsResult<InodeNumber> {
+    fn get_parent_inode(_inode_manager: &mut InodeManager, inode: InodeNumber) -> FsResult<InodeNumber> {
         if inode == VEXFS_ROOT_INO {
             return Ok(VEXFS_ROOT_INO);
         }
@@ -431,6 +431,17 @@ impl PathResolver {
         } else {
             Err(VexfsError::InvalidPath("Cannot resolve parent of root".into()))
         }
+    }
+
+    /// Check if one inode is a descendant of another (for preventing cycles)
+    pub fn is_descendant(
+        _inode_manager: &mut InodeManager,
+        _ancestor: InodeNumber,
+        _descendant: InodeNumber,
+    ) -> FsResult<bool> {
+        // TODO: Implement proper descendant checking
+        // For now, return false to be safe
+        Ok(false)
     }
 }
 

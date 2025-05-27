@@ -377,7 +377,7 @@ impl FreeSpaceBitmap {
         }
         
         // Adjust for any padding bits beyond total_bits
-        let total_words = self.bitmap.len() as u64;
+        let _total_words = self.bitmap.len() as u64;
         let used_bits_in_last_word = self.total_bits % 64;
         if used_bits_in_last_word > 0 {
             let padding_bits = 64 - used_bits_in_last_word;

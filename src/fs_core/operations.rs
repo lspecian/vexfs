@@ -7,9 +7,9 @@
 
 use crate::shared::errors::VexfsError;
 use crate::shared::types::{
-    InodeNumber, FileType, FileMode, FileSize, BlockNumber, Result, Timestamp // AccessMode removed
+    InodeNumber, FileType, FileMode, FileSize, Result, Timestamp // AccessMode removed, BlockNumber removed
 };
-use crate::shared::constants::VEXFS_ROOT_INODE;
+use crate::shared::constants::VEXFS_ROOT_INO;
 use crate::fs_core::{
     file::{File, FileHandle},
     directory::{Directory, DirectoryEntry},
@@ -288,7 +288,7 @@ impl FilesystemOperations {
     /// # Returns
     /// 
     /// Returns Ok(()) on success or an error.
-    pub fn close_file(handle: FileHandle) -> Result<()> {
+    pub fn close_file(mut handle: FileHandle) -> Result<()> {
         handle.file.flush()?;
         // File handle is dropped automatically
         Ok(())
@@ -323,7 +323,7 @@ impl FilesystemOperations {
         let file_inode_data = (*file_inode_arc).clone(); // Clone Inode data for checks
         
         // Check permissions
-        check_delete_permission(&parent_inode, &file_inode_data, &context.user)?;
+        check_delete_permission(&parent_inode, &context.user)?;
         
         // Can't delete directories with this function
         if file_inode_data.is_dir() {
@@ -341,7 +341,7 @@ impl FilesystemOperations {
         // If no more links, delete the inode and its data
         if updated_inode_data.nlink == 0 {
             // TODO: Deallocate file data blocks
-            crate::fs_core::inode::deallocate_inode_blocks(context.inode_manager, file_inode_number)?; // Assuming deallocate_inode_blocks needs manager
+            crate::fs_core::inode::deallocate_inode_blocks(file_inode_number)?;
             delete_inode(context.inode_manager, file_inode_number)?;
         } else {
             // Just update the link count
@@ -504,7 +504,7 @@ impl FilesystemOperations {
         }
         
         // Check permissions
-        check_delete_permission(&parent_inode_arc, &dir_inode_data, &context.user)?;
+        check_delete_permission(&parent_inode_arc, &context.user)?;
         
         // Check that directory is empty (should only contain . and ..)
         let entries = crate::fs_core::directory::read_entries(context.inode_manager, dir_inode_number, &context.user)?;
