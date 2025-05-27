@@ -296,7 +296,7 @@ impl DirectoryOperations {
         let _parent_lock = acquire_write_lock_guard(context.lock_manager, parent_inode)?;
         
         // Load parent directory and check if name already exists
-        let mut parent_dir = Directory::from_inode((*parent_dir_inode).clone());
+        let mut parent_dir = Directory::from_inode(parent_dir_inode.as_ref().clone());
         if parent_dir.find_entry(name)?.is_some() {
             return Err(VexfsError::FileExists);
         }
@@ -311,7 +311,7 @@ impl DirectoryOperations {
         let dir_inode_number = dir_inode.ino;
         
         // Create the directory entity
-        let mut directory = Directory::from_inode(dir_inode.clone());
+        let mut directory = Directory::from_inode((*dir_inode_arc).clone());
         
         // Add . and .. entries
         directory.add_entry(DirectoryEntry::current_dir(dir_inode_number))?;
@@ -372,7 +372,7 @@ impl DirectoryOperations {
         let _lock = acquire_read_lock_guard(context.lock_manager, inode_number)?;
         
         // Load and return entries
-        let mut directory = Directory::from_inode(dir_inode.clone());
+        let mut directory = Directory::from_inode(dir_inode.as_ref().clone());
         let entries = directory.list_entries()?;
         
         Ok(entries.clone())
@@ -445,7 +445,7 @@ impl DirectoryOperations {
     ) -> Result<()> {
         // Validate names
         if old_name == "." || old_name == ".." || new_name == "." || new_name == ".." {
-            return Err(VexfsError::InvalidArgument);
+            return Err(VexfsError::InvalidArgument("cannot rename . or .. entries".to_string()));
         }
         
         // Get directory inodes
@@ -491,12 +491,12 @@ impl DirectoryOperations {
         let target_inode = get_inode(context.inode_manager,entry.inode_number)?;
         
         // Check permissions
-        if !can_delete_from_directory(&old_dir, &target_inode, user)? {
-            return Err(VexfsError::PermissionDenied);
+        if !can_delete_from_directory(&old_dir, &context.user) {
+            return Err(VexfsError::PermissionDenied("Permission denied".to_string()));
         }
         
-        if !can_create_in_directory(&new_dir, user)? {
-            return Err(VexfsError::PermissionDenied);
+        if !can_create_in_directory(&new_dir, &context.user) {
+            return Err(VexfsError::PermissionDenied("Permission denied".to_string()));
         }
         
         // Check if destination already exists
@@ -553,7 +553,7 @@ impl DirectoryOperations {
     ) -> Result<()> {
         // Validate name
         if name == "." || name == ".." {
-            return Err(VexfsError::InvalidArgument);
+            return Err(VexfsError::InvalidArgument("cannot rename . or .. entries".to_string()));
         }
         
         // Get parent directory
@@ -568,7 +568,7 @@ impl DirectoryOperations {
         let _parent_lock = acquire_write_lock_guard(context.lock_manager,parent_inode)?;
         
         // Load parent directory and find the target
-        let mut parent_dir = Directory::from_inode(parent_dir_inode);
+        let mut parent_dir = Directory::from_inode(parent_dir_inode.as_ref().clone());
         let entry = parent_dir.find_entry(name)?
             .ok_or(VexfsError::NotFound)?
             .clone();
@@ -582,15 +582,15 @@ impl DirectoryOperations {
         let target_dir_inode = get_inode(context.inode_manager,entry.inode_number)?;
         
         // Check deletion permission
-        if !can_delete_from_directory(&parent_dir_inode, &target_dir_inode, user)? {
-            return Err(VexfsError::PermissionDenied);
+        if !can_delete_from_directory(&parent_dir_inode, &context.user) {
+            return Err(VexfsError::PermissionDenied("Permission denied".to_string()));
         }
         
         // Acquire write lock on target directory
         let _target_lock = acquire_write_lock_guard(context.lock_manager,entry.inode_number)?;
         
         // Check if directory is empty
-        let mut target_dir = Directory::from_inode(target_dir_inode);
+        let mut target_dir = Directory::from_inode((**target_dir_inode).clone());
         if !target_dir.is_empty() {
             return Err(VexfsError::DirectoryNotEmpty);
         }
@@ -600,16 +600,16 @@ impl DirectoryOperations {
         
         // Update parent link count (removing the .. link from deleted dir)
         let mut updated_parent = parent_dir.inode.clone();
-        updated_parent.link_count -= 1;
+        updated_parent.nlink -= 1;
         updated_parent.mtime = crate::shared::utils::current_timestamp();
         updated_parent.mark_dirty();
         
         // Delete the target directory inode
-        delete_inode(entry.inode_number)?;
+        delete_inode(context.inode_manager, entry.inode_number)?;
         
         // Save parent directory
         parent_dir.sync()?;
-        put_inode(updated_parent)?;
+        put_inode(context.inode_manager, Arc::new(updated_parent))?;
         
         Ok(())
     }
@@ -651,8 +651,8 @@ impl DirectoryOperations {
         }
         
         // Check permission to create in directory
-        if !can_create_in_directory(&dir, user)? {
-            return Err(VexfsError::PermissionDenied);
+        if !can_create_in_directory(&dir, &context.user) {
+            return Err(VexfsError::PermissionDenied("Permission denied".to_string()));
         }
         
         // Acquire locks
@@ -660,7 +660,7 @@ impl DirectoryOperations {
         let _target_lock = acquire_write_lock_guard(context.lock_manager,target_inode)?;
         
         // Load directory and check if name exists
-        let mut directory = Directory::from_inode(dir);
+        let mut directory = Directory::from_inode((**dir).clone());
         if directory.find_entry(name)?.is_some() {
             return Err(VexfsError::FileExists);
         }
@@ -670,13 +670,14 @@ impl DirectoryOperations {
         directory.add_entry(entry)?;
         
         // Increment link count
-        target.link_count += 1;
-        target.ctime = crate::shared::utils::current_timestamp();
-        target.mark_dirty();
+        let mut target_mut = Arc::try_unwrap(target).unwrap_or_else(|arc| (*arc).clone());
+        target_mut.nlink += 1;
+        target_mut.ctime = crate::shared::utils::current_timestamp();
+        target_mut.mark_dirty();
         
         // Save changes
         directory.sync()?;
-        put_inode(target)?;
+        put_inode(context.inode_manager, Arc::new(target_mut))?;
         
         Ok(())
     }
@@ -710,31 +711,29 @@ impl DirectoryOperations {
         }
         
         // Check permission to create in directory
-        if !can_create_in_directory(&dir, user)? {
-            return Err(VexfsError::PermissionDenied);
+        if !can_create_in_directory(&dir, &context.user) {
+            return Err(VexfsError::PermissionDenied("Permission denied".to_string()));
         }
         
         // Acquire directory lock
         let _dir_lock = acquire_write_lock_guard(context.lock_manager,dir_inode)?;
         
         // Load directory and check if name exists
-        let mut directory = Directory::from_inode(dir);
+        let mut directory = Directory::from_inode((**dir).clone());
         if directory.find_entry(name)?.is_some() {
             return Err(VexfsError::FileExists);
         }
         
         // Create symlink inode
-        let mut symlink_inode = create_inode(FileType::Symlink)?;
-        symlink_inode.uid = user.uid;
-        symlink_inode.gid = user.gid;
-        symlink_inode.mode = 0o777; // Symlinks have full permissions
-        symlink_inode.size = target_path.len() as u64;
-        symlink_inode.link_count = 1;
+        let symlink_inode = create_inode(context.inode_manager, FileType::Symlink, FileMode::new(0o777), context.user.uid, context.user.gid)?;
+        let mut symlink_inode_mut = (*symlink_inode).clone();
+        symlink_inode_mut.size = target_path.len() as u64;
+        symlink_inode_mut.nlink = 1;
         
         // TODO: Store the target path in the symlink inode data
         // For now, this is a placeholder
         
-        let symlink_inode_number = symlink_inode.number;
+        let symlink_inode_number = symlink_inode_mut.ino;
         
         // Create directory entry
         let entry = DirectoryEntry::new(
@@ -746,7 +745,7 @@ impl DirectoryOperations {
         
         // Save changes
         directory.sync()?;
-        put_inode(symlink_inode)?;
+        put_inode(context.inode_manager, Arc::new(symlink_inode_mut))?;
         
         Ok(())
     }
