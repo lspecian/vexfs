@@ -311,7 +311,7 @@ impl DirectoryOperations {
         let dir_inode_number = dir_inode.ino;
         
         // Create the directory entity
-        let mut directory = Directory::from_inode(dir_inode);
+        let mut directory = Directory::from_inode(dir_inode.clone());
         
         // Add . and .. entries
         directory.add_entry(DirectoryEntry::current_dir(dir_inode_number))?;
@@ -372,7 +372,7 @@ impl DirectoryOperations {
         let _lock = acquire_read_lock_guard(context.lock_manager, inode_number)?;
         
         // Load and return entries
-        let mut directory = Directory::from_inode(dir_inode);
+        let mut directory = Directory::from_inode(dir_inode.clone());
         let entries = directory.list_entries()?;
         
         Ok(entries.clone())
@@ -413,7 +413,7 @@ impl DirectoryOperations {
         let _lock = acquire_read_lock_guard(context.lock_manager, dir_inode)?;
         
         // Load directory and search for entry
-        let mut directory = Directory::from_inode(inode);
+        let mut directory = Directory::from_inode((*inode).clone());
         
         match directory.find_entry(name)? {
             Some(entry) => Ok(entry.clone()),
@@ -475,11 +475,11 @@ impl DirectoryOperations {
         };
         
         // Load directories
-        let mut old_directory = Directory::from_inode(old_dir);
+        let mut old_directory = Directory::from_inode((*old_dir).clone());
         let mut new_directory = if old_dir_inode == new_dir_inode {
             old_directory.clone()
         } else {
-            Directory::from_inode(new_dir)
+            Directory::from_inode((*new_dir).clone())
         };
         
         // Find the entry to move
