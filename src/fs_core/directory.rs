@@ -807,3 +807,102 @@ pub fn create_symbolic_link(
 ) -> Result<()> {
     DirectoryOperations::create_symbolic_link(target_path, dir_inode, name, user)
 }
+
+// Wrapper functions to match the interface expected by operations.rs
+use super::InodeManager;
+
+/// Add an entry to a directory (wrapper for operations.rs compatibility)
+pub fn add_entry(
+    _inode_manager: &mut InodeManager,
+    dir_inode: InodeNumber,
+    entry: DirectoryEntry,
+    user: &UserContext,
+) -> Result<()> {
+    // Get the directory inode
+    let dir = get_inode(dir_inode)?;
+    
+    // Check if it's actually a directory
+    if !dir.is_directory() {
+        return Err(VexfsError::NotDirectory);
+    }
+    
+    // Check permission to create in directory
+    if !can_create_in_directory(&dir, user) {
+        return Err(VexfsError::PermissionDenied);
+    }
+    
+    // Load directory and add entry
+    let mut directory = Directory::from_inode(dir);
+    directory.add_entry(entry)?;
+    directory.sync()?;
+    
+    Ok(())
+}
+
+/// Remove an entry from a directory (wrapper for operations.rs compatibility)
+pub fn remove_entry(
+    _inode_manager: &mut InodeManager,
+    dir_inode: InodeNumber,
+    name: &str,
+    user: &UserContext,
+) -> Result<DirectoryEntry> {
+    // Get the directory inode
+    let dir = get_inode(dir_inode)?;
+    
+    // Check if it's actually a directory
+    if !dir.is_directory() {
+        return Err(VexfsError::NotDirectory);
+    }
+    
+    // Check permission to delete from directory
+    if !can_delete_from_directory(&dir, user) {
+        return Err(VexfsError::PermissionDenied);
+    }
+    
+    // Load directory and remove entry
+    let mut directory = Directory::from_inode(dir);
+    let removed_entry = directory.remove_entry(name)?;
+    directory.sync()?;
+    
+    Ok(removed_entry)
+}
+
+/// Read directory entries (wrapper for operations.rs compatibility)
+pub fn read_entries(
+    _inode_manager: &mut InodeManager,
+    dir_inode: InodeNumber,
+    user: &UserContext,
+) -> Result<Vec<DirectoryEntry>> {
+    read_directory(dir_inode, user)
+}
+
+/// Update the ".." entry in a directory (placeholder implementation)
+pub fn update_dotdot_entry(
+    _inode_manager: &mut InodeManager,
+    dir_inode: InodeNumber,
+    new_parent_inode: InodeNumber,
+) -> Result<()> {
+    // Get the directory inode
+    let dir = get_inode(dir_inode)?;
+    
+    // Check if it's actually a directory
+    if !dir.is_directory() {
+        return Err(VexfsError::NotDirectory);
+    }
+    
+    // Load directory
+    let mut directory = Directory::from_inode(dir);
+    directory.ensure_entries_loaded()?;
+    
+    // Find and update the ".." entry
+    for entry in &mut directory.entries {
+        if entry.name == ".." {
+            entry.inode_number = new_parent_inode;
+            directory.mark_dirty();
+            break;
+        }
+    }
+    
+    directory.sync()?;
+    Ok(())
+}

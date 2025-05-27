@@ -154,7 +154,7 @@ Improve `test_env/vexfs.pkr.hcl`:
 ## 📁 **File Structure**
 
 ```
-vexfs/
+fs/
 ├── src/                    # Kernel module source (VM-only build)
 │   ├── lib.rs
 │   ├── vector_*.rs

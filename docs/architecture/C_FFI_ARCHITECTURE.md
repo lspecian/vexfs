@@ -538,7 +538,7 @@ use linked_list_allocator::LockedHeap;
 ### Code Organization
 
 ```
-vexfs/src/
+fs/src/
 ├── ffi.rs              # FFI function implementations
 ├── lib.rs              # Main library interface
 ├── superblock.rs       # Superblock operations

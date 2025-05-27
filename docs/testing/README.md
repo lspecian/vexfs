@@ -76,7 +76,7 @@ make -C vexfs      # Build kernel module
 # Connect to VM for manual testing
 ./test_env/vm_control.sh ssh
 # Inside VM:
-cd /mnt/vexfs/vexfs
+cd /mnt/vexfs/fs
 make && sudo insmod vexfs.ko
 ./test_ffi_integration
 ```
@@ -125,7 +125,7 @@ VEXFS_VM_MEMORY=8G VEXFS_VM_CPUS=8 ./test_env/run_qemu_simple.sh
 ./test_env/vm_control.sh ssh
 
 # In VM:
-cd /mnt/vexfs/vexfs
+cd /mnt/vexfs/fs
 sudo insmod vexfs.ko
 dmesg | tail -50              # Check kernel messages
 sudo rmmod vexfs             # Clean unload
@@ -143,7 +143,7 @@ free -h            # Memory usage
 ### FFI Debug
 ```bash
 # In VM:
-cd /mnt/vexfs/vexfs
+cd /mnt/vexfs/fs
 make test_ffi                 # Build FFI test
 ./test_ffi_integration       # Run FFI test
 objdump -t vexfs.ko | grep ffi  # Check FFI symbols
