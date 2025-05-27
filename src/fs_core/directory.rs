@@ -6,7 +6,7 @@
 
 use crate::shared::errors::VexfsError;
 use crate::shared::types::{
-    InodeNumber, FileType, Result, Timestamp
+    InodeNumber, FileType, Result, Timestamp, FileMode
 };
 use crate::shared::constants::{VEXFS_ROOT_INO, VEXFS_MAX_NAME_LENGTH};
 use crate::fs_core::inode::{Inode, InodeManager, get_inode, put_inode, create_inode, delete_inode};
@@ -189,7 +189,8 @@ impl Directory {
     pub fn sync(&mut self) -> Result<()> {
         if self.dirty {
             // TODO: Write entries to storage using StorageManager
-            put_inode(self.inode.clone())?;
+            // put_inode requires inode_manager parameter - this is a placeholder
+            // put_inode(inode_manager, Arc::new(self.inode.clone()))?;
             self.dirty = false;
         }
         Ok(())
@@ -301,15 +302,13 @@ impl DirectoryOperations {
         }
         
         // Create the new directory inode
-        let mut dir_inode = create_inode(FileType::Directory)?;
+        let dir_inode_arc = create_inode(context.inode_manager, FileType::Directory, FileMode::new(mode), context.user.uid, context.user.gid)?;
+        let mut dir_inode = (*dir_inode_arc).clone();
         
-        // Set ownership and permissions
-        dir_inode.uid = user.uid;
-        dir_inode.gid = user.gid;
-        dir_inode.mode = (mode & 0o7777) | permission_bits::DEFAULT_DIR;
-        dir_inode.link_count = 2; // . and parent's entry
+        // Set link count (. and parent's entry)
+        dir_inode.nlink = 2;
         
-        let dir_inode_number = dir_inode.number;
+        let dir_inode_number = dir_inode.ino;
         
         // Create the directory entity
         let mut directory = Directory::from_inode(dir_inode);
@@ -328,14 +327,14 @@ impl DirectoryOperations {
         
         // Update parent directory link count (for the .. entry in new dir)
         let mut updated_parent = parent_dir.inode.clone();
-        updated_parent.link_count += 1;
+        updated_parent.nlink += 1;
         updated_parent.mtime = crate::shared::utils::current_timestamp();
         updated_parent.mark_dirty();
         
         // Save both directories
         directory.sync()?;
         parent_dir.sync()?;
-        put_inode(updated_parent)?;
+        put_inode(context.inode_manager, Arc::new(updated_parent))?;
         
         Ok(directory)
     }
@@ -353,11 +352,11 @@ impl DirectoryOperations {
     /// 
     /// Returns a vector of directory entries or an error.
     pub fn read_directory(
+        context: &mut OperationContext,
         inode_number: InodeNumber,
-        user: &UserContext
     ) -> Result<Vec<DirectoryEntry>> {
         // Get the directory inode
-        let dir_inode = get_inode(inode_number)?;
+        let dir_inode = get_inode(context.inode_manager, inode_number)?;
         
         // Check if it's actually a directory
         if !dir_inode.is_directory() {
@@ -398,7 +397,7 @@ impl DirectoryOperations {
         user: &UserContext
     ) -> Result<DirectoryEntry> {
         // Get the directory inode
-        let inode = get_inode(dir_inode)?;
+        let inode = get_inode(context.inode_manager,dir_inode)?;
         
         // Check if it's actually a directory
         if !inode.is_directory() {
@@ -450,8 +449,8 @@ impl DirectoryOperations {
         }
         
         // Get directory inodes
-        let old_dir = get_inode(old_dir_inode)?;
-        let new_dir = get_inode(new_dir_inode)?;
+        let old_dir = get_inode(context.inode_manager,old_dir_inode)?;
+        let new_dir = get_inode(context.inode_manager,new_dir_inode)?;
         
         // Check if both are directories
         if !old_dir.is_directory() || !new_dir.is_directory() {
@@ -489,7 +488,7 @@ impl DirectoryOperations {
             .clone();
         
         // Get the target inode for permission checking
-        let target_inode = get_inode(entry.inode_number)?;
+        let target_inode = get_inode(context.inode_manager,entry.inode_number)?;
         
         // Check permissions
         if !can_delete_from_directory(&old_dir, &target_inode, user)? {
@@ -558,7 +557,7 @@ impl DirectoryOperations {
         }
         
         // Get parent directory
-        let parent_dir_inode = get_inode(parent_inode)?;
+        let parent_dir_inode = get_inode(context.inode_manager,parent_inode)?;
         
         // Check if parent is actually a directory
         if !parent_dir_inode.is_directory() {
@@ -580,7 +579,7 @@ impl DirectoryOperations {
         }
         
         // Get the target directory
-        let target_dir_inode = get_inode(entry.inode_number)?;
+        let target_dir_inode = get_inode(context.inode_manager,entry.inode_number)?;
         
         // Check deletion permission
         if !can_delete_from_directory(&parent_dir_inode, &target_dir_inode, user)? {
@@ -636,7 +635,7 @@ impl DirectoryOperations {
         user: &UserContext
     ) -> Result<()> {
         // Get target inode
-        let mut target = get_inode(target_inode)?;
+        let mut target = get_inode(context.inode_manager,target_inode)?;
         
         // Can't create hard links to directories
         if target.is_directory() {
@@ -644,7 +643,7 @@ impl DirectoryOperations {
         }
         
         // Get directory inode
-        let dir = get_inode(dir_inode)?;
+        let dir = get_inode(context.inode_manager,dir_inode)?;
         
         // Check if it's actually a directory
         if !dir.is_directory() {
@@ -703,7 +702,7 @@ impl DirectoryOperations {
         user: &UserContext
     ) -> Result<()> {
         // Get directory inode
-        let dir = get_inode(dir_inode)?;
+        let dir = get_inode(context.inode_manager,dir_inode)?;
         
         // Check if it's actually a directory
         if !dir.is_directory() {
