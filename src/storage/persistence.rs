@@ -212,7 +212,7 @@ impl DiskInode {
 }
 
 /// Directory entry structure
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[repr(C, packed)]
 pub struct DiskDirEntry {
     /// Inode number
@@ -235,12 +235,12 @@ impl DiskDirEntry {
 
         let name_bytes = name.as_bytes();
         let total_len = mem::size_of::<Self>() + name_bytes.len();
-        let aligned_len = align_up(total_len, 4); // 4-byte alignment
+        let aligned_len = align_up(total_len as u64, 4u64) as usize; // 4-byte alignment
 
         let mut data = vec![0u8; aligned_len];
         
         let entry = Self {
-            inode,
+            inode: inode as u32,
             rec_len: aligned_len as u16,
             name_len: name_bytes.len() as u8,
             file_type,
@@ -291,7 +291,7 @@ impl DiskDirEntry {
         }
 
         let entry = unsafe {
-            *(data.as_ptr() as *const Self)
+            std::ptr::read(data.as_ptr() as *const Self)
         };
 
         // Validate entry
@@ -444,7 +444,7 @@ impl PersistenceManager {
     /// Serialize structure to block-aligned buffer
     pub fn serialize_to_block<T: OnDiskSerializable>(&self, data: &T) -> VexfsResult<Vec<u8>> {
         let serialized = data.to_bytes();
-        let aligned_size = align_up(serialized.len(), self.block_size as usize);
+        let aligned_size = align_up(serialized.len() as u64, self.block_size as u64) as usize;
         
         let mut buffer = vec![0u8; aligned_size];
         buffer[0..serialized.len()].copy_from_slice(serialized);
@@ -474,7 +474,7 @@ impl PersistenceManager {
         }
         
         // Pad to block boundary
-        let aligned_size = align_up(buffer.len(), self.block_size as usize);
+        let aligned_size = align_up(buffer.len() as u64, self.block_size as u64) as usize;
         buffer.resize(aligned_size, 0);
         
         if self.checksum_enabled {
@@ -586,7 +586,7 @@ impl BufferManager {
 
     /// Allocate a write buffer
     pub fn allocate_buffer(&mut self, size: usize) -> VexfsResult<usize> {
-        let aligned_size = align_up(size, self.block_size as usize);
+        let aligned_size = align_up(size as u64, self.block_size as u64) as usize;
         
         // Find free buffer
         for i in 0..VEXFS_MAX_WRITE_BUFFERS {

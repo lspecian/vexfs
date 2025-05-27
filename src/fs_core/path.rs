@@ -62,7 +62,7 @@ impl PathComponent {
             "/" | "" => Ok(Self::Root),
             _ => {
                 if name.len() > MAX_COMPONENT_LENGTH {
-                    return Err(VexfsError::NameTooLong(name.len()));
+                    return Err(VexfsError::NameTooLong);
                 }
                 
                 // Validate component name
@@ -122,7 +122,7 @@ impl Path {
 
         // Check path depth
         if components.len() > MAX_PATH_DEPTH {
-            return Err(VexfsError::PathTooLong(components.len()));
+            return Err(VexfsError::PathTooLong);
         }
 
         Ok(Self {
@@ -206,7 +206,7 @@ impl Path {
         new_components.push(new_component);
 
         if new_components.len() > MAX_PATH_DEPTH {
-            return Err(VexfsError::PathTooLong(new_components.len()));
+            return Err(VexfsError::PathTooLong);
         }
 
         Ok(Self {
@@ -254,7 +254,7 @@ impl PathValidator {
         }
 
         if name.len() > MAX_COMPONENT_LENGTH {
-            return Err(VexfsError::NameTooLong(name.len()));
+            return Err(VexfsError::NameTooLong);
         }
 
         // Check for invalid characters
@@ -307,7 +307,7 @@ impl PathValidator {
 
         // Check final depth
         if depth > MAX_PATH_DEPTH {
-            return Err(VexfsError::PathTooLong(depth));
+            return Err(VexfsError::PathTooLong);
         }
 
         Ok(())

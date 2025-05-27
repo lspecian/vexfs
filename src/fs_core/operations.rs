@@ -145,7 +145,7 @@ impl FilesystemOperations {
     /// Returns the new file's inode number or an error.
     pub fn create_file(path: &str, mode: u32, context: &mut OperationContext) -> Result<InodeNumber> { // context is now &mut
         // Resolve parent directory and filename
-        let (parent_inode_num, filename) = PathResolver::resolve_parent(context.inode_manager, &Path::from_str(path)?, context.resolution_context())?;
+        let (parent_inode_num, filename) = PathResolver::resolve_parent(context.inode_manager, context.cwd_inode, &Path::from_str(path)?)?;
         
         // Lock parent directory
         let _parent_lock = acquire_inode_lock(context.lock_manager, parent_inode_num, LockType::Write, 0)?;
@@ -155,13 +155,13 @@ impl FilesystemOperations {
         check_create_permission(&parent_inode, &context.user)?;
         
         // Check if file already exists
-        if PathResolver::resolve_path(context.inode_manager, &Path::from_str(path)?, context.resolution_context()).is_ok() {
+        if PathResolver::resolve_path(context.inode_manager, context.cwd_inode, &Path::from_str(path)?).is_ok() {
             return Err(VexfsError::FileExists);
         }
         
         // Create new inode
         let file_inode_arc = create_inode(context.inode_manager, FileType::Regular, FileMode::new(mode), context.user.uid, context.user.gid)?;
-        let mut file_inode_mut_guard = Arc::try_unwrap(file_inode_arc).map_err(|_| VexfsError::LockError("Failed to get mutable inode".to_string()))?;
+        let mut file_inode_mut_guard = Arc::try_unwrap(file_inode_arc).map_err(|_| VexfsError::LockConflict("Failed to get mutable inode".to_string()))?;
         // If Arc::try_unwrap fails, it means there are other Arcs. This is a design issue if we need to mutate here.
         // For now, assuming it succeeds or we need a different pattern like clone-modify-put.
         // Let's assume create_inode returns an Inode that we can make mutable or it's already what we need.
@@ -214,8 +214,7 @@ impl FilesystemOperations {
     /// Returns a file handle or an error.
     pub fn open_file(path: &str, flags: u32, context: &mut OperationContext) -> Result<FileHandle> { // context is now &mut
         // Resolve the path
-        let result = PathResolver::resolve_path(context.inode_manager, &Path::from_str(path)?, context.resolution_context())?;
-        let inode_number = result.inode;
+        let inode_number = PathResolver::resolve_path(context.inode_manager, context.cwd_inode, &Path::from_str(path)?)?;
         
         // Get and check the inode
         let inode_arc = get_inode(context.inode_manager, inode_number)?; // Returns Arc<Inode>
@@ -309,11 +308,10 @@ impl FilesystemOperations {
     /// Returns Ok(()) on success or an error.
     pub fn delete_file(path: &str, context: &mut OperationContext) -> Result<()> { // context is now &mut
         // Resolve parent directory and filename
-        let (parent_inode_num, filename) = PathResolver::resolve_parent(context.inode_manager, &Path::from_str(path)?, context.resolution_context())?;
+        let (parent_inode_num, filename) = PathResolver::resolve_parent(context.inode_manager, context.cwd_inode, &Path::from_str(path)?)?;
         
         // Resolve the file itself
-        let file_result = PathResolver::resolve_path(context.inode_manager, &Path::from_str(path)?, context.resolution_context())?;
-        let file_inode_number = file_result.inode;
+        let file_inode_number = PathResolver::resolve_path(context.inode_manager, context.cwd_inode, &Path::from_str(path)?)?;
         
         // Lock both parent and file
         let _parent_lock = acquire_inode_lock(context.lock_manager, parent_inode_num, LockType::Write, 0)?;
@@ -371,7 +369,7 @@ impl FilesystemOperations {
     /// Returns the new directory's inode number or an error.
     pub fn create_directory(path: &str, mode: u32, context: &mut OperationContext) -> Result<InodeNumber> { // context is now &mut
         // Resolve parent directory and dirname
-        let (parent_inode_num, dirname) = PathResolver::resolve_parent(context.inode_manager, &Path::from_str(path)?, context.resolution_context())?;
+        let (parent_inode_num, dirname) = PathResolver::resolve_parent(context.inode_manager, context.cwd_inode, &Path::from_str(path)?)?;
         
         // Lock parent directory
         let _parent_lock = acquire_inode_lock(context.lock_manager, parent_inode_num, LockType::Write, 0)?;
@@ -381,7 +379,7 @@ impl FilesystemOperations {
         check_create_permission(&parent_inode, &context.user)?;
         
         // Check if directory already exists
-        if PathResolver::resolve_path(context.inode_manager, &Path::from_str(path)?, context.resolution_context()).is_ok() {
+        if PathResolver::resolve_path(context.inode_manager, context.cwd_inode, &Path::from_str(path)?).is_ok() {
             return Err(VexfsError::FileExists);
         }
         
@@ -450,8 +448,7 @@ impl FilesystemOperations {
     /// Returns a vector of directory entries or an error.
     pub fn list_directory(path: &str, context: &mut OperationContext) -> Result<Vec<DirectoryEntry>> { // context is now &mut
         // Resolve the directory path
-        let result = PathResolver::resolve_path(context.inode_manager, &Path::from_str(path)?, context.resolution_context())?;
-        let inode_number = result.inode;
+        let inode_number = PathResolver::resolve_path(context.inode_manager, context.cwd_inode, &Path::from_str(path)?)?;
         
         // Get and check the inode
         let inode_arc = get_inode(context.inode_manager, inode_number)?;
@@ -483,15 +480,14 @@ impl FilesystemOperations {
     pub fn remove_directory(path: &str, context: &mut OperationContext) -> Result<()> { // context is now &mut
         // Can't remove root directory
         if path == "/" {
-            return Err(VexfsError::InvalidArgument);
+            return Err(VexfsError::InvalidArgument("invalid argument".to_string()));
         }
         
         // Resolve parent directory and dirname
-        let (parent_inode_num, dirname) = PathResolver::resolve_parent(context.inode_manager, &Path::from_str(path)?, context.resolution_context())?;
+        let (parent_inode_num, dirname) = PathResolver::resolve_parent(context.inode_manager, context.cwd_inode, &Path::from_str(path)?)?;
         
         // Resolve the directory itself
-        let dir_result = PathResolver::resolve_path(context.inode_manager, &Path::from_str(path)?, context.resolution_context())?;
-        let dir_inode_number = dir_result.inode;
+        let dir_inode_number = PathResolver::resolve_path(context.inode_manager, context.cwd_inode, &Path::from_str(path)?)?;
         
         // Lock both parent and directory
         let _parent_lock = acquire_inode_lock(context.lock_manager, parent_inode_num, LockType::Write, 0)?;
@@ -526,10 +522,10 @@ impl FilesystemOperations {
         // Update parent directory link count (removing the .. reference)
         let mut parent_updated = get_inode(context.inode_manager, parent_inode_num)?;
         parent_updated.nlink -= 1;
-        put_inode(parent_updated)?;
+        put_inode(context.inode_manager, parent_updated)?;
         
         // Delete the directory inode
-        delete_inode(dir_inode_number)?;
+        delete_inode(context.inode_manager, dir_inode_number)?;
         
         Ok(())
     }
@@ -539,12 +535,11 @@ impl FilesystemOperations {
         let new_path_obj = Path::from_str(new_path)?;
 
         // Resolve old file and its parent
-        let (old_parent_inode_num, old_filename) = PathResolver::resolve_parent(context.inode_manager, context.cwd_inode, &old_path_obj, &context.user)?;
-        let old_file_result = PathResolver::resolve_path(context.inode_manager, context.cwd_inode, &old_path_obj, context.follow_symlinks, &context.user)?;
-        let file_inode_number = old_file_result.inode;
+        let (old_parent_inode_num, old_filename) = PathResolver::resolve_parent(context.inode_manager, context.cwd_inode, &old_path_obj)?;
+        let file_inode_number = PathResolver::resolve_path(context.inode_manager, context.cwd_inode, &old_path_obj)?;
         
         // Resolve new parent
-        let (new_parent_inode_num, new_filename) = PathResolver::resolve_parent(context.inode_manager, context.cwd_inode, &new_path_obj, &context.user)?;
+        let (new_parent_inode_num, new_filename) = PathResolver::resolve_parent(context.inode_manager, context.cwd_inode, &new_path_obj)?;
         
         // Lock all involved inodes
         let _old_parent_lock = acquire_inode_lock(context.lock_manager, old_parent_inode_num, LockType::Write, 0)?;
@@ -570,18 +565,18 @@ impl FilesystemOperations {
         crate::fs_core::permissions::PermissionChecker::check_create(context.inode_manager, new_parent_inode_num, &context.user)?.to_result()?;
         
         // Check if destination exists
-        if PathResolver::resolve_path(context.inode_manager, context.cwd_inode, &new_path_obj, context.follow_symlinks, &context.user).is_ok() {
+        if PathResolver::resolve_path(context.inode_manager, context.cwd_inode, &new_path_obj).is_ok() {
             return Err(VexfsError::FileExists);
         }
         
         // Prevent renaming "." or ".."
         if old_filename == "." || old_filename == ".." || new_filename == "." || new_filename == ".." {
-            return Err(VexfsError::InvalidArgument);
+            return Err(VexfsError::InvalidArgument("invalid argument".to_string()));
         }
         
         if file_inode_data.is_dir() {
             if PathResolver::is_descendant(context.inode_manager, new_parent_inode_num, file_inode_number)? {
-                 return Err(VexfsError::InvalidArgument);
+                 return Err(VexfsError::InvalidArgument("invalid argument".to_string()));
             }
         }
         
@@ -635,8 +630,8 @@ impl FilesystemOperations {
     /// Returns metadata or an error.
     pub fn get_metadata<'a>(path: &str, context: &mut OperationContext<'a>) -> Result<OperationResult> {
         // Resolve the path
-        let result = PathResolver::resolve_path(context.inode_manager, context.cwd_inode, &Path::from_str(path)?, context.follow_symlinks, &context.user)?;
-        let inode_arc = get_inode(context.inode_manager, result.inode)?;
+        let result = PathResolver::resolve_path(context.inode_manager, context.cwd_inode, &Path::from_str(path)?)?;
+        let inode_arc = get_inode(context.inode_manager, result)?;
         let inode_data = &*inode_arc;
         
         // No special permission check needed for metadata (just needs to be able to access the path)
@@ -664,14 +659,13 @@ impl FilesystemOperations {
     /// Returns Ok(()) on success or an error.
     pub fn change_permissions(path: &str, mode: u32, context: &OperationContext) -> Result<()> {
         // Resolve the path
-        let result = PathResolver::resolve_path(&Path::from_str(path)?, context.resolution_context())?;
-        let inode_number = result.inode;
+        let inode_number = PathResolver::resolve_path(context.inode_manager, context.cwd_inode, &Path::from_str(path)?)?;
         
         // Lock the inode
-        let _lock = acquire_inode_lock(inode_number, LockType::Write)?;
+        let _lock = acquire_inode_lock(context.lock_manager, inode_number, LockType::Write, context.user.uid)?;
         
         // Get and check the inode
-        let mut inode = get_inode(inode_number)?;
+        let mut inode = get_inode(context.inode_manager, inode_number)?;
         
         // Check permissions to change mode
         crate::fs_core::permissions::PermissionChecker::check_change_permissions(&inode, &context.user)?;
@@ -680,7 +674,7 @@ impl FilesystemOperations {
         inode.mode = (inode.mode & !0o777) | (mode & 0o777);
         inode.touch_ctime();
         
-        put_inode(inode)?;
+        put_inode(context.inode_manager, inode)?;
         
         Ok(())
     }

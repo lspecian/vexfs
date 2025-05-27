@@ -60,8 +60,8 @@ impl VexfsLayout {
     ) -> VexfsResult<Self> {
         // Validate block size
         if !block_size.is_power_of_two() || 
-           block_size < VEXFS_MIN_BLOCK_SIZE || 
-           block_size > VEXFS_MAX_BLOCK_SIZE {
+           block_size < VEXFS_MIN_BLOCK_SIZE as u32 ||
+           block_size > VEXFS_MAX_BLOCK_SIZE as u32 {
             return Err(VexfsError::InvalidArgument("invalid block size".to_string()));
         }
 
@@ -97,7 +97,7 @@ impl VexfsLayout {
             blocks_per_group,
             inodes_per_group,
             group_count,
-            inode_size: VEXFS_DEFAULT_INODE_SIZE,
+            inode_size: VEXFS_DEFAULT_INODE_SIZE as u16,
             journal_blocks,
             vector_blocks,
         })
@@ -456,7 +456,7 @@ impl LayoutCalculator {
         journal_size: Option<u32>,
         enable_vectors: bool,
     ) -> VexfsResult<VexfsLayout> {
-        let block_size = block_size.unwrap_or(VEXFS_DEFAULT_BLOCK_SIZE);
+        let block_size = block_size.unwrap_or(VEXFS_DEFAULT_BLOCK_SIZE as u32);
         let inode_ratio = inode_ratio.unwrap_or(16384); // 16KB per inode default
         
         VexfsLayout::calculate(device_size, block_size, inode_ratio, journal_size, enable_vectors)

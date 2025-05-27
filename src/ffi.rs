@@ -26,8 +26,14 @@
 
 use core::ffi::{c_int, c_void, c_char};
 use crate::shared::errors::{VexfsError, VexfsResult};
-use crate::fs_core::operations::FilesystemOperations;
-use crate::storage::StorageManager;
+use crate::shared::types::InodeNumber;
+use crate::fs_core::operations::{FilesystemOperations, OperationContext};
+use crate::fs_core::inode::InodeManager;
+use crate::fs_core::locking::LockManager;
+use crate::fs_core::permissions::UserContext;
+use crate::storage::{StorageManager};
+use crate::storage::block::BlockDevice;
+use crate::storage::layout::VexfsLayout;
 
 /// Error codes for C FFI
 pub const VEXFS_SUCCESS: c_int = 0;
@@ -60,10 +66,10 @@ pub fn to_ffi_result<T>(result: VexfsResult<T>) -> c_int {
             VexfsError::InvalidArgument(_) => VEXFS_ERROR_INVAL,
             VexfsError::OutOfMemory => VEXFS_ERROR_NOMEM,
             VexfsError::NoSpaceLeft => VEXFS_ERROR_NOSPC,
-            VexfsError::PermissionDenied => VEXFS_ERROR_PERMISSION,
+            VexfsError::PermissionDenied(_) => VEXFS_ERROR_PERMISSION,
             VexfsError::FileExists => VEXFS_ERROR_EXIST,
             VexfsError::FileNotFound => VEXFS_ERROR_NOENT,
-            VexfsError::NotDirectory => VEXFS_ERROR_NOTDIR,
+            VexfsError::NotADirectory(_) => VEXFS_ERROR_NOTDIR,
             VexfsError::IsDirectory => VEXFS_ERROR_ISDIR,
             VexfsError::IoError(_) => VEXFS_ERROR_IO,
             _ => VEXFS_ERROR_GENERIC,
@@ -332,13 +338,56 @@ pub extern "C" fn vexfs_rust_put_super(sb_ptr: *mut c_void) {
 // File Operations FFI Functions
 // ============================================================================
 
-/// Helper to get filesystem operations instance
+/// Helper to create operation context for FFI calls
 /// TODO: Replace with proper global state management
-fn get_fs_ops() -> VexfsResult<FilesystemOperations> {
-    // For now, create a new instance each time
-    // In production, this should be a global singleton
-    let storage_manager = StorageManager::new()?;
-    FilesystemOperations::new(storage_manager)
+fn create_operation_context() -> VexfsResult<(InodeManager, LockManager, UserContext)> {
+    // Create placeholder parameters for StorageManager
+    let device = BlockDevice::new(
+        1024 * 1024 * 1024, // 1GB device size
+        4096,               // 4KB block size
+        false,              // not read-only
+        "vexfs-device".to_string()
+    )?;
+    
+    // Create a minimal layout - TODO: Use actual layout
+    let layout = VexfsLayout::calculate(
+        device.size_in_blocks() * device.block_size() as u64, // device_size
+        device.block_size(),     // block_size
+        16384,                   // inode_ratio (16KB per inode default)
+        None,                    // journal_size (use default)
+        true,                    // vector_enabled
+    )?;
+    let cache_size = 64 * 1024 * 1024; // 64MB default cache
+    
+    let storage_manager = StorageManager::new(device, layout, cache_size)?;
+    let inode_manager = InodeManager::new(&storage_manager)?;
+    let lock_manager = LockManager::new();
+    let user_context = UserContext::root(); // TODO: Use actual user context
+    
+    Ok((inode_manager, lock_manager, user_context))
+}
+
+/// Helper function to create operation context for FFI calls
+/// TODO: Replace with proper global state management
+fn create_ffi_context() -> VexfsResult<(InodeManager, LockManager, UserContext)> {
+    let (inode_manager, lock_manager, user_context) = create_operation_context()?;
+    Ok((inode_manager, lock_manager, user_context))
+}
+
+/// Helper function to convert VexfsError to FFI error code
+fn error_to_ffi(err: VexfsError) -> c_int {
+    match err {
+        VexfsError::InvalidArgument(_) => VEXFS_ERROR_INVAL,
+        VexfsError::OutOfMemory => VEXFS_ERROR_NOMEM,
+        VexfsError::NoSpaceLeft => VEXFS_ERROR_NOSPC,
+        VexfsError::PermissionDenied(_) => VEXFS_ERROR_PERMISSION,
+        VexfsError::FileExists => VEXFS_ERROR_EXIST,
+        VexfsError::FileNotFound => VEXFS_ERROR_NOENT,
+        VexfsError::NotADirectory(_) => VEXFS_ERROR_NOTDIR,
+        VexfsError::IsDirectory => VEXFS_ERROR_ISDIR,
+        VexfsError::IoError(_) => VEXFS_ERROR_IO,
+        _ => VEXFS_ERROR_GENERIC,
+    }
 }
 
 /// Create a new file
@@ -357,13 +406,16 @@ pub extern "C" fn vexfs_create_file(
         Err(_) => return VEXFS_ERROR_INVAL,
     };
 
-    // Get filesystem operations and create file
-    match get_fs_ops() {
-        Ok(fs_ops) => match fs_ops.create_file(path_str, mode) {
-            Ok(_) => VEXFS_SUCCESS,
-            Err(err) => to_ffi_result(Err(err)),
+    // Create operation context and call static method
+    match create_ffi_context() {
+        Ok((mut inode_manager, mut lock_manager, user_context)) => {
+            let mut context = OperationContext::new(user_context, 1, &mut inode_manager, &mut lock_manager); // Use root inode as cwd
+            match FilesystemOperations::create_file(path_str, mode, &mut context) {
+                Ok(_) => VEXFS_SUCCESS,
+                Err(err) => error_to_ffi(err),
+            }
         },
-        Err(err) => to_ffi_result(Err(err)),
+        Err(err) => error_to_ffi(err),
     }
 }
 
@@ -382,12 +434,15 @@ pub extern "C" fn vexfs_open_file(
         Err(_) => return VEXFS_ERROR_INVAL,
     };
 
-    match get_fs_ops() {
-        Ok(fs_ops) => match fs_ops.open_file(path_str, flags) {
-            Ok(_) => VEXFS_SUCCESS,
-            Err(err) => to_ffi_result(Err(err)),
+    match create_ffi_context() {
+        Ok((mut inode_manager, mut lock_manager, user_context)) => {
+            let mut context = OperationContext::new(user_context, 1, &mut inode_manager, &mut lock_manager);
+            match FilesystemOperations::open_file(path_str, flags, &mut context) {
+                Ok(_) => VEXFS_SUCCESS,
+                Err(err) => error_to_ffi(err),
+            }
         },
-        Err(err) => to_ffi_result(Err(err)),
+        Err(err) => error_to_ffi(err),
     }
 }
 
@@ -410,13 +465,9 @@ pub extern "C" fn vexfs_read_file(
 
     let buffer_slice = unsafe { core::slice::from_raw_parts_mut(buffer as *mut u8, size) };
 
-    match get_fs_ops() {
-        Ok(fs_ops) => match fs_ops.read_file(path_str, buffer_slice, offset) {
-            Ok(bytes_read) => bytes_read as c_int,
-            Err(err) => to_ffi_result(Err(err)),
-        },
-        Err(err) => to_ffi_result(Err(err)),
-    }
+    // TODO: Implement proper read_file FFI function
+    // FilesystemOperations::read_file requires a FileHandle, not a path
+    VEXFS_ERROR_GENERIC
 }
 
 /// Write to a file
@@ -438,13 +489,9 @@ pub extern "C" fn vexfs_write_file(
 
     let buffer_slice = unsafe { core::slice::from_raw_parts(buffer as *const u8, size) };
 
-    match get_fs_ops() {
-        Ok(fs_ops) => match fs_ops.write_file(path_str, buffer_slice, offset) {
-            Ok(bytes_written) => bytes_written as c_int,
-            Err(err) => to_ffi_result(Err(err)),
-        },
-        Err(err) => to_ffi_result(Err(err)),
-    }
+    // TODO: Implement proper write_file FFI function
+    // FilesystemOperations::write_file requires a FileHandle, not a path
+    VEXFS_ERROR_GENERIC
 }
 
 /// Close a file
@@ -459,13 +506,9 @@ pub extern "C" fn vexfs_close_file(path: *const c_char) -> c_int {
         Err(_) => return VEXFS_ERROR_INVAL,
     };
 
-    match get_fs_ops() {
-        Ok(fs_ops) => match fs_ops.close_file(path_str) {
-            Ok(_) => VEXFS_SUCCESS,
-            Err(err) => to_ffi_result(Err(err)),
-        },
-        Err(err) => to_ffi_result(Err(err)),
-    }
+    // TODO: Implement proper close_file FFI function
+    // FilesystemOperations::close_file requires a FileHandle, not a path
+    VEXFS_ERROR_GENERIC
 }
 
 /// Delete a file
@@ -480,13 +523,9 @@ pub extern "C" fn vexfs_unlink_file(path: *const c_char) -> c_int {
         Err(_) => return VEXFS_ERROR_INVAL,
     };
 
-    match get_fs_ops() {
-        Ok(fs_ops) => match fs_ops.unlink_file(path_str) {
-            Ok(_) => VEXFS_SUCCESS,
-            Err(err) => to_ffi_result(Err(err)),
-        },
-        Err(err) => to_ffi_result(Err(err)),
-    }
+    // TODO: Implement proper unlink_file FFI function
+    // FilesystemOperations::unlink_file requires different parameters
+    VEXFS_ERROR_GENERIC
 }
 
 /// Truncate a file
@@ -501,13 +540,9 @@ pub extern "C" fn vexfs_truncate_file(path: *const c_char, size: u64) -> c_int {
         Err(_) => return VEXFS_ERROR_INVAL,
     };
 
-    match get_fs_ops() {
-        Ok(fs_ops) => match fs_ops.truncate_file(path_str, size) {
-            Ok(_) => VEXFS_SUCCESS,
-            Err(err) => to_ffi_result(Err(err)),
-        },
-        Err(err) => to_ffi_result(Err(err)),
-    }
+    // TODO: Implement proper truncate_file FFI function
+    // FilesystemOperations::truncate_file requires different parameters
+    VEXFS_ERROR_GENERIC
 }
 
 // ============================================================================
@@ -526,13 +561,9 @@ pub extern "C" fn vexfs_create_dir(path: *const c_char, mode: u32) -> c_int {
         Err(_) => return VEXFS_ERROR_INVAL,
     };
 
-    match get_fs_ops() {
-        Ok(fs_ops) => match fs_ops.create_directory(path_str, mode) {
-            Ok(_) => VEXFS_SUCCESS,
-            Err(err) => to_ffi_result(Err(err)),
-        },
-        Err(err) => to_ffi_result(Err(err)),
-    }
+    // TODO: Implement proper create_directory FFI function
+    // FilesystemOperations::create_directory requires different parameters
+    VEXFS_ERROR_GENERIC
 }
 
 /// Remove a directory
@@ -547,13 +578,9 @@ pub extern "C" fn vexfs_remove_dir(path: *const c_char) -> c_int {
         Err(_) => return VEXFS_ERROR_INVAL,
     };
 
-    match get_fs_ops() {
-        Ok(fs_ops) => match fs_ops.remove_directory(path_str) {
-            Ok(_) => VEXFS_SUCCESS,
-            Err(err) => to_ffi_result(Err(err)),
-        },
-        Err(err) => to_ffi_result(Err(err)),
-    }
+    // TODO: Implement proper remove_directory FFI function
+    // FilesystemOperations::remove_directory requires different parameters
+    VEXFS_ERROR_GENERIC
 }
 
 /// List directory contents
@@ -574,13 +601,9 @@ pub extern "C" fn vexfs_list_dir(
 
     let buffer_slice = unsafe { core::slice::from_raw_parts_mut(buffer as *mut u8, buffer_size) };
 
-    match get_fs_ops() {
-        Ok(fs_ops) => match fs_ops.list_directory(path_str, buffer_slice) {
-            Ok(entries_count) => entries_count as c_int,
-            Err(err) => to_ffi_result(Err(err)),
-        },
-        Err(err) => to_ffi_result(Err(err)),
-    }
+    // TODO: Implement proper list_directory FFI function
+    // FilesystemOperations::list_directory requires different parameters
+    VEXFS_ERROR_GENERIC
 }
 
 /// Rename a file or directory
@@ -603,13 +626,9 @@ pub extern "C" fn vexfs_rename(
         Err(_) => return VEXFS_ERROR_INVAL,
     };
 
-    match get_fs_ops() {
-        Ok(fs_ops) => match fs_ops.rename_entry(old_path_str, new_path_str) {
-            Ok(_) => VEXFS_SUCCESS,
-            Err(err) => to_ffi_result(Err(err)),
-        },
-        Err(err) => to_ffi_result(Err(err)),
-    }
+    // TODO: Implement proper rename_entry FFI function
+    // FilesystemOperations::rename_entry requires different parameters
+    VEXFS_ERROR_GENERIC
 }
 
 /// Create a hard link
@@ -632,13 +651,9 @@ pub extern "C" fn vexfs_link(
         Err(_) => return VEXFS_ERROR_INVAL,
     };
 
-    match get_fs_ops() {
-        Ok(fs_ops) => match fs_ops.create_hard_link(target_str, link_path_str) {
-            Ok(_) => VEXFS_SUCCESS,
-            Err(err) => to_ffi_result(Err(err)),
-        },
-        Err(err) => to_ffi_result(Err(err)),
-    }
+    // TODO: Implement proper create_hard_link FFI function
+    // FilesystemOperations::create_hard_link requires different parameters
+    VEXFS_ERROR_GENERIC
 }
 
 /// Create a symbolic link
@@ -661,13 +676,9 @@ pub extern "C" fn vexfs_symlink(
         Err(_) => return VEXFS_ERROR_INVAL,
     };
 
-    match get_fs_ops() {
-        Ok(fs_ops) => match fs_ops.create_symbolic_link(target_str, link_path_str) {
-            Ok(_) => VEXFS_SUCCESS,
-            Err(err) => to_ffi_result(Err(err)),
-        },
-        Err(err) => to_ffi_result(Err(err)),
-    }
+    // TODO: Implement proper create_symbolic_link FFI function
+    // FilesystemOperations::create_symbolic_link requires different parameters
+    VEXFS_ERROR_GENERIC
 }
 
 /// Cleanup superblock during unmount

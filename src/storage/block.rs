@@ -398,7 +398,7 @@ pub struct BlockManager {
 impl BlockManager {
     /// Create new block manager
     pub fn new(device: BlockDevice) -> VexfsResult<Self> {
-        let cache_size = min(device.size_in_blocks(), VEXFS_MAX_CACHED_BLOCKS);
+        let cache_size = min(device.size_in_blocks(), VEXFS_MAX_CACHED_BLOCKS as u64);
         let metadata_cache = vec![None; cache_size as usize];
         
         Ok(Self {
@@ -447,6 +447,30 @@ impl BlockManager {
                 "block range exceeds device size".to_string()
             ));
         }
+        Ok(())
+    }
+
+    /// Read block data from device
+    pub fn read_block(&self, block_num: BlockNumber) -> VexfsResult<Vec<u8>> {
+        self.device.validate_block(block_num)?;
+        
+        // TODO: Implement actual device I/O
+        // For now, return a zero-filled block
+        Ok(vec![0u8; self.device.block_size() as usize])
+    }
+
+    /// Write block data to device
+    pub fn write_block(&mut self, block_num: BlockNumber, data: &[u8]) -> VexfsResult<()> {
+        self.device.validate_block(block_num)?;
+        
+        if data.len() != self.device.block_size() as usize {
+            return Err(VexfsError::InvalidArgument(
+                "data size doesn't match block size".to_string()
+            ));
+        }
+        
+        // TODO: Implement actual device I/O
+        // For now, just validate and return success
         Ok(())
     }
 

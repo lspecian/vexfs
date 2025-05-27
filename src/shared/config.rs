@@ -194,7 +194,7 @@ impl Default for VectorConfig {
             hnsw: HnswConfig::default(),
             max_vectors_per_file: VEXFS_MAX_VECTORS_PER_FILE as u32,
             compression_enabled: false,
-            cache_size: VEXFS_DEFAULT_VECTOR_CACHE_SIZE,
+            cache_size: VEXFS_DEFAULT_VECTOR_CACHE_SIZE as u32,
             async_indexing: true,
         }
     }
@@ -228,11 +228,11 @@ pub struct HnswConfig {
 impl Default for HnswConfig {
     fn default() -> Self {
         Self {
-            max_connections: VEXFS_DEFAULT_HNSW_M,
-            max_connections_layer0: VEXFS_DEFAULT_HNSW_M_L,
+            max_connections: VEXFS_DEFAULT_HNSW_M as u16,
+            max_connections_layer0: VEXFS_DEFAULT_HNSW_M_L as u16,
             level_factor: VEXFS_DEFAULT_HNSW_ML,
-            ef_search: VEXFS_DEFAULT_EF,
-            ef_construction: VEXFS_DEFAULT_EF_CONSTRUCTION,
+            ef_search: VEXFS_DEFAULT_EF as u16,
+            ef_construction: VEXFS_DEFAULT_EF_CONSTRUCTION as u16,
             random_seed: VEXFS_DEFAULT_RANDOM_SEED,
             enable_pruning: true,
         }
@@ -242,19 +242,19 @@ impl Default for HnswConfig {
 impl HnswConfig {
     /// Validate HNSW configuration
     pub fn validate(&self) -> VexfsResult<()> {
-        if self.max_connections == 0 || self.max_connections > VEXFS_MAX_HNSW_M {
+        if self.max_connections == 0 || self.max_connections > VEXFS_MAX_HNSW_M as u16 {
             return Err(VexfsError::InvalidConfiguration);
         }
         
-        if self.max_connections_layer0 == 0 || self.max_connections_layer0 > VEXFS_MAX_HNSW_M_L {
+        if self.max_connections_layer0 == 0 || self.max_connections_layer0 > VEXFS_MAX_HNSW_M_L as u16 {
             return Err(VexfsError::InvalidConfiguration);
         }
         
-        if self.ef_search == 0 || self.ef_search > VEXFS_MAX_EF {
+        if self.ef_search == 0 || self.ef_search > VEXFS_MAX_EF as u16 {
             return Err(VexfsError::InvalidConfiguration);
         }
         
-        if self.ef_construction == 0 || self.ef_construction > VEXFS_MAX_EF_CONSTRUCTION {
+        if self.ef_construction == 0 || self.ef_construction > VEXFS_MAX_EF_CONSTRUCTION as u16 {
             return Err(VexfsError::InvalidConfiguration);
         }
         
@@ -324,12 +324,12 @@ impl Default for CacheConfig {
             page_cache_enabled: true,
             page_cache_size: VEXFS_DEFAULT_PAGE_CACHE_SIZE as u64,
             inode_cache_enabled: true,
-            inode_cache_size: VEXFS_DEFAULT_INODE_CACHE_SIZE,
+            inode_cache_size: VEXFS_DEFAULT_INODE_CACHE_SIZE as u32,
             vector_cache_enabled: true,
-            vector_cache_size: VEXFS_DEFAULT_VECTOR_CACHE_SIZE,
+            vector_cache_size: VEXFS_DEFAULT_VECTOR_CACHE_SIZE as u32,
             replacement_policy: CacheReplacementPolicy::Lru,
             write_policy: CacheWritePolicy::WriteBack,
-            cache_line_size: VEXFS_DEFAULT_CACHE_LINE_SIZE,
+            cache_line_size: VEXFS_DEFAULT_CACHE_LINE_SIZE as u32,
         }
     }
 }
@@ -370,12 +370,12 @@ impl Default for IoConfig {
     fn default() -> Self {
         Self {
             async_io_enabled: true,
-            queue_depth: VEXFS_DEFAULT_IO_QUEUE_DEPTH,
-            readahead_size: VEXFS_DEFAULT_READAHEAD_SIZE,
+            queue_depth: VEXFS_DEFAULT_IO_QUEUE_DEPTH as u32,
+            readahead_size: VEXFS_DEFAULT_READAHEAD_SIZE as u32,
             batching_enabled: true,
-            max_batch_size: VEXFS_DEFAULT_MAX_BATCH_SIZE,
-            timeout_ms: VEXFS_DEFAULT_IO_TIMEOUT_MS,
-            io_threads: VEXFS_DEFAULT_IO_THREADS,
+            max_batch_size: VEXFS_DEFAULT_MAX_BATCH_SIZE as u32,
+            timeout_ms: VEXFS_DEFAULT_IO_TIMEOUT_MS as u32,
+            io_threads: VEXFS_DEFAULT_IO_THREADS as u32,
             direct_io: false,
         }
     }
@@ -426,10 +426,10 @@ impl Default for JournalConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            size_blocks: VEXFS_DEFAULT_JOURNAL_SIZE,
-            commit_interval_ms: VEXFS_DEFAULT_JOURNAL_COMMIT_INTERVAL,
+            size_blocks: VEXFS_DEFAULT_JOURNAL_SIZE as u32,
+            commit_interval_ms: VEXFS_DEFAULT_JOURNAL_COMMIT_INTERVAL as u32,
             wal_enabled: true,
-            max_transaction_size: VEXFS_DEFAULT_MAX_TRANSACTION_SIZE,
+            max_transaction_size: VEXFS_DEFAULT_MAX_TRANSACTION_SIZE as u32,
             compression_enabled: false,
             checksums_enabled: true,
             flush_policy: JournalFlushPolicy::Periodic,
@@ -473,13 +473,13 @@ impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
             pools_enabled: true,
-            small_pool_size: VEXFS_DEFAULT_SMALL_POOL_SIZE,
-            medium_pool_size: VEXFS_DEFAULT_MEDIUM_POOL_SIZE,
-            large_pool_size: VEXFS_DEFAULT_LARGE_POOL_SIZE,
+            small_pool_size: VEXFS_DEFAULT_SMALL_POOL_SIZE as u64,
+            medium_pool_size: VEXFS_DEFAULT_MEDIUM_POOL_SIZE as u64,
+            large_pool_size: VEXFS_DEFAULT_LARGE_POOL_SIZE as u64,
             stats_enabled: true,
-            alignment: VEXFS_DEFAULT_ALIGNMENT,
+            alignment: VEXFS_DEFAULT_ALIGNMENT as u32,
             debug_enabled: false,
-            pressure_threshold: VEXFS_DEFAULT_MEMORY_PRESSURE_THRESHOLD,
+            pressure_threshold: VEXFS_DEFAULT_MEMORY_PRESSURE_THRESHOLD as u8,
         }
     }
 }
@@ -531,7 +531,7 @@ impl Default for DebugConfig {
             tracing_enabled: cfg!(debug_assertions),
             stats_enabled: true,
             assertions_enabled: cfg!(debug_assertions),
-            buffer_size: VEXFS_DEFAULT_DEBUG_BUFFER_SIZE,
+            buffer_size: VEXFS_DEFAULT_DEBUG_BUFFER_SIZE as u32,
             verbose_errors: cfg!(debug_assertions),
         }
     }

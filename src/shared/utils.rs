@@ -580,6 +580,34 @@ pub fn error_to_string(error: &VexfsError) -> String {
     format!("{}", error)
 }
 
+// =======================
+// UUID Generation Utilities
+// =======================
+
+/// Generate a simple UUID (placeholder implementation)
+/// TODO: Replace with proper UUID generation
+pub fn generate_uuid() -> [u8; 16] {
+    // Simple placeholder UUID generation using current time and some constants
+    let time = current_timestamp();
+    let mut uuid = [0u8; 16];
+    
+    // Use time and some magic numbers to create a pseudo-UUID
+    let time_bytes = time.to_le_bytes();
+    uuid[0..8].copy_from_slice(&time_bytes);
+    
+    // Fill remaining bytes with pattern based on constants
+    uuid[8] = (VEXFS_MAGIC & 0xFF) as u8;
+    uuid[9] = ((VEXFS_MAGIC >> 8) & 0xFF) as u8;
+    uuid[10] = ((VEXFS_MAGIC >> 16) & 0xFF) as u8;
+    uuid[11] = ((VEXFS_MAGIC >> 24) & 0xFF) as u8;
+    uuid[12] = 0x42; // Version marker
+    uuid[13] = 0x56; // 'V' for VexFS
+    uuid[14] = 0x45; // 'E'
+    uuid[15] = 0x58; // 'X'
+    
+    uuid
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

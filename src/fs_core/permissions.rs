@@ -87,6 +87,17 @@ impl AccessMode {
             execute: (octal & 1) != 0,
         }
     }
+    
+    /// Create from file open flags
+    pub fn from_flags(flags: u32) -> Self {
+        let read_flag = 0x01;
+        let write_flag = 0x02;
+        Self {
+            read: (flags & read_flag) != 0,
+            write: (flags & write_flag) != 0,
+            execute: false, // Files don't need execute for open
+        }
+    }
 }
 
 /// User context for permission checking
@@ -451,7 +462,7 @@ pub fn check_read_permission(inode: &Inode, user: &UserContext) -> FsResult<()> 
     if can_read(inode, user) {
         Ok(())
     } else {
-        Err(VexfsError::PermissionDenied)
+        Err(VexfsError::PermissionDenied("Read permission denied".into()))
     }
 }
 
@@ -459,7 +470,7 @@ pub fn check_write_permission(inode: &Inode, user: &UserContext) -> FsResult<()>
     if can_write(inode, user) {
         Ok(())
     } else {
-        Err(VexfsError::PermissionDenied)
+        Err(VexfsError::PermissionDenied("Write permission denied".into()))
     }
 }
 
@@ -467,7 +478,7 @@ pub fn check_create_permission(inode: &Inode, user: &UserContext) -> FsResult<()
     if can_create_in_directory(inode, user) {
         Ok(())
     } else {
-        Err(VexfsError::PermissionDenied)
+        Err(VexfsError::PermissionDenied("Create permission denied".into()))
     }
 }
 
@@ -475,7 +486,7 @@ pub fn check_delete_permission(inode: &Inode, user: &UserContext) -> FsResult<()
     if can_delete_from_directory(inode, user) {
         Ok(())
     } else {
-        Err(VexfsError::PermissionDenied)
+        Err(VexfsError::PermissionDenied("Delete permission denied".into()))
     }
 }
 
@@ -523,7 +534,7 @@ impl SecurityPolicy {
     ) -> FsResult<()> {
         // Validate filename
         if name.len() > MAX_FILENAME_LENGTH {
-            return Err(VexfsError::NameTooLong(name.len()));
+            return Err(VexfsError::NameTooLong);
         }
 
         // Check for dangerous filenames

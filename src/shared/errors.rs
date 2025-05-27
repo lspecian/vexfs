@@ -49,7 +49,7 @@ pub enum VexfsError {
     FileTooLarge,
     FileNotFound,
     DirectoryNotEmpty,
-    NotADirectory,
+    NotADirectory(u64),
     IsADirectory,
     
     // Vector-specific Errors
@@ -67,9 +67,9 @@ pub enum VexfsError {
     WouldBlock,
     
     // Permission and Access Errors
-    PermissionDenied,
+    PermissionDenied(String),
     ReadOnlyFilesystem,
-    InvalidOperation,
+    InvalidOperation(String),
     
     // Index and Search Errors
     IndexError(IndexErrorKind),
@@ -94,7 +94,7 @@ pub enum VexfsError {
     NotFound,
     NotMounted,
     NoSpace,
-    EntryNotFound,
+    EntryNotFound(String),
     DeviceFull,
     
     // Cache and Storage Errors
@@ -261,16 +261,16 @@ impl fmt::Display for VexfsError {
             VexfsError::FileTooLarge => write!(f, "File size exceeds maximum limit"),
             VexfsError::FileNotFound => write!(f, "File not found"),
             VexfsError::DirectoryNotEmpty => write!(f, "Directory not empty"),
-            VexfsError::NotADirectory => write!(f, "Not a directory"),
+            VexfsError::NotADirectory(ino) => write!(f, "Not a directory: inode {}", ino),
             VexfsError::IsADirectory => write!(f, "Is a directory"),
             VexfsError::VectorError(kind) => write!(f, "Vector error: {}", kind),
             VexfsError::OutOfMemory => write!(f, "Out of memory"),
             VexfsError::OutOfSpace => write!(f, "No space left on device"),
             VexfsError::ResourceBusy => write!(f, "Resource busy"),
             VexfsError::TooManyOpenFiles => write!(f, "Too many open files"),
-            VexfsError::PermissionDenied => write!(f, "Permission denied"),
+            VexfsError::PermissionDenied(msg) => write!(f, "Permission denied: {}", msg),
             VexfsError::ReadOnlyFilesystem => write!(f, "Read-only filesystem"),
-            VexfsError::InvalidOperation => write!(f, "Invalid operation"),
+            VexfsError::InvalidOperation(msg) => write!(f, "Invalid operation: {}", msg),
             VexfsError::IndexError(kind) => write!(f, "Index error: {}", kind),
             VexfsError::SearchError(kind) => write!(f, "Search error: {}", kind),
             VexfsError::JournalError(kind) => write!(f, "Journal error: {}", kind),
@@ -285,7 +285,7 @@ impl fmt::Display for VexfsError {
             VexfsError::NotFound => write!(f, "Not found"),
             VexfsError::NotMounted => write!(f, "Not mounted"),
             VexfsError::NoSpace => write!(f, "No space left"),
-            VexfsError::EntryNotFound => write!(f, "Entry not found"),
+            VexfsError::EntryNotFound(name) => write!(f, "Entry not found: {}", name),
             VexfsError::DeviceFull => write!(f, "Device full"),
             VexfsError::CacheError => write!(f, "Cache error"),
             VexfsError::CacheLocked => write!(f, "Cache locked"),
@@ -448,18 +448,18 @@ impl VexfsError {
             VexfsError::StorageError(_) => -5,     // EIO
             VexfsError::FileNotFound => -2,       // ENOENT
             VexfsError::InodeNotFound(_) => -2,   // ENOENT
-            VexfsError::PermissionDenied => -13,  // EACCES
+            VexfsError::PermissionDenied(_) => -13,  // EACCES
             VexfsError::OutOfMemory => -12,       // ENOMEM
             VexfsError::OutOfSpace => -28,        // ENOSPC
             VexfsError::InvalidArgument(_) => -22, // EINVAL
             VexfsError::FileTooLarge => -27,      // EFBIG
             VexfsError::ReadOnlyFilesystem => -30, // EROFS
             VexfsError::DirectoryNotEmpty => -39, // ENOTEMPTY
-            VexfsError::NotADirectory => -20,     // ENOTDIR
+            VexfsError::NotADirectory(_) => -20,     // ENOTDIR
             VexfsError::IsADirectory => -21,      // EISDIR
             VexfsError::TooManyOpenFiles => -24,  // EMFILE
             VexfsError::ResourceBusy => -16,      // EBUSY
-            VexfsError::InvalidOperation => -95,  // EOPNOTSUPP
+            VexfsError::InvalidOperation(_) => -95,  // EOPNOTSUPP
             VexfsError::UnsupportedVersion => -95, // EOPNOTSUPP
             // New error variants
             VexfsError::InvalidData(_) => -22,    // EINVAL
@@ -469,7 +469,7 @@ impl VexfsError {
             VexfsError::NotFound => -2,           // ENOENT
             VexfsError::NotMounted => -19,        // ENODEV
             VexfsError::NoSpace => -28,           // ENOSPC
-            VexfsError::EntryNotFound => -2,      // ENOENT
+            VexfsError::EntryNotFound(_) => -2,      // ENOENT
             VexfsError::DeviceFull => -28,        // ENOSPC
             VexfsError::CacheError => -5,         // EIO
             VexfsError::CacheLocked => -16,       // EBUSY
@@ -564,7 +564,7 @@ impl From<std::io::Error> for VexfsError {
     fn from(error: std::io::Error) -> Self {
         match error.kind() {
             std::io::ErrorKind::NotFound => VexfsError::FileNotFound,
-            std::io::ErrorKind::PermissionDenied => VexfsError::PermissionDenied,
+            std::io::ErrorKind::PermissionDenied => VexfsError::PermissionDenied("permission denied".to_string()),
             std::io::ErrorKind::OutOfMemory => VexfsError::OutOfMemory,
             std::io::ErrorKind::WriteZero => VexfsError::IoError(IoErrorKind::WriteError),
             std::io::ErrorKind::Interrupted => VexfsError::IoError(IoErrorKind::InterruptedError),
@@ -598,7 +598,7 @@ mod tests {
     #[test]
     fn test_kernel_errno_conversion() {
         assert_eq!(VexfsError::FileNotFound.to_kernel_errno(), -2);
-        assert_eq!(VexfsError::PermissionDenied.to_kernel_errno(), -13);
+        assert_eq!(VexfsError::PermissionDenied("test".to_string()).to_kernel_errno(), -13);
         assert_eq!(VexfsError::OutOfMemory.to_kernel_errno(), -12);
     }
 
