@@ -152,7 +152,7 @@ pub struct FileSystem {
 impl FileSystem {
     /// Create a new filesystem instance
     pub fn new(storage_manager: crate::storage::StorageManager, config: FsConfig) -> FsResult<Self> {
-        let inode_manager = InodeManager::new(&storage_manager)?;
+        let inode_manager = InodeManager::new(storage_manager)?;
         let lock_manager = LockManager::new();
         let stats = FsStats::new();
 
