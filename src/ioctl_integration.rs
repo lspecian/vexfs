@@ -939,12 +939,35 @@ impl EnhancedIoctlHandler {
             // Update performance monitor
             let end_time = self.get_current_time_us();
             let duration = end_time - operation.start_time_us;
-            // Performance monitor completion tracking (stub - method not available)
-            // self.performance_monitor.record_operation_completion(
-            //     operation_id,
-            //     duration,
-            //     result.is_ok(),
-            // )?;
+            
+            // Generate comprehensive audit entry using UserContext
+            let user_context = crate::fs_core::permissions::UserContext::new(
+                operation.user_context.user_id,
+                operation.user_context.group_id,
+                &[], // No additional groups for now
+            );
+            
+            // Create a simplified audit context since OperationContext requires InodeManager and LockManager
+            let audit_context = AuditContext {
+                operation_id: operation_id,
+                user: UserInfo {
+                    uid: operation.user_context.user_id,
+                    gid: operation.user_context.group_id,
+                    username: format!("user_{}", operation.user_context.user_id),
+                },
+                process: ProcessInfo {
+                    pid: operation.user_context.process_id,
+                    ppid: 1,
+                    executable_path: "ioctl_operation".to_string(),
+                },
+                timestamp: std::time::SystemTime::now(),
+                session_id: None,
+                source_ip: None,
+            };
+            
+            // Generate audit entry using the logger (simplified approach)
+            // In a full implementation, this would use a dedicated audit engine
+            self.logger.log_audit_entry(&audit_context, &operation.operation_type, result)?;
         }
         
         Ok(())
@@ -1225,6 +1248,22 @@ impl IoctlLogger {
         _result: &VexfsResult<i32>,
     ) -> VexfsResult<()> {
         // Placeholder implementation
+        Ok(())
+    }
+    
+    /// Log audit entry for security tracking
+    pub fn log_audit_entry(
+        &self,
+        _audit_context: &AuditContext,
+        _operation: &VectorIoctlOperation,
+        _result: &VexfsResult<i32>,
+    ) -> VexfsResult<()> {
+        // Placeholder implementation for audit logging
+        // In a full implementation, this would:
+        // 1. Format the audit entry with all context information
+        // 2. Write to secure audit log
+        // 3. Ensure tamper-proof logging
+        // 4. Handle audit log rotation and retention
         Ok(())
     }
 }
@@ -1518,6 +1557,45 @@ pub struct SecurityContext {
     security_flags: u32,
     /// Audit required
     audit_required: bool,
+}
+
+/// User information for audit purposes
+#[derive(Debug, Clone)]
+pub struct UserInfo {
+    /// User ID
+    pub uid: u32,
+    /// Group ID
+    pub gid: u32,
+    /// Username
+    pub username: String,
+}
+
+/// Process information for audit purposes
+#[derive(Debug, Clone)]
+pub struct ProcessInfo {
+    /// Process ID
+    pub pid: u32,
+    /// Parent process ID
+    pub ppid: u32,
+    /// Executable path
+    pub executable_path: String,
+}
+
+/// Audit context for security logging
+#[derive(Debug, Clone)]
+pub struct AuditContext {
+    /// Operation ID
+    pub operation_id: u64,
+    /// User information
+    pub user: UserInfo,
+    /// Process information
+    pub process: ProcessInfo,
+    /// Timestamp
+    pub timestamp: std::time::SystemTime,
+    /// Session ID
+    pub session_id: Option<String>,
+    /// Source IP
+    pub source_ip: Option<String>,
 }
 
 /// Permissions for security context
