@@ -179,6 +179,17 @@ pub enum VectorErrorKind {
     NormalizationError,
     SearchError,
     IndexError,
+    // Additional variants needed by other modules
+    InvalidVectorId,
+    CorruptedData,
+    NoSpace,
+    IoError,
+    InvalidVersion,
+    ChecksumMismatch,
+    FileNotFound,
+    CompressionError,
+    MetadataError,
+    AlignmentError,
 }
 
 /// Index operation error kinds
@@ -362,6 +373,16 @@ impl fmt::Display for VectorErrorKind {
             VectorErrorKind::NormalizationError => write!(f, "vector normalization failed"),
             VectorErrorKind::SearchError => write!(f, "vector search error"),
             VectorErrorKind::IndexError => write!(f, "vector index error"),
+            VectorErrorKind::InvalidVectorId => write!(f, "invalid vector ID"),
+            VectorErrorKind::CorruptedData => write!(f, "vector data corrupted"),
+            VectorErrorKind::NoSpace => write!(f, "no space for vector storage"),
+            VectorErrorKind::IoError => write!(f, "vector I/O error"),
+            VectorErrorKind::InvalidVersion => write!(f, "invalid vector format version"),
+            VectorErrorKind::ChecksumMismatch => write!(f, "vector checksum mismatch"),
+            VectorErrorKind::FileNotFound => write!(f, "vector file not found"),
+            VectorErrorKind::CompressionError => write!(f, "vector compression error"),
+            VectorErrorKind::MetadataError => write!(f, "vector metadata error"),
+            VectorErrorKind::AlignmentError => write!(f, "vector alignment error"),
         }
     }
 }
