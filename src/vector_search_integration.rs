@@ -6,24 +6,25 @@
 
 
 extern crate alloc;
-use alloc::{vec::Vec, collections::BTreeMap, format};
+use alloc::{vec::Vec, collections::BTreeMap, format, sync::Arc};
 use core::ptr;
 
-use crate::ioctl::{VectorIoctlError};
+use crate::shared::errors::{VexfsError, VexfsResult, SearchErrorKind};
+use crate::fs_core::operations::OperationContext;
+use crate::storage::StorageManager;
 use crate::vector_search::{VectorSearchEngine, SearchQuery, SearchOptions, BatchSearchRequest, SearchError};
-use crate::vector_metrics::{VectorMetrics, MetricsError};
+use crate::vector_metrics::{VectorMetrics, MetricsError, MetricsConfig};
 use crate::knn_search::{KnnSearchEngine, SearchParams, MetadataFilter};
 use crate::result_scoring::{ScoredResult, ResultScorer, ScoringParams};
-use crate::vector_handlers::VectorStorage;
-use crate::vector_storage::VectorHeader;
+use crate::vector_storage::{VectorStorageManager, VectorHeader};
 use crate::anns::{AnnsIndex, DistanceMetric};
 
 /// Vector search subsystem for VexFS
 pub struct VectorSearchSubsystem {
     /// Primary search engine
     search_engine: VectorSearchEngine,
-    /// IOCTL interface for userspace communication
-    ioctl_interface: VexfsIoctlInterface,
+    /// Storage manager for fs_core integration
+    storage_manager: Arc<StorageManager>,
     /// Metrics calculator
     metrics: VectorMetrics,
     /// Search statistics
@@ -171,24 +172,25 @@ pub struct VectorMetadataC {
 }
 
 impl VectorSearchSubsystem {
-    /// Create new vector search subsystem
-    pub fn new(storage: VectorStorage) -> Result<Self, SearchError> {
+    /// Create new vector search subsystem with fs_core integration
+    pub fn new(storage_manager: Arc<StorageManager>) -> VexfsResult<Self> {
+        let vector_storage = VectorStorageManager::new(storage_manager.clone())?;
         let options = SearchOptions::default();
-        let search_engine = VectorSearchEngine::new(storage, options)?;
-        let ioctl_interface = VexfsIoctlInterface::new();
+        let search_engine = VectorSearchEngine::new(Box::new(vector_storage), options)
+            .map_err(|e| VexfsError::SearchError(SearchErrorKind::InvalidQuery))?;
         let metrics_config = MetricsConfig::default();
         let metrics = VectorMetrics::new(metrics_config);
         
         Ok(Self {
             search_engine,
-            ioctl_interface,
+            storage_manager,
             metrics,
             search_stats: SearchStatistics::default(),
         })
     }
     
     /// Initialize the search subsystem with HNSW index
-    pub fn initialize_with_index(&mut self, index: HnswIndex) -> Result<(), SearchError> {
+    pub fn initialize_with_index(&mut self, index: AnnsIndex) -> VexfsResult<()> {
         self.search_engine.set_hnsw_index(index);
         Ok(())
     }
@@ -196,9 +198,10 @@ impl VectorSearchSubsystem {
     /// Handle vector search ioctl commands
     pub fn handle_ioctl(
         &mut self,
+        context: &mut OperationContext,
         cmd: u32,
         arg: *mut u8,
-    ) -> Result<i32, IoctlError> {
+    ) -> VexfsResult<i32> {
         let search_cmd = match cmd {
             x if x == VectorSearchIoctlCmd::Search as u32 => VectorSearchIoctlCmd::Search,
             x if x == VectorSearchIoctlCmd::BatchSearch as u32 => VectorSearchIoctlCmd::BatchSearch,
@@ -207,12 +210,12 @@ impl VectorSearchSubsystem {
             x if x == VectorSearchIoctlCmd::ConfigureOptions as u32 => VectorSearchIoctlCmd::ConfigureOptions,
             x if x == VectorSearchIoctlCmd::UpdateIndex as u32 => VectorSearchIoctlCmd::UpdateIndex,
             x if x == VectorSearchIoctlCmd::ValidateResults as u32 => VectorSearchIoctlCmd::ValidateResults,
-            _ => return Err(IoctlError::InvalidCommand),
+            _ => return Err(VexfsError::InvalidArgument("Invalid ioctl command".to_string())),
         };
         
         match search_cmd {
-            VectorSearchIoctlCmd::Search => self.handle_search_ioctl(arg),
-            VectorSearchIoctlCmd::BatchSearch => self.handle_batch_search_ioctl(arg),
+            VectorSearchIoctlCmd::Search => self.handle_search_ioctl(context, arg),
+            VectorSearchIoctlCmd::BatchSearch => self.handle_batch_search_ioctl(context, arg),
             VectorSearchIoctlCmd::GetStats => self.handle_get_stats_ioctl(arg),
             VectorSearchIoctlCmd::ResetStats => self.handle_reset_stats_ioctl(),
             VectorSearchIoctlCmd::ConfigureOptions => self.handle_configure_options_ioctl(arg),
@@ -222,16 +225,16 @@ impl VectorSearchSubsystem {
     }
     
     /// Handle single vector search ioctl
-    fn handle_search_ioctl(&mut self, arg: *mut u8) -> Result<i32, IoctlError> {
+    fn handle_search_ioctl(&mut self, context: &mut OperationContext, arg: *mut u8) -> VexfsResult<i32> {
         if arg.is_null() {
-            return Err(IoctlError::InvalidArgument);
+            return Err(VexfsError::InvalidArgument("Null argument pointer".to_string()));
         }
         
         let request = unsafe { &mut *(arg as *mut SearchRequest) };
         
         // Validate input parameters
         if request.vector_data.is_null() || request.dimensions == 0 || request.k == 0 {
-            return Err(IoctlError::InvalidArgument);
+            return Err(VexfsError::InvalidArgument("Invalid search parameters".to_string()));
         }
         
         // Convert C structures to Rust types
@@ -243,7 +246,7 @@ impl VectorSearchSubsystem {
             0 => DistanceMetric::Euclidean,
             1 => DistanceMetric::Cosine,
             2 => DistanceMetric::InnerProduct,
-            _ => return Err(IoctlError::InvalidArgument),
+            _ => return Err(VexfsError::InvalidArgument("Invalid distance metric".to_string())),
         };
         
         let filter = self.convert_metadata_filter(&request.filter)?;
@@ -262,8 +265,8 @@ impl VectorSearchSubsystem {
         
         // Perform search
         let start_time = self.get_current_time_us();
-        let results = self.search_engine.search(query)
-            .map_err(|_| IoctlError::OperationFailed)?;
+        let results = self.search_engine.search(context, query)
+            .map_err(|_| VexfsError::SearchError(SearchErrorKind::InvalidQuery))?;
         let end_time = self.get_current_time_us();
         
         // Update statistics
@@ -287,16 +290,16 @@ impl VectorSearchSubsystem {
     }
     
     /// Handle batch search ioctl
-    fn handle_batch_search_ioctl(&mut self, arg: *mut u8) -> Result<i32, IoctlError> {
+    fn handle_batch_search_ioctl(&mut self, context: &mut OperationContext, arg: *mut u8) -> VexfsResult<i32> {
         // Simplified batch search implementation
         // In a real implementation, this would handle multiple queries
-        self.handle_search_ioctl(arg)
+        self.handle_search_ioctl(context, arg)
     }
     
     /// Handle get statistics ioctl
-    fn handle_get_stats_ioctl(&mut self, arg: *mut u8) -> Result<i32, IoctlError> {
+    fn handle_get_stats_ioctl(&mut self, arg: *mut u8) -> VexfsResult<i32> {
         if arg.is_null() {
-            return Err(IoctlError::InvalidArgument);
+            return Err(VexfsError::InvalidArgument("Null argument pointer".to_string()));
         }
         
         let stats_ptr = arg as *mut SearchStatistics;
@@ -308,32 +311,32 @@ impl VectorSearchSubsystem {
     }
     
     /// Handle reset statistics ioctl
-    fn handle_reset_stats_ioctl(&mut self) -> Result<i32, IoctlError> {
+    fn handle_reset_stats_ioctl(&mut self) -> VexfsResult<i32> {
         self.search_stats = SearchStatistics::default();
         self.search_engine.reset_analytics();
         Ok(0)
     }
     
     /// Handle configure options ioctl
-    fn handle_configure_options_ioctl(&mut self, _arg: *mut u8) -> Result<i32, IoctlError> {
+    fn handle_configure_options_ioctl(&mut self, _arg: *mut u8) -> VexfsResult<i32> {
         // Placeholder for configuration updates
         Ok(0)
     }
     
     /// Handle update index ioctl
-    fn handle_update_index_ioctl(&mut self, _arg: *mut u8) -> Result<i32, IoctlError> {
+    fn handle_update_index_ioctl(&mut self, _arg: *mut u8) -> VexfsResult<i32> {
         // Placeholder for index updates
         Ok(0)
     }
     
     /// Handle validate results ioctl
-    fn handle_validate_results_ioctl(&mut self, _arg: *mut u8) -> Result<i32, IoctlError> {
+    fn handle_validate_results_ioctl(&mut self, _arg: *mut u8) -> VexfsResult<i32> {
         // Placeholder for result validation
         Ok(0)
     }
     
     /// Convert C metadata filter to Rust type
-    fn convert_metadata_filter(&self, filter: &MetadataFilterC) -> Result<Option<MetadataFilter>, IoctlError> {
+    fn convert_metadata_filter(&self, filter: &MetadataFilterC) -> VexfsResult<Option<MetadataFilter>> {
         if filter.flags == 0 {
             return Ok(None);
         }
@@ -350,7 +353,7 @@ impl VectorSearchSubsystem {
             }
             if len > 0 {
                 Some(format!("{}", core::str::from_utf8(&filter.extension_filter[..len])
-                    .map_err(|_| IoctlError::InvalidArgument)?))
+                    .map_err(|_| VexfsError::InvalidArgument("Invalid UTF-8 in extension filter".to_string()))?))
             } else {
                 None
             }
@@ -421,8 +424,8 @@ impl VectorSearchSubsystem {
     }
     
     /// Perform administrative search operations
-    pub fn admin_search(&mut self, query: SearchQuery) -> Result<Vec<ScoredResult>, SearchError> {
-        self.search_engine.search(query)
+    pub fn admin_search(&mut self, context: &mut OperationContext, query: SearchQuery) -> Result<Vec<ScoredResult>, SearchError> {
+        self.search_engine.search(context, query)
     }
     
     /// Get search engine reference for advanced operations
