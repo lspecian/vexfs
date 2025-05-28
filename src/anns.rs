@@ -44,18 +44,28 @@ pub enum AnnsError {
 impl From<VectorStorageError> for AnnsError {
     fn from(err: VectorStorageError) -> Self {
         match err {
-            VectorStorageError::InvalidDimensions => AnnsError::InvalidDimensions,
-            VectorStorageError::InvalidVectorId => AnnsError::VectorNotFound,
+            VectorStorageError::InvalidDimensions(_) => AnnsError::InvalidDimensions,
+            VectorStorageError::InvalidDimension(_) => AnnsError::InvalidDimensions,
+            VectorStorageError::DimensionMismatch { .. } => AnnsError::InvalidDimensions,
+            VectorStorageError::InvalidComponent(_) => AnnsError::InvalidVectorData,
+            VectorStorageError::VectorTooLarge => AnnsError::InvalidVectorData,
             VectorStorageError::VectorNotFound => AnnsError::VectorNotFound,
+            VectorStorageError::MetadataTooLarge => AnnsError::InvalidVectorData,
+            VectorStorageError::SerializationError => AnnsError::SerializationError,
+            VectorStorageError::DeserializationError => AnnsError::SerializationError,
+            VectorStorageError::NormalizationError => AnnsError::InvalidVectorData,
+            VectorStorageError::SearchError => AnnsError::InvalidOperation,
+            VectorStorageError::IndexError => AnnsError::InvalidOperation,
+            VectorStorageError::InvalidVectorId => AnnsError::VectorNotFound,
             VectorStorageError::CorruptedData => AnnsError::InvalidVectorData,
             VectorStorageError::NoSpace => AnnsError::StorageFull,
             VectorStorageError::IoError => AnnsError::IOError,
+            VectorStorageError::InvalidVersion => AnnsError::InvalidOperation,
+            VectorStorageError::ChecksumMismatch => AnnsError::InvalidVectorData,
             VectorStorageError::FileNotFound => AnnsError::InvalidOperation,
             VectorStorageError::CompressionError => AnnsError::SerializationError,
-            VectorStorageError::InvalidVersion => AnnsError::InvalidOperation,
             VectorStorageError::MetadataError => AnnsError::InvalidVectorData,
             VectorStorageError::AlignmentError => AnnsError::InvalidOperation,
-            VectorStorageError::ChecksumMismatch => AnnsError::InvalidVectorData,
         }
     }
 }

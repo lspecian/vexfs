@@ -3,10 +3,28 @@
 //! This module implements the core vector storage capabilities that make VexFS vector-native,
 //! including on-disk format, allocation mechanisms, file-to-embedding linking, metadata
 //! management, and serialization/compression.
-
-
+//!
+//! This module has been integrated with the fs_core architecture to use OperationContext
+//! patterns and work seamlessly with the established VexFS components.
 
 use core::mem;
+use crate::shared::errors::{VexfsError, VexfsResult};
+use crate::shared::types::{InodeNumber, BlockNumber, Result};
+use crate::fs_core::operations::OperationContext;
+use crate::storage::StorageManager;
+
+#[cfg(not(feature = "kernel"))]
+use std::sync::Arc;
+#[cfg(feature = "kernel")]
+use alloc::sync::Arc;
+
+#[cfg(not(feature = "std"))]
+use alloc::{vec::Vec, string::String, collections::BTreeMap};
+#[cfg(feature = "std")]
+use std::{vec::Vec, string::String, collections::BTreeMap};
+
+// Re-export VectorStorageError for backward compatibility
+pub use crate::shared::errors::{VectorErrorKind as VectorStorageError};
 
 // Forward declarations for types that will be defined in other modules
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -30,35 +48,6 @@ pub enum AllocHint {
     Random,
     Clustered,
     VectorAligned,
-}
-
-/// Vector storage error types
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum VectorStorageError {
-    /// No space available for vector storage
-    NoSpace,
-    /// Invalid vector dimensions
-    InvalidDimensions,
-    /// Invalid vector ID
-    InvalidVectorId,
-    /// Vector not found
-    VectorNotFound,
-    /// File not found
-    FileNotFound,
-    /// Corrupted vector data
-    CorruptedData,
-    /// I/O error
-    IoError,
-    /// Compression/decompression error
-    CompressionError,
-    /// Invalid format version
-    InvalidVersion,
-    /// Metadata error
-    MetadataError,
-    /// Alignment error
-    AlignmentError,
-    /// Checksum mismatch
-    ChecksumMismatch,
 }
 
 /// Vector data types supported
@@ -94,7 +83,7 @@ pub const VECTOR_ALIGNMENT: usize = 64;
 
 /// Vector header stored on disk
 #[derive(Debug, Clone, Copy)]
-#[repr(C, packed)]
+#[repr(C)]
 pub struct VectorHeader {
     /// Magic number for validation
     pub magic: u32,
@@ -190,8 +179,21 @@ pub struct VectorAllocStats {
     pub largest_free_block: u32,
 }
 
-/// Main vector storage manager
+/// Vector location information for indexing
+#[derive(Debug, Clone, Copy)]
+pub struct VectorLocation {
+    /// Starting block number
+    pub start_block: BlockNumber,
+    /// Number of blocks used
+    pub block_count: u32,
+    /// Vector header information
+    pub header: VectorHeader,
+}
+
+/// Main vector storage manager integrated with fs_core architecture
 pub struct VectorStorageManager {
+    /// Reference to storage manager for block operations
+    storage_manager: Arc<StorageManager>,
     /// Device block size
     pub block_size: u32,
     /// Total storage capacity in blocks
@@ -204,12 +206,17 @@ pub struct VectorStorageManager {
     pub alloc_stats: VectorAllocStats,
     /// Format version being used
     pub format_version: u32,
+    /// Vector index mapping vector IDs to block locations
+    vector_index: BTreeMap<u64, VectorLocation>,
+    /// File-to-vector mapping
+    file_vector_map: BTreeMap<InodeNumber, Vec<u64>>,
 }
 
 impl VectorStorageManager {
-    /// Create a new vector storage manager
-    pub fn new(block_size: u32, total_blocks: u64) -> Self {
+    /// Create a new vector storage manager integrated with fs_core
+    pub fn new(storage_manager: Arc<StorageManager>, block_size: u32, total_blocks: u64) -> Self {
         Self {
+            storage_manager,
             block_size,
             total_blocks,
             free_blocks: total_blocks,
@@ -224,20 +231,23 @@ impl VectorStorageManager {
                 largest_free_block: total_blocks as u32,
             },
             format_version: VECTOR_FORMAT_VERSION,
+            vector_index: BTreeMap::new(),
+            file_vector_map: BTreeMap::new(),
         }
     }
 
-    /// Store a vector with metadata
+    /// Store a vector with metadata using OperationContext pattern
     pub fn store_vector(
         &mut self,
+        context: &mut OperationContext,
         data: &[u8],
-        file_inode: u64,
+        file_inode: InodeNumber,
         data_type: VectorDataType,
         dimensions: u32,
         compression: CompressionType,
-    ) -> Result<u64, VectorStorageError> {
+    ) -> VexfsResult<u64> {
         if dimensions > MAX_VECTOR_DIMENSIONS {
-            return Err(VectorStorageError::InvalidDimensions);
+            return Err(VexfsError::VectorError(crate::shared::errors::VectorErrorKind::InvalidDimensions(dimensions as u16)));
         }
 
         let vector_id = self.next_vector_id;
@@ -248,8 +258,15 @@ impl VectorStorageManager {
         let total_size = header_size + data.len();
         let aligned_size = (total_size + VECTOR_ALIGNMENT - 1) & !(VECTOR_ALIGNMENT - 1);
 
-        // Allocate space
-        let alloc_result = self.allocate_vector_space(aligned_size as u32)?;
+        // Allocate space using storage manager
+        let blocks_needed = (aligned_size as u32 + self.block_size - 1) / self.block_size;
+        let allocated_blocks = self.storage_manager.allocate_blocks(blocks_needed, None)?;
+        
+        if allocated_blocks.is_empty() {
+            return Err(VexfsError::OutOfSpace);
+        }
+
+        let start_block = allocated_blocks[0];
 
         // Create vector header
         let header = VectorHeader {
@@ -262,86 +279,158 @@ impl VectorStorageManager {
             dimensions,
             original_size: data.len() as u32,
             compressed_size: data.len() as u32, // TODO: implement compression
-            created_timestamp: 0, // TODO: get current time
+            created_timestamp: 0, // TODO: get current time from context
             modified_timestamp: 0,
             checksum: self.calculate_checksum(data),
             flags: 0,
             reserved: [],
         };
 
-        // TODO: Write header and data to storage
-        // This would involve:
-        // 1. Writing the header to the allocated blocks
-        // 2. Writing the vector data
-        // 3. Updating metadata indices
-        // 4. Creating file-to-vector mapping
+        // Serialize header and data
+        let mut block_data = Vec::with_capacity(aligned_size);
+        
+        // Write header (unsafe conversion for now - in production would use proper serialization)
+        let header_bytes = unsafe {
+            core::slice::from_raw_parts(
+                &header as *const VectorHeader as *const u8,
+                header_size
+            )
+        };
+        block_data.extend_from_slice(header_bytes);
+        
+        // Write vector data
+        block_data.extend_from_slice(data);
+        
+        // Pad to alignment
+        while block_data.len() < aligned_size {
+            block_data.push(0);
+        }
+
+        // Write to storage using storage manager
+        let mut offset = 0;
+        for &block_num in &allocated_blocks {
+            let chunk_size = core::cmp::min(self.block_size as usize, block_data.len() - offset);
+            if chunk_size == 0 {
+                break;
+            }
+            
+            let chunk = block_data[offset..offset + chunk_size].to_vec();
+            // Pad chunk to block size
+            let mut padded_chunk = chunk;
+            padded_chunk.resize(self.block_size as usize, 0);
+            
+            self.storage_manager.write_block(block_num, padded_chunk)?;
+            offset += chunk_size;
+        }
+
+        // Update indices
+        let location = VectorLocation {
+            start_block,
+            block_count: blocks_needed,
+            header,
+        };
+        
+        self.vector_index.insert(vector_id, location);
+        
+        // Update file-to-vector mapping
+        self.file_vector_map
+            .entry(file_inode)
+            .or_insert_with(Vec::new)
+            .push(vector_id);
+
+        // Update statistics
+        self.alloc_stats.total_vectors += 1;
+        self.alloc_stats.total_bytes += aligned_size as u64;
+        self.alloc_stats.avg_vector_size = (self.alloc_stats.total_bytes / self.alloc_stats.total_vectors) as u32;
+        if aligned_size as u32 > self.alloc_stats.max_vector_size {
+            self.alloc_stats.max_vector_size = aligned_size as u32;
+        }
 
         Ok(vector_id)
     }
 
-    /// Retrieve a vector by ID
-    pub fn get_vector(&mut self, vector_id: u64) -> Result<(VectorHeader, &[u8]), VectorStorageError> {
-        // TODO: Implement vector retrieval
-        // This would involve:
-        // 1. Looking up vector location in index
-        // 2. Reading header from storage
-        // 3. Validating header magic and checksum
-        // 4. Reading vector data
-        // 5. Decompressing if necessary
+    /// Retrieve a vector by ID using OperationContext pattern
+    pub fn get_vector(&mut self, context: &mut OperationContext, vector_id: u64) -> VexfsResult<(VectorHeader, Vec<u8>)> {
+        // Look up vector location in index
+        let location = self.vector_index.get(&vector_id)
+            .ok_or_else(|| VexfsError::VectorError(crate::shared::errors::VectorErrorKind::VectorNotFound))?;
 
-        Err(VectorStorageError::VectorNotFound)
-    }
-
-    /// Delete a vector
-    pub fn delete_vector(&mut self, vector_id: u64) -> Result<(), VectorStorageError> {
-        // TODO: Implement vector deletion
-        // This would involve:
-        // 1. Finding vector location
-        // 2. Freeing allocated blocks
-        // 3. Removing from indices
-        // 4. Removing file-to-vector mappings
-
-        Err(VectorStorageError::VectorNotFound)
-    }
-
-    /// Get vectors associated with a file
-    pub fn get_file_vectors(&mut self, file_inode: u64) -> Result<[u64; 16], VectorStorageError> {
-        // TODO: Implement file-to-vector lookup
-        // This would return an array of vector IDs (fixed size for FFI compatibility)
-        Err(VectorStorageError::FileNotFound)
-    }
-
-    /// Get files associated with a vector
-    pub fn get_vector_files(&mut self, vector_id: u64) -> Result<[u64; 16], VectorStorageError> {
-        // TODO: Implement vector-to-file lookup
-        Err(VectorStorageError::VectorNotFound)
-    }
-
-    /// Allocate space for vector storage
-    fn allocate_vector_space(&mut self, size: u32) -> Result<AllocResult, VectorStorageError> {
-        let pages_needed = (size + self.block_size - 1) / self.block_size;
-        
-        if self.free_blocks < pages_needed as u64 {
-            return Err(VectorStorageError::NoSpace);
+        // Read blocks from storage
+        let mut data = Vec::new();
+        for i in 0..location.block_count {
+            let block_num = location.start_block + i as u64;
+            let block_data = self.storage_manager.read_block(block_num)?;
+            data.extend_from_slice(&block_data);
         }
 
-        // Simple allocation strategy - find first fit
-        let start_page = self.total_blocks - self.free_blocks;
-        self.free_blocks -= pages_needed as u64;
+        // Extract header
+        if data.len() < VectorHeader::SIZE {
+            return Err(VexfsError::VectorError(crate::shared::errors::VectorErrorKind::DeserializationError));
+        }
+
+        let header = location.header;
+        
+        // Extract vector data
+        let vector_data_start = VectorHeader::SIZE;
+        let vector_data_end = vector_data_start + header.compressed_size as usize;
+        
+        if data.len() < vector_data_end {
+            return Err(VexfsError::VectorError(crate::shared::errors::VectorErrorKind::DeserializationError));
+        }
+
+        let vector_data = data[vector_data_start..vector_data_end].to_vec();
+
+        // Verify integrity
+        if !self.verify_vector_integrity(&header, &vector_data) {
+            return Err(VexfsError::VectorError(crate::shared::errors::VectorErrorKind::DeserializationError));
+        }
+
+        Ok((header, vector_data))
+    }
+
+    /// Delete a vector using OperationContext pattern
+    pub fn delete_vector(&mut self, context: &mut OperationContext, vector_id: u64) -> VexfsResult<()> {
+        // Look up vector location
+        let location = self.vector_index.remove(&vector_id)
+            .ok_or_else(|| VexfsError::VectorError(crate::shared::errors::VectorErrorKind::VectorNotFound))?;
+
+        // Free allocated blocks
+        let blocks_to_free: Vec<BlockNumber> = (location.start_block..location.start_block + location.block_count as u64).collect();
+        self.storage_manager.free_blocks(&blocks_to_free)?;
+
+        // Remove from file-to-vector mapping
+        let file_inode = location.header.file_inode;
+        if let Some(vector_list) = self.file_vector_map.get_mut(&file_inode) {
+            vector_list.retain(|&id| id != vector_id);
+            if vector_list.is_empty() {
+                self.file_vector_map.remove(&file_inode);
+            }
+        }
 
         // Update statistics
-        self.alloc_stats.total_vectors += 1;
-        self.alloc_stats.total_bytes += size as u64;
-        self.alloc_stats.avg_vector_size = (self.alloc_stats.total_bytes / self.alloc_stats.total_vectors) as u32;
-        if size > self.alloc_stats.max_vector_size {
-            self.alloc_stats.max_vector_size = size;
+        self.alloc_stats.total_vectors = self.alloc_stats.total_vectors.saturating_sub(1);
+        if self.alloc_stats.total_vectors > 0 {
+            self.alloc_stats.avg_vector_size = (self.alloc_stats.total_bytes / self.alloc_stats.total_vectors) as u32;
+        } else {
+            self.alloc_stats.avg_vector_size = 0;
         }
+
+        Ok(())
+    }
+
+    /// Get vectors associated with a file using OperationContext pattern
+    pub fn get_file_vectors(&mut self, context: &mut OperationContext, file_inode: InodeNumber) -> VexfsResult<Vec<u64>> {
+        Ok(self.file_vector_map.get(&file_inode).cloned().unwrap_or_default())
+    }
+
+    /// Get files associated with a vector using OperationContext pattern
+    pub fn get_vector_files(&mut self, context: &mut OperationContext, vector_id: u64) -> VexfsResult<Vec<InodeNumber>> {
+        let location = self.vector_index.get(&vector_id)
+            .ok_or_else(|| VexfsError::VectorError(crate::shared::errors::VectorErrorKind::VectorNotFound))?;
         
-        Ok(AllocResult {
-            start_block: start_page,
-            block_count: pages_needed,
-            fragmentation_score: 0,
-        })
+        // Get file inode from header
+        let file_inode = location.header.file_inode;
+        Ok(vec![file_inode])
     }
 
     /// Calculate CRC32 checksum for data integrity
@@ -385,14 +474,32 @@ impl VectorStorageManager {
         self.alloc_stats
     }
 
-    /// Compact storage to reduce fragmentation
-    pub fn compact_storage(&mut self) -> Result<(), VectorStorageError> {
+    /// Compact storage to reduce fragmentation using OperationContext pattern
+    pub fn compact_storage(&mut self, context: &mut OperationContext) -> VexfsResult<()> {
         // TODO: Implement storage compaction
         // This would involve:
         // 1. Identifying fragmented regions
         // 2. Moving vectors to consolidate free space
         // 3. Updating indices and mappings
+        // 4. Using storage manager for block operations
         Ok(())
+    }
+
+    /// Sync vector storage to persistent storage
+    pub fn sync(&mut self, context: &mut OperationContext) -> VexfsResult<()> {
+        // Sync underlying storage manager
+        self.storage_manager.sync_all()?;
+        
+        // TODO: Persist vector indices and mappings
+        // This would involve writing the vector_index and file_vector_map
+        // to dedicated metadata blocks
+        
+        Ok(())
+    }
+
+    /// Get storage manager reference for integration
+    pub fn storage_manager(&self) -> &Arc<StorageManager> {
+        &self.storage_manager
     }
 }
 
@@ -405,19 +512,14 @@ impl VectorCompression {
         data: &[u8],
         compression: CompressionType,
         data_type: VectorDataType,
-    ) -> Result<[u8; 1024], VectorStorageError> {
+    ) -> VexfsResult<Vec<u8>> {
         match compression {
             CompressionType::None => {
-                if data.len() > 1024 {
-                    return Err(VectorStorageError::CompressionError);
-                }
-                let mut result = [0u8; 1024];
-                result[..data.len()].copy_from_slice(data);
-                Ok(result)
+                Ok(data.to_vec())
             }
             _ => {
                 // TODO: Implement compression algorithms
-                Err(VectorStorageError::CompressionError)
+                Err(VexfsError::VectorError(crate::shared::errors::VectorErrorKind::SerializationError))
             }
         }
     }
@@ -428,19 +530,17 @@ impl VectorCompression {
         compression: CompressionType,
         original_size: u32,
         data_type: VectorDataType,
-    ) -> Result<[u8; 1024], VectorStorageError> {
+    ) -> VexfsResult<Vec<u8>> {
         match compression {
             CompressionType::None => {
-                if data.len() > 1024 || original_size > 1024 {
-                    return Err(VectorStorageError::CompressionError);
+                if data.len() != original_size as usize {
+                    return Err(VexfsError::VectorError(crate::shared::errors::VectorErrorKind::DeserializationError));
                 }
-                let mut result = [0u8; 1024];
-                result[..original_size as usize].copy_from_slice(&data[..original_size as usize]);
-                Ok(result)
+                Ok(data.to_vec())
             }
             _ => {
                 // TODO: Implement decompression algorithms
-                Err(VectorStorageError::CompressionError)
+                Err(VexfsError::VectorError(crate::shared::errors::VectorErrorKind::DeserializationError))
             }
         }
     }
@@ -458,15 +558,6 @@ mod tests {
     }
 
     #[test]
-    fn test_vector_storage_manager_creation() {
-        let manager = VectorStorageManager::new(4096, 1000);
-        assert_eq!(manager.block_size, 4096);
-        assert_eq!(manager.total_blocks, 1000);
-        assert_eq!(manager.free_blocks, 1000);
-        assert_eq!(manager.next_vector_id, 1);
-    }
-
-    #[test]
     fn test_vector_alignment() {
         assert_eq!(VECTOR_ALIGNMENT, 64);
         
@@ -474,5 +565,23 @@ mod tests {
         let size = 100;
         let aligned = (size + VECTOR_ALIGNMENT - 1) & !(VECTOR_ALIGNMENT - 1);
         assert_eq!(aligned, 128); // Should align to next 64-byte boundary
+    }
+
+    #[test]
+    fn test_vector_data_types() {
+        assert_eq!(VectorDataType::Float32 as u8, 0);
+        assert_eq!(VectorDataType::Float16 as u8, 1);
+        assert_eq!(VectorDataType::Int8 as u8, 2);
+        assert_eq!(VectorDataType::Int16 as u8, 3);
+        assert_eq!(VectorDataType::Binary as u8, 4);
+    }
+
+    #[test]
+    fn test_compression_types() {
+        assert_eq!(CompressionType::None as u8, 0);
+        assert_eq!(CompressionType::Quantization4Bit as u8, 1);
+        assert_eq!(CompressionType::Quantization8Bit as u8, 2);
+        assert_eq!(CompressionType::ProductQuantization as u8, 3);
+        assert_eq!(CompressionType::SparseEncoding as u8, 4);
     }
 }

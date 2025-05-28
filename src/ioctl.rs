@@ -515,7 +515,7 @@ impl From<AnnsError> for VectorIoctlError {
 impl From<VectorStorageError> for VectorIoctlError {
     fn from(err: VectorStorageError) -> Self {
         match err {
-            VectorStorageError::InvalidDimensions => VectorIoctlError::InvalidDimensions,
+            VectorStorageError::InvalidDimensions(_) => VectorIoctlError::InvalidDimensions,
             VectorStorageError::InvalidVectorId => VectorIoctlError::InvalidVectorId,
             VectorStorageError::VectorNotFound => VectorIoctlError::VectorNotFound,
             VectorStorageError::NoSpace => VectorIoctlError::InsufficientMemory,
