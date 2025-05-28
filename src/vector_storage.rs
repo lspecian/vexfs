@@ -1276,7 +1276,7 @@ impl VectorCompression {
     }
 
     /// Helper: Convert bytes to f32 slice
-    fn bytes_to_f32_slice(data: &[u8]) -> VexfsResult<&[f32]> {
+    pub fn bytes_to_f32_slice(data: &[u8]) -> VexfsResult<&[f32]> {
         if data.len() % 4 != 0 {
             return Err(VexfsError::VectorError(crate::shared::errors::VectorErrorKind::DeserializationError));
         }
