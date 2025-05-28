@@ -1,9 +1,13 @@
 //! Query Planning and Optimization for VexFS Vector Search
 //!
-//! This module implements intelligent query planning for vector search operations,
-//! analyzing query characteristics and determining optimal execution strategies.
-//! It provides index selection logic, query optimization algorithms, and execution
-//! planning to maximize search performance across different query types and data characteristics.
+//! This module implements intelligent query planning and optimization for vector search operations,
+//! providing cost-based optimization, query rewriting, adaptive optimization, and execution planning.
+//! It analyzes query characteristics, determines optimal execution strategies, and continuously learns
+//! from performance feedback to improve future query planning decisions.
+//!
+//! **Task 6.2 Implementation**: Enhanced with intelligent cost estimation, query transformation,
+//! adaptive optimization based on historical performance, and integration with QueryPerformanceMonitor
+//! for feedback-driven optimization.
 
 use crate::anns::{DistanceMetric, IndexStrategy, LshConfig, IvfConfig, PqConfig, FlatConfig};
 use crate::vector_search::{SearchQuery, SearchOptions, VectorSearchEngine};
@@ -12,6 +16,7 @@ use crate::vector_storage::{VectorStorageManager, VectorDataType};
 use crate::vector_optimizations::{VectorOptimizer, SimdStrategy, MemoryLayout, BatchConfig};
 use crate::fs_core::operations::OperationContext;
 use crate::shared::errors::{VexfsError, VexfsResult};
+use crate::query_monitor::{QueryPerformanceMonitor, QueryPattern, OptimizationRecommendation, RecommendationType};
 
 #[cfg(not(feature = "kernel"))]
 use std::sync::Arc;
@@ -24,6 +29,125 @@ use alloc::{vec::Vec, collections::BTreeMap, string::String};
 use std::{vec::Vec, collections::BTreeMap, string::String};
 
 use core::f32;
+
+/// Cost estimation model for query optimization
+#[derive(Debug, Clone)]
+pub struct CostModel {
+    /// CPU cost per vector comparison
+    pub cpu_cost_per_comparison: f32,
+    /// Memory cost per byte allocated
+    pub memory_cost_per_byte: f32,
+    /// I/O cost per disk access
+    pub io_cost_per_access: f32,
+    /// Index traversal cost factor
+    pub index_traversal_cost: f32,
+    /// Cache miss penalty
+    pub cache_miss_penalty: f32,
+    /// Network latency cost (for distributed scenarios)
+    pub network_latency_cost: f32,
+}
+
+impl Default for CostModel {
+    fn default() -> Self {
+        Self {
+            cpu_cost_per_comparison: 1.0,
+            memory_cost_per_byte: 0.001,
+            io_cost_per_access: 100.0,
+            index_traversal_cost: 10.0,
+            cache_miss_penalty: 50.0,
+            network_latency_cost: 1000.0,
+        }
+    }
+}
+
+/// Query transformation and rewriting strategies
+#[derive(Debug, Clone)]
+pub struct QueryTransformation {
+    /// Original query
+    pub original_query: SearchQuery,
+    /// Transformed query
+    pub transformed_query: SearchQuery,
+    /// Transformation type applied
+    pub transformation_type: TransformationType,
+    /// Expected performance improvement
+    pub expected_improvement: f32,
+    /// Transformation confidence
+    pub confidence: f32,
+    /// Reasoning for transformation
+    pub reasoning: String,
+}
+
+/// Types of query transformations
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TransformationType {
+    /// Dimension reduction
+    DimensionReduction,
+    /// Approximation level adjustment
+    ApproximationAdjustment,
+    /// Filter reordering
+    FilterReordering,
+    /// Batch size optimization
+    BatchOptimization,
+    /// Distance metric substitution
+    MetricSubstitution,
+    /// Query decomposition
+    QueryDecomposition,
+    /// Parameter tuning
+    ParameterTuning,
+}
+
+/// Adaptive optimization state
+#[derive(Debug, Clone)]
+pub struct AdaptiveOptimizationState {
+    /// Learning rate for adaptation
+    pub learning_rate: f32,
+    /// Performance history window size
+    pub history_window_size: usize,
+    /// Adaptation threshold
+    pub adaptation_threshold: f32,
+    /// Current optimization strategy
+    pub current_strategy: OptimizationStrategy,
+    /// Strategy performance scores
+    pub strategy_scores: BTreeMap<OptimizationStrategy, f32>,
+    /// Last adaptation timestamp
+    pub last_adaptation_us: u64,
+}
+
+/// Optimization strategies for adaptive learning
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum OptimizationStrategy {
+    /// Conservative optimization (favor accuracy)
+    Conservative,
+    /// Balanced optimization
+    Balanced,
+    /// Aggressive optimization (favor speed)
+    Aggressive,
+    /// Memory-optimized
+    MemoryOptimized,
+    /// Latency-optimized
+    LatencyOptimized,
+}
+
+/// Cost estimation result
+#[derive(Debug, Clone)]
+pub struct CostEstimate {
+    /// Total estimated cost
+    pub total_cost: f32,
+    /// CPU cost component
+    pub cpu_cost: f32,
+    /// Memory cost component
+    pub memory_cost: f32,
+    /// I/O cost component
+    pub io_cost: f32,
+    /// Index cost component
+    pub index_cost: f32,
+    /// Cache cost component
+    pub cache_cost: f32,
+    /// Estimated execution time (microseconds)
+    pub estimated_time_us: u64,
+    /// Confidence in estimate
+    pub confidence: f32,
+}
 
 /// Query complexity levels for optimization decisions
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -149,6 +273,7 @@ pub struct OptimizationStats {
 }
 
 /// Main query planner and optimizer with comprehensive OperationContext integration
+/// Enhanced with intelligent cost-based optimization, query rewriting, and adaptive learning
 pub struct QueryPlanner {
     /// Vector storage manager
     storage_manager: Arc<VectorStorageManager>,
@@ -166,6 +291,18 @@ pub struct QueryPlanner {
     active_operations: BTreeMap<u64, OperationMetadata>,
     /// Operation counter for unique operation IDs
     operation_counter: u64,
+    /// Cost estimation model
+    cost_model: CostModel,
+    /// Query transformation cache
+    transformation_cache: BTreeMap<String, QueryTransformation>,
+    /// Adaptive optimization state
+    adaptive_state: AdaptiveOptimizationState,
+    /// Performance monitor integration
+    performance_monitor: Option<Arc<QueryPerformanceMonitor>>,
+    /// Query rewriting rules
+    rewriting_rules: Vec<QueryRewritingRule>,
+    /// Execution path cache for similar queries
+    execution_path_cache: BTreeMap<String, CachedExecutionPath>,
 }
 
 /// Index characteristics for selection decisions
@@ -200,6 +337,81 @@ struct PerformanceRecord {
     accuracy: f32,
     /// Timestamp
     timestamp: u64,
+}
+
+/// Query rewriting rule
+#[derive(Debug, Clone)]
+pub struct QueryRewritingRule {
+    /// Rule name
+    pub name: String,
+    /// Rule condition
+    pub condition: RewritingCondition,
+    /// Rule action
+    pub action: RewritingAction,
+    /// Rule priority
+    pub priority: f32,
+    /// Rule effectiveness score
+    pub effectiveness: f32,
+}
+
+/// Rewriting condition
+#[derive(Debug, Clone)]
+pub enum RewritingCondition {
+    /// Dimension threshold
+    DimensionThreshold(usize),
+    /// Sparsity threshold
+    SparsityThreshold(f32),
+    /// K value threshold
+    KThreshold(usize),
+    /// Complexity threshold
+    ComplexityThreshold(QueryComplexity),
+    /// Combined conditions
+    Combined(Vec<RewritingCondition>),
+}
+
+/// Rewriting action
+#[derive(Debug, Clone)]
+pub enum RewritingAction {
+    /// Reduce dimensions
+    ReduceDimensions(usize),
+    /// Adjust approximation
+    AdjustApproximation(f32),
+    /// Reorder filters
+    ReorderFilters,
+    /// Change metric
+    ChangeMetric(DistanceMetric),
+    /// Split query
+    SplitQuery(usize),
+}
+
+/// Cached execution path
+#[derive(Debug, Clone)]
+pub struct CachedExecutionPath {
+    /// Query signature
+    pub query_signature: String,
+    /// Execution plan
+    pub execution_plan: QueryExecutionPlan,
+    /// Performance metrics
+    pub performance_metrics: ExecutionMetrics,
+    /// Cache timestamp
+    pub cached_at_us: u64,
+    /// Hit count
+    pub hit_count: u64,
+    /// Last used timestamp
+    pub last_used_us: u64,
+}
+
+/// Execution metrics for cached paths
+#[derive(Debug, Clone)]
+pub struct ExecutionMetrics {
+    /// Average execution time
+    pub avg_execution_time_us: u64,
+    /// Average memory usage
+    pub avg_memory_usage_bytes: usize,
+    /// Success rate
+    pub success_rate: f32,
+    /// Sample count
+    pub sample_count: u64,
 }
 
 /// Operation metadata for lifecycle tracking
@@ -292,6 +504,53 @@ impl QueryPlanner {
             sparsity_handling: 1.0,
         });
 
+        // Initialize adaptive optimization state
+        let mut strategy_scores = BTreeMap::new();
+        strategy_scores.insert(OptimizationStrategy::Conservative, 0.7);
+        strategy_scores.insert(OptimizationStrategy::Balanced, 0.8);
+        strategy_scores.insert(OptimizationStrategy::Aggressive, 0.6);
+        strategy_scores.insert(OptimizationStrategy::MemoryOptimized, 0.7);
+        strategy_scores.insert(OptimizationStrategy::LatencyOptimized, 0.7);
+
+        let adaptive_state = AdaptiveOptimizationState {
+            learning_rate: 0.1,
+            history_window_size: 100,
+            adaptation_threshold: 0.1,
+            current_strategy: OptimizationStrategy::Balanced,
+            strategy_scores,
+            last_adaptation_us: 0,
+        };
+
+        // Initialize default rewriting rules
+        let mut rewriting_rules = Vec::new();
+        
+        // Rule 1: Reduce dimensions for very high-dimensional queries
+        rewriting_rules.push(QueryRewritingRule {
+            name: "High Dimension Reduction".to_string(),
+            condition: RewritingCondition::DimensionThreshold(2048),
+            action: RewritingAction::ReduceDimensions(1024),
+            priority: 0.8,
+            effectiveness: 0.7,
+        });
+
+        // Rule 2: Force approximation for large k values
+        rewriting_rules.push(QueryRewritingRule {
+            name: "Large K Approximation".to_string(),
+            condition: RewritingCondition::KThreshold(1000),
+            action: RewritingAction::AdjustApproximation(0.9),
+            priority: 0.7,
+            effectiveness: 0.8,
+        });
+
+        // Rule 3: Optimize sparse vectors
+        rewriting_rules.push(QueryRewritingRule {
+            name: "Sparse Vector Optimization".to_string(),
+            condition: RewritingCondition::SparsityThreshold(0.8),
+            action: RewritingAction::ChangeMetric(DistanceMetric::Manhattan),
+            priority: 0.6,
+            effectiveness: 0.6,
+        });
+
         Self {
             storage_manager,
             vector_optimizer,
@@ -301,6 +560,12 @@ impl QueryPlanner {
             config,
             active_operations: BTreeMap::new(),
             operation_counter: 0,
+            cost_model: CostModel::default(),
+            transformation_cache: BTreeMap::new(),
+            adaptive_state,
+            performance_monitor: None,
+            rewriting_rules,
+            execution_path_cache: BTreeMap::new(),
         }
     }
 
@@ -1005,6 +1270,383 @@ impl QueryPlanner {
     fn get_current_time_us(&self) -> u64 {
         // In a real kernel implementation, this would use kernel time functions
         1640995200_000_000 // Placeholder timestamp in microseconds
+    }
+
+    // ===== NEW TASK 6.2 METHODS: INTELLIGENT QUERY PLANNING AND OPTIMIZATION =====
+
+    /// Estimate query execution cost using the cost model
+    pub fn estimate_query_cost(&self, characteristics: &QueryCharacteristics, plan: &QueryExecutionPlan) -> CostEstimate {
+        let mut cpu_cost = 0.0;
+        let mut memory_cost = 0.0;
+        let mut io_cost = 0.0;
+        let mut index_cost = 0.0;
+        let mut cache_cost = 0.0;
+
+        // CPU cost calculation
+        let vector_comparisons = characteristics.dimensions * characteristics.k;
+        cpu_cost += vector_comparisons as f32 * self.cost_model.cpu_cost_per_comparison;
+
+        // Memory cost calculation
+        memory_cost += plan.memory_estimate as f32 * self.cost_model.memory_cost_per_byte;
+
+        // I/O cost calculation (estimated based on index strategy)
+        let io_operations = match plan.index_recommendation.primary_strategy {
+            IndexStrategy::Flat => characteristics.k / 10, // Sequential scan
+            IndexStrategy::HNSW => (characteristics.k as f32).log2() as usize * 2, // Tree traversal
+            IndexStrategy::LSH => characteristics.k / 5, // Hash lookups
+            IndexStrategy::IVF => characteristics.k / 8, // Cluster access
+            IndexStrategy::PQ => characteristics.k / 15, // Compressed access
+        };
+        io_cost += io_operations as f32 * self.cost_model.io_cost_per_access;
+
+        // Index traversal cost
+        index_cost += self.cost_model.index_traversal_cost * characteristics.k as f32;
+
+        // Cache cost (miss penalty)
+        let estimated_cache_miss_rate = 1.0 - self.estimate_cache_hit_rate(characteristics);
+        cache_cost += estimated_cache_miss_rate * self.cost_model.cache_miss_penalty * characteristics.k as f32;
+
+        let total_cost = cpu_cost + memory_cost + io_cost + index_cost + cache_cost;
+        let estimated_time_us = (total_cost * 10.0) as u64; // Convert cost to time estimate
+
+        CostEstimate {
+            total_cost,
+            cpu_cost,
+            memory_cost,
+            io_cost,
+            index_cost,
+            cache_cost,
+            estimated_time_us,
+            confidence: 0.8, // Base confidence
+        }
+    }
+
+    /// Apply query rewriting rules to optimize the query
+    pub fn rewrite_query(&self, query: &SearchQuery) -> VexfsResult<Option<QueryTransformation>> {
+        for rule in &self.rewriting_rules {
+            if self.evaluate_rewriting_condition(&rule.condition, query)? {
+                let transformed_query = self.apply_rewriting_action(&rule.action, query)?;
+                
+                return Ok(Some(QueryTransformation {
+                    original_query: query.clone(),
+                    transformed_query,
+                    transformation_type: self.action_to_transformation_type(&rule.action),
+                    expected_improvement: rule.effectiveness * 100.0,
+                    confidence: rule.priority,
+                    reasoning: format!("Applied rule '{}': {}", rule.name, self.generate_transformation_reasoning(&rule.action)),
+                }));
+            }
+        }
+        
+        Ok(None)
+    }
+
+    /// Adaptive optimization based on historical performance
+    pub fn adapt_optimization_strategy(&mut self) -> VexfsResult<()> {
+        if self.performance_history.len() < self.adaptive_state.history_window_size {
+            return Ok(()); // Not enough data for adaptation
+        }
+
+        let current_time = self.get_current_time_us();
+        let time_since_last_adaptation = current_time - self.adaptive_state.last_adaptation_us;
+        
+        // Only adapt if enough time has passed
+        if time_since_last_adaptation < 60_000_000 { // 1 minute
+            return Ok(());
+        }
+
+        // Analyze recent performance for each strategy
+        let recent_history = &self.performance_history[self.performance_history.len().saturating_sub(self.adaptive_state.history_window_size)..];
+        
+        let mut strategy_performance = BTreeMap::new();
+        let mut strategy_counts = BTreeMap::new();
+
+        for record in recent_history {
+            let strategy = self.characteristics_to_strategy(&record.characteristics);
+            let performance_score = self.calculate_performance_score(record);
+            
+            *strategy_performance.entry(strategy).or_insert(0.0) += performance_score;
+            *strategy_counts.entry(strategy).or_insert(0) += 1;
+        }
+
+        // Update strategy scores with exponential moving average
+        for (strategy, total_performance) in strategy_performance {
+            if let Some(count) = strategy_counts.get(&strategy) {
+                if *count > 0 {
+                    let avg_performance = total_performance / *count as f32;
+                    let current_score = self.adaptive_state.strategy_scores.get(&strategy).copied().unwrap_or(0.5);
+                    let new_score = (1.0 - self.adaptive_state.learning_rate) * current_score +
+                                   self.adaptive_state.learning_rate * avg_performance;
+                    self.adaptive_state.strategy_scores.insert(strategy, new_score);
+                }
+            }
+        }
+
+        // Select best performing strategy
+        let best_strategy = self.adaptive_state.strategy_scores.iter()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(core::cmp::Ordering::Equal))
+            .map(|(&strategy, _)| strategy)
+            .unwrap_or(OptimizationStrategy::Balanced);
+
+        // Adapt if performance improvement is significant
+        let current_score = self.adaptive_state.strategy_scores.get(&self.adaptive_state.current_strategy).copied().unwrap_or(0.5);
+        let best_score = self.adaptive_state.strategy_scores.get(&best_strategy).copied().unwrap_or(0.5);
+        
+        if best_score - current_score > self.adaptive_state.adaptation_threshold {
+            self.adaptive_state.current_strategy = best_strategy;
+            self.adaptive_state.last_adaptation_us = current_time;
+        }
+
+        Ok(())
+    }
+
+    /// Check execution path cache for similar queries
+    pub fn check_execution_path_cache(&self, query: &SearchQuery) -> Option<&CachedExecutionPath> {
+        let query_signature = self.generate_query_signature(query);
+        self.execution_path_cache.get(&query_signature)
+    }
+
+    /// Cache execution path for future use
+    pub fn cache_execution_path(&mut self, query: &SearchQuery, plan: QueryExecutionPlan, metrics: ExecutionMetrics) {
+        let query_signature = self.generate_query_signature(query);
+        let current_time = self.get_current_time_us();
+        
+        let cached_path = CachedExecutionPath {
+            query_signature: query_signature.clone(),
+            execution_plan: plan,
+            performance_metrics: metrics,
+            cached_at_us: current_time,
+            hit_count: 0,
+            last_used_us: current_time,
+        };
+        
+        self.execution_path_cache.insert(query_signature, cached_path);
+        
+        // Limit cache size
+        if self.execution_path_cache.len() > 1000 {
+            self.cleanup_execution_path_cache();
+        }
+    }
+
+    /// Set performance monitor for feedback integration
+    pub fn set_performance_monitor(&mut self, monitor: Arc<QueryPerformanceMonitor>) {
+        self.performance_monitor = Some(monitor);
+    }
+
+    /// Get optimization recommendations based on current state
+    pub fn get_optimization_recommendations(&self) -> Vec<OptimizationRecommendation> {
+        let mut recommendations = Vec::new();
+
+        // Analyze current strategy performance
+        if let Some(current_score) = self.adaptive_state.strategy_scores.get(&self.adaptive_state.current_strategy) {
+            if *current_score < 0.6 {
+                recommendations.push(OptimizationRecommendation {
+                    recommendation_type: RecommendationType::QueryOptimization,
+                    priority: 0.8,
+                    expected_improvement_percent: 25.0,
+                    implementation_complexity: 0.3,
+                    description: "Current optimization strategy is underperforming. Consider strategy adaptation.".to_string(),
+                    actions: vec![
+                        "Analyze query patterns for better strategy selection".to_string(),
+                        "Increase adaptation sensitivity".to_string(),
+                    ],
+                    estimated_implementation_time_us: 1800 * 1_000_000, // 30 minutes
+                });
+            }
+        }
+
+        // Check cache effectiveness
+        let cache_hit_rate = self.calculate_cache_hit_rate();
+        if cache_hit_rate < 0.3 {
+            recommendations.push(OptimizationRecommendation {
+                recommendation_type: RecommendationType::CacheOptimization,
+                priority: 0.7,
+                expected_improvement_percent: 40.0,
+                implementation_complexity: 0.4,
+                description: "Execution path cache hit rate is low. Consider cache optimization.".to_string(),
+                actions: vec![
+                    "Improve query signature generation".to_string(),
+                    "Increase cache size".to_string(),
+                    "Optimize cache eviction policy".to_string(),
+                ],
+                estimated_implementation_time_us: 3600 * 1_000_000, // 1 hour
+            });
+        }
+
+        recommendations
+    }
+
+    // ===== HELPER METHODS FOR NEW OPTIMIZATION FEATURES =====
+
+    /// Estimate cache hit rate for a query
+    fn estimate_cache_hit_rate(&self, characteristics: &QueryCharacteristics) -> f32 {
+        // Simple heuristic based on query complexity and patterns
+        let base_hit_rate = match characteristics.complexity {
+            QueryComplexity::Simple => 0.8,
+            QueryComplexity::Moderate => 0.6,
+            QueryComplexity::Complex => 0.4,
+            QueryComplexity::HighlyComplex => 0.2,
+        };
+
+        // Adjust for filters (filtered queries are less likely to be cached)
+        if characteristics.has_filters {
+            base_hit_rate * 0.7
+        } else {
+            base_hit_rate
+        }
+    }
+
+    /// Evaluate a rewriting condition against a query
+    fn evaluate_rewriting_condition(&self, condition: &RewritingCondition, query: &SearchQuery) -> VexfsResult<bool> {
+        match condition {
+            RewritingCondition::DimensionThreshold(threshold) => Ok(query.vector.len() > *threshold),
+            RewritingCondition::SparsityThreshold(threshold) => {
+                let sparsity = self.calculate_sparsity(&query.vector);
+                Ok(sparsity > *threshold)
+            },
+            RewritingCondition::KThreshold(threshold) => Ok(query.k > *threshold),
+            RewritingCondition::ComplexityThreshold(threshold) => {
+                let characteristics = self.analyze_query(query)?;
+                Ok(characteristics.complexity as u8 >= *threshold as u8)
+            },
+            RewritingCondition::Combined(conditions) => {
+                for condition in conditions {
+                    if !self.evaluate_rewriting_condition(condition, query)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            },
+        }
+    }
+
+    /// Apply a rewriting action to a query
+    fn apply_rewriting_action(&self, action: &RewritingAction, query: &SearchQuery) -> VexfsResult<SearchQuery> {
+        let mut transformed_query = query.clone();
+
+        match action {
+            RewritingAction::ReduceDimensions(target_dims) => {
+                if query.vector.len() > *target_dims {
+                    transformed_query.vector.truncate(*target_dims);
+                }
+            },
+            RewritingAction::AdjustApproximation(factor) => {
+                transformed_query.approximate = true;
+                transformed_query.expansion_factor *= factor;
+            },
+            RewritingAction::ReorderFilters => {
+                // For now, this is a placeholder - would implement filter reordering logic
+            },
+            RewritingAction::ChangeMetric(new_metric) => {
+                transformed_query.metric = *new_metric;
+            },
+            RewritingAction::SplitQuery(batch_size) => {
+                if query.k > *batch_size {
+                    transformed_query.k = *batch_size;
+                }
+            },
+        }
+
+        Ok(transformed_query)
+    }
+
+    /// Convert rewriting action to transformation type
+    fn action_to_transformation_type(&self, action: &RewritingAction) -> TransformationType {
+        match action {
+            RewritingAction::ReduceDimensions(_) => TransformationType::DimensionReduction,
+            RewritingAction::AdjustApproximation(_) => TransformationType::ApproximationAdjustment,
+            RewritingAction::ReorderFilters => TransformationType::FilterReordering,
+            RewritingAction::ChangeMetric(_) => TransformationType::MetricSubstitution,
+            RewritingAction::SplitQuery(_) => TransformationType::QueryDecomposition,
+        }
+    }
+
+    /// Generate reasoning for transformation
+    fn generate_transformation_reasoning(&self, action: &RewritingAction) -> String {
+        match action {
+            RewritingAction::ReduceDimensions(dims) => format!("Reduced dimensions to {} for better performance", dims),
+            RewritingAction::AdjustApproximation(factor) => format!("Adjusted approximation factor to {:.2} for speed", factor),
+            RewritingAction::ReorderFilters => "Reordered filters for optimal selectivity".to_string(),
+            RewritingAction::ChangeMetric(metric) => format!("Changed distance metric to {:?} for better accuracy", metric),
+            RewritingAction::SplitQuery(size) => format!("Split query into batches of size {} for memory efficiency", size),
+        }
+    }
+
+    /// Map query characteristics to optimization strategy
+    fn characteristics_to_strategy(&self, characteristics: &QueryCharacteristics) -> OptimizationStrategy {
+        match characteristics.complexity {
+            QueryComplexity::Simple => OptimizationStrategy::Conservative,
+            QueryComplexity::Moderate => OptimizationStrategy::Balanced,
+            QueryComplexity::Complex => OptimizationStrategy::Aggressive,
+            QueryComplexity::HighlyComplex => {
+                if characteristics.dimensions > 1024 {
+                    OptimizationStrategy::MemoryOptimized
+                } else {
+                    OptimizationStrategy::LatencyOptimized
+                }
+            },
+        }
+    }
+
+    /// Calculate performance score for a record
+    fn calculate_performance_score(&self, record: &PerformanceRecord) -> f32 {
+        // Normalize performance metrics to a 0-1 score
+        let time_score = 1.0 / (1.0 + record.actual_time_us as f32 / 100000.0); // Normalize by 100ms
+        let memory_score = 1.0 / (1.0 + record.memory_used as f32 / 1048576.0); // Normalize by 1MB
+        let accuracy_score = record.accuracy;
+
+        // Weighted combination
+        0.4 * time_score + 0.3 * memory_score + 0.3 * accuracy_score
+    }
+
+    /// Generate query signature for caching
+    fn generate_query_signature(&self, query: &SearchQuery) -> String {
+        use core::hash::{Hash, Hasher};
+        
+        // Simple signature based on key query characteristics
+        let mut signature = String::new();
+        signature.push_str(&format!("dims:{}", query.vector.len()));
+        signature.push_str(&format!("_k:{}", query.k));
+        signature.push_str(&format!("_metric:{:?}", query.metric));
+        signature.push_str(&format!("_approx:{}", query.approximate));
+        
+        if query.filter.is_some() {
+            signature.push_str("_filtered");
+        }
+        
+        signature
+    }
+
+    /// Calculate sparsity of a vector
+    fn calculate_sparsity(&self, vector: &[f32]) -> f32 {
+        let zero_count = vector.iter().filter(|&&x| x.abs() < f32::EPSILON).count();
+        zero_count as f32 / vector.len() as f32
+    }
+
+    /// Calculate current cache hit rate
+    fn calculate_cache_hit_rate(&self) -> f32 {
+        if self.execution_path_cache.is_empty() {
+            return 0.0;
+        }
+
+        let total_hits: u64 = self.execution_path_cache.values().map(|path| path.hit_count).sum();
+        let total_entries = self.execution_path_cache.len() as u64;
+        
+        if total_entries > 0 {
+            total_hits as f32 / total_entries as f32
+        } else {
+            0.0
+        }
+    }
+
+    /// Cleanup old execution path cache entries
+    fn cleanup_execution_path_cache(&mut self) {
+        let current_time = self.get_current_time_us();
+        let retention_time = 3600 * 1_000_000; // 1 hour
+        
+        self.execution_path_cache.retain(|_, path| {
+            current_time - path.last_used_us < retention_time
+        });
     }
 }
 

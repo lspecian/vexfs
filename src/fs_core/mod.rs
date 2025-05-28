@@ -32,6 +32,7 @@ pub mod path;
 pub mod permissions;
 pub mod operations;
 pub mod locking;
+pub mod enhanced_operation_context;
 
 // Re-export commonly used types and functions
 pub use file::{File, FileOperations};
@@ -42,6 +43,13 @@ pub use permissions::{
     AccessMode, UserContext, AccessCheck, PermissionChecker, SecurityPolicy
 };
 pub use operations::{FilesystemOperations, OperationContext};
+pub use enhanced_operation_context::{
+    EnhancedOperationContext, OperationMetadata, OperationType, CancellationToken,
+    CancellationReason, TimeoutConfig, TimeoutAction, TelemetryCollector,
+    TelemetryEvent, TelemetryEventType, TelemetrySeverity, ProgressReporter,
+    ResourceTracker, LifecycleHooks, OperationPriority, ResourceLimits,
+    ResourceUsageSummary
+};
 pub use locking::{
     LockType, LockScope, LockManager, FileLock, DirectoryLock, LockGuard
 };
