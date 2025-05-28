@@ -132,6 +132,10 @@ pub mod vector_search;
 #[cfg(not(feature = "kernel"))]
 pub mod anns;
 #[cfg(not(feature = "kernel"))]
+pub mod vector_optimizations;
+#[cfg(not(feature = "kernel"))]
+pub mod vector_large_collections;
+#[cfg(not(feature = "kernel"))]
 // pub mod vector_search_integration; // Temporarily disabled due to compilation issues
 
 // Conditional compilation for userspace-only modules
