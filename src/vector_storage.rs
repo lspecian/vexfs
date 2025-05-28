@@ -253,9 +253,12 @@ impl VectorStorageManager {
         let vector_id = self.next_vector_id;
         self.next_vector_id += 1;
 
+        // Apply compression to vector data
+        let compressed_data = VectorCompression::compress(data, compression, data_type)?;
+        
         // Calculate space needed
         let header_size = VectorHeader::SIZE;
-        let total_size = header_size + data.len();
+        let total_size = header_size + compressed_data.len();
         let aligned_size = (total_size + VECTOR_ALIGNMENT - 1) & !(VECTOR_ALIGNMENT - 1);
 
         // Allocate space using storage manager
@@ -268,7 +271,7 @@ impl VectorStorageManager {
 
         let start_block = allocated_blocks[0];
 
-        // Create vector header
+        // Create vector header with compression info
         let header = VectorHeader {
             magic: VectorHeader::MAGIC,
             version: self.format_version,
@@ -278,10 +281,10 @@ impl VectorStorageManager {
             compression,
             dimensions,
             original_size: data.len() as u32,
-            compressed_size: data.len() as u32, // TODO: implement compression
+            compressed_size: compressed_data.len() as u32,
             created_timestamp: 0, // TODO: get current time from context
             modified_timestamp: 0,
-            checksum: self.calculate_checksum(data),
+            checksum: self.calculate_checksum(&compressed_data),
             flags: 0,
             reserved: [],
         };
@@ -378,12 +381,20 @@ impl VectorStorageManager {
             return Err(VexfsError::VectorError(crate::shared::errors::VectorErrorKind::DeserializationError));
         }
 
-        let vector_data = data[vector_data_start..vector_data_end].to_vec();
+        let compressed_data = data[vector_data_start..vector_data_end].to_vec();
 
-        // Verify integrity
-        if !self.verify_vector_integrity(&header, &vector_data) {
+        // Verify integrity of compressed data
+        if !self.verify_vector_integrity(&header, &compressed_data) {
             return Err(VexfsError::VectorError(crate::shared::errors::VectorErrorKind::DeserializationError));
         }
+
+        // Decompress vector data
+        let vector_data = VectorCompression::decompress(
+            &compressed_data,
+            header.compression,
+            header.original_size,
+            header.data_type,
+        )?;
 
         Ok((header, vector_data))
     }
@@ -501,9 +512,281 @@ impl VectorStorageManager {
     pub fn storage_manager(&self) -> &Arc<StorageManager> {
         &self.storage_manager
     }
+
+    /// Select optimal compression strategy based on vector characteristics
+    pub fn select_compression_strategy(
+        &self,
+        data: &[u8],
+        data_type: VectorDataType,
+        dimensions: u32,
+    ) -> CompressionType {
+        VectorCompressionStrategy::select_optimal(data, data_type, dimensions)
+    }
+
+    /// Store vector with automatic compression strategy selection
+    pub fn store_vector_auto_compress(
+        &mut self,
+        context: &mut OperationContext,
+        data: &[u8],
+        file_inode: InodeNumber,
+        data_type: VectorDataType,
+        dimensions: u32,
+    ) -> VexfsResult<u64> {
+        let compression = self.select_compression_strategy(data, data_type, dimensions);
+        self.store_vector(context, data, file_inode, data_type, dimensions, compression)
+    }
+
+    /// Benchmark compression effectiveness for different strategies
+    pub fn benchmark_compression(
+        &self,
+        data: &[u8],
+        data_type: VectorDataType,
+    ) -> VexfsResult<CompressionBenchmark> {
+        VectorCompressionStrategy::benchmark_all(data, data_type)
+    }
 }
 
-/// Vector compression utilities
+/// Compression strategy selector with optimization integration
+pub struct VectorCompressionStrategy;
+
+impl VectorCompressionStrategy {
+    /// Select optimal compression based on vector characteristics
+    pub fn select_optimal(
+        data: &[u8],
+        data_type: VectorDataType,
+        dimensions: u32,
+    ) -> CompressionType {
+        // Analyze vector characteristics
+        let sparsity = Self::calculate_sparsity(data, data_type);
+        let entropy = Self::calculate_entropy(data);
+        let dimension_factor = Self::get_dimension_factor(dimensions);
+        
+        // Decision tree for compression selection
+        match data_type {
+            VectorDataType::Float32 => {
+                if sparsity > 0.8 {
+                    // High sparsity - use sparse encoding
+                    CompressionType::SparseEncoding
+                } else if dimensions >= 512 {
+                    // High-dimensional - use product quantization
+                    CompressionType::ProductQuantization
+                } else if entropy < 0.5 {
+                    // Low entropy - use 4-bit quantization
+                    CompressionType::Quantization4Bit
+                } else {
+                    // Balanced - use 8-bit quantization
+                    CompressionType::Quantization8Bit
+                }
+            }
+            VectorDataType::Float16 => {
+                if sparsity > 0.7 {
+                    CompressionType::SparseEncoding
+                } else {
+                    CompressionType::Quantization8Bit
+                }
+            }
+            VectorDataType::Int8 | VectorDataType::Int16 => {
+                if sparsity > 0.6 {
+                    CompressionType::SparseEncoding
+                } else {
+                    CompressionType::Quantization8Bit
+                }
+            }
+            VectorDataType::Binary => {
+                // Binary vectors are already compact
+                CompressionType::SparseEncoding
+            }
+        }
+    }
+
+    /// Calculate sparsity (fraction of near-zero elements)
+    fn calculate_sparsity(data: &[u8], data_type: VectorDataType) -> f32 {
+        match data_type {
+            VectorDataType::Float32 => {
+                if let Ok(floats) = VectorCompression::bytes_to_f32_slice(data) {
+                    let threshold = 1e-6f32;
+                    let zero_count = floats.iter().filter(|&&x| x.abs() < threshold).count();
+                    zero_count as f32 / floats.len() as f32
+                } else {
+                    0.0
+                }
+            }
+            _ => {
+                // For other types, count actual zeros
+                let zero_count = data.iter().filter(|&&x| x == 0).count();
+                zero_count as f32 / data.len() as f32
+            }
+        }
+    }
+
+    /// Calculate entropy (measure of randomness)
+    fn calculate_entropy(data: &[u8]) -> f32 {
+        let mut counts = [0u32; 256];
+        for &byte in data {
+            counts[byte as usize] += 1;
+        }
+        
+        let len = data.len() as f32;
+        let mut entropy = 0.0f32;
+        
+        for &count in &counts {
+            if count > 0 {
+                let p = count as f32 / len;
+                entropy -= p * p.log2();
+            }
+        }
+        
+        entropy / 8.0 // Normalize to 0-1 range
+    }
+
+    /// Get dimension factor for compression selection
+    fn get_dimension_factor(dimensions: u32) -> f32 {
+        match dimensions {
+            0..=128 => 0.25,
+            129..=256 => 0.5,
+            257..=512 => 0.75,
+            _ => 1.0,
+        }
+    }
+
+    /// Benchmark all compression strategies
+    pub fn benchmark_all(
+        data: &[u8],
+        data_type: VectorDataType,
+    ) -> VexfsResult<CompressionBenchmark> {
+        let original_size = data.len();
+        let mut results = Vec::new();
+
+        let strategies = [
+            CompressionType::None,
+            CompressionType::Quantization4Bit,
+            CompressionType::Quantization8Bit,
+            CompressionType::ProductQuantization,
+            CompressionType::SparseEncoding,
+        ];
+
+        for &strategy in &strategies {
+            let start = std::time::Instant::now();
+            
+            match VectorCompression::compress(data, strategy, data_type) {
+                Ok(compressed) => {
+                    let compress_time = start.elapsed();
+                    
+                    // Test decompression
+                    let decompress_start = std::time::Instant::now();
+                    match VectorCompression::decompress(
+                        &compressed,
+                        strategy,
+                        original_size as u32,
+                        data_type,
+                    ) {
+                        Ok(_decompressed) => {
+                            let decompress_time = decompress_start.elapsed();
+                            
+                            results.push(CompressionResult {
+                                strategy,
+                                original_size,
+                                compressed_size: compressed.len(),
+                                compression_ratio: original_size as f32 / compressed.len() as f32,
+                                compress_time,
+                                decompress_time,
+                                success: true,
+                            });
+                        }
+                        Err(_) => {
+                            results.push(CompressionResult {
+                                strategy,
+                                original_size,
+                                compressed_size: compressed.len(),
+                                compression_ratio: 1.0,
+                                compress_time,
+                                decompress_time: std::time::Duration::ZERO,
+                                success: false,
+                            });
+                        }
+                    }
+                }
+                Err(_) => {
+                    results.push(CompressionResult {
+                        strategy,
+                        original_size,
+                        compressed_size: original_size,
+                        compression_ratio: 1.0,
+                        compress_time: start.elapsed(),
+                        decompress_time: std::time::Duration::ZERO,
+                        success: false,
+                    });
+                }
+            }
+        }
+
+        Ok(CompressionBenchmark {
+            data_type,
+            original_size,
+            results,
+        })
+    }
+}
+
+/// Compression benchmark result
+#[derive(Debug, Clone)]
+pub struct CompressionBenchmark {
+    pub data_type: VectorDataType,
+    pub original_size: usize,
+    pub results: Vec<CompressionResult>,
+}
+
+/// Individual compression strategy result
+#[derive(Debug, Clone)]
+pub struct CompressionResult {
+    pub strategy: CompressionType,
+    pub original_size: usize,
+    pub compressed_size: usize,
+    pub compression_ratio: f32,
+    pub compress_time: std::time::Duration,
+    pub decompress_time: std::time::Duration,
+    pub success: bool,
+}
+
+impl CompressionBenchmark {
+    /// Get the best compression strategy by ratio
+    pub fn best_by_ratio(&self) -> Option<&CompressionResult> {
+        self.results
+            .iter()
+            .filter(|r| r.success)
+            .max_by(|a, b| a.compression_ratio.partial_cmp(&b.compression_ratio).unwrap())
+    }
+
+    /// Get the fastest compression strategy
+    pub fn fastest_compression(&self) -> Option<&CompressionResult> {
+        self.results
+            .iter()
+            .filter(|r| r.success)
+            .min_by_key(|r| r.compress_time)
+    }
+
+    /// Get the fastest decompression strategy
+    pub fn fastest_decompression(&self) -> Option<&CompressionResult> {
+        self.results
+            .iter()
+            .filter(|r| r.success)
+            .min_by_key(|r| r.decompress_time)
+    }
+
+    /// Get balanced strategy (good ratio + reasonable speed)
+    pub fn balanced_strategy(&self) -> Option<&CompressionResult> {
+        self.results
+            .iter()
+            .filter(|r| r.success && r.compression_ratio > 1.1)
+            .min_by(|a, b| {
+                let score_a = a.compress_time.as_nanos() as f32 / a.compression_ratio;
+                let score_b = b.compress_time.as_nanos() as f32 / b.compression_ratio;
+                score_a.partial_cmp(&score_b).unwrap()
+            })
+    }
+}
+
+/// Vector compression utilities with advanced algorithms
 pub struct VectorCompression;
 
 impl VectorCompression {
@@ -517,9 +800,17 @@ impl VectorCompression {
             CompressionType::None => {
                 Ok(data.to_vec())
             }
-            _ => {
-                // TODO: Implement compression algorithms
-                Err(VexfsError::VectorError(crate::shared::errors::VectorErrorKind::SerializationError))
+            CompressionType::Quantization4Bit => {
+                Self::quantize_4bit(data, data_type)
+            }
+            CompressionType::Quantization8Bit => {
+                Self::quantize_8bit(data, data_type)
+            }
+            CompressionType::ProductQuantization => {
+                Self::product_quantize(data, data_type)
+            }
+            CompressionType::SparseEncoding => {
+                Self::sparse_encode(data, data_type)
             }
         }
     }
@@ -538,11 +829,476 @@ impl VectorCompression {
                 }
                 Ok(data.to_vec())
             }
-            _ => {
-                // TODO: Implement decompression algorithms
-                Err(VexfsError::VectorError(crate::shared::errors::VectorErrorKind::DeserializationError))
+            CompressionType::Quantization4Bit => {
+                Self::dequantize_4bit(data, original_size, data_type)
+            }
+            CompressionType::Quantization8Bit => {
+                Self::dequantize_8bit(data, original_size, data_type)
+            }
+            CompressionType::ProductQuantization => {
+                Self::product_dequantize(data, original_size, data_type)
+            }
+            CompressionType::SparseEncoding => {
+                Self::sparse_decode(data, original_size, data_type)
             }
         }
+    }
+
+    /// 4-bit quantization for maximum compression
+    fn quantize_4bit(data: &[u8], data_type: VectorDataType) -> VexfsResult<Vec<u8>> {
+        match data_type {
+            VectorDataType::Float32 => {
+                let floats = Self::bytes_to_f32_slice(data)?;
+                let mut compressed = Vec::new();
+                
+                // Find min/max for quantization range
+                let min_val = floats.iter().fold(f32::INFINITY, |a, &b| a.min(b));
+                let max_val = floats.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+                let range = max_val - min_val;
+                
+                // Store quantization parameters (8 bytes)
+                compressed.extend_from_slice(&min_val.to_le_bytes());
+                compressed.extend_from_slice(&range.to_le_bytes());
+                
+                // Quantize to 4-bit values (0-15)
+                let mut packed_data = Vec::new();
+                for chunk in floats.chunks(2) {
+                    let val1 = if chunk.len() > 0 {
+                        ((chunk[0] - min_val) / range * 15.0).round().clamp(0.0, 15.0) as u8
+                    } else { 0 };
+                    let val2 = if chunk.len() > 1 {
+                        ((chunk[1] - min_val) / range * 15.0).round().clamp(0.0, 15.0) as u8
+                    } else { 0 };
+                    
+                    // Pack two 4-bit values into one byte
+                    packed_data.push((val1 << 4) | val2);
+                }
+                
+                compressed.extend_from_slice(&packed_data);
+                Ok(compressed)
+            }
+            _ => {
+                // For other types, fall back to 8-bit quantization
+                Self::quantize_8bit(data, data_type)
+            }
+        }
+    }
+
+    /// 8-bit quantization for balanced compression/quality
+    fn quantize_8bit(data: &[u8], data_type: VectorDataType) -> VexfsResult<Vec<u8>> {
+        match data_type {
+            VectorDataType::Float32 => {
+                let floats = Self::bytes_to_f32_slice(data)?;
+                let mut compressed = Vec::new();
+                
+                // Find min/max for quantization range
+                let min_val = floats.iter().fold(f32::INFINITY, |a, &b| a.min(b));
+                let max_val = floats.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+                let range = max_val - min_val;
+                
+                // Store quantization parameters (8 bytes)
+                compressed.extend_from_slice(&min_val.to_le_bytes());
+                compressed.extend_from_slice(&range.to_le_bytes());
+                
+                // Quantize to 8-bit values (0-255)
+                for &val in floats {
+                    let quantized = ((val - min_val) / range * 255.0).round().clamp(0.0, 255.0) as u8;
+                    compressed.push(quantized);
+                }
+                
+                Ok(compressed)
+            }
+            VectorDataType::Float16 => {
+                // Already 16-bit, quantize to 8-bit
+                let mut compressed = Vec::new();
+                for chunk in data.chunks(2) {
+                    if chunk.len() == 2 {
+                        // Simple downsampling for demonstration
+                        compressed.push(chunk[1]); // Take high byte
+                    }
+                }
+                Ok(compressed)
+            }
+            _ => {
+                // For integer types, apply delta encoding
+                Self::delta_encode(data)
+            }
+        }
+    }
+
+    /// Product quantization for high-dimensional vectors
+    fn product_quantize(data: &[u8], data_type: VectorDataType) -> VexfsResult<Vec<u8>> {
+        match data_type {
+            VectorDataType::Float32 => {
+                let floats = Self::bytes_to_f32_slice(data)?;
+                let dimensions = floats.len();
+                
+                // Use 8 subspaces for product quantization
+                let subspace_size = (dimensions + 7) / 8; // Round up
+                let mut compressed = Vec::new();
+                
+                // Store metadata
+                compressed.extend_from_slice(&(dimensions as u32).to_le_bytes());
+                compressed.extend_from_slice(&(subspace_size as u32).to_le_bytes());
+                
+                // For each subspace, find centroids and quantize
+                for subspace in 0..8 {
+                    let start_idx = subspace * subspace_size;
+                    let end_idx = (start_idx + subspace_size).min(dimensions);
+                    
+                    if start_idx >= dimensions {
+                        break;
+                    }
+                    
+                    let subvector = &floats[start_idx..end_idx];
+                    
+                    // Simple quantization for each subspace (in practice would use k-means)
+                    let min_val = subvector.iter().fold(f32::INFINITY, |a, &b| a.min(b));
+                    let max_val = subvector.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+                    let range = max_val - min_val;
+                    
+                    // Store subspace parameters
+                    compressed.extend_from_slice(&min_val.to_le_bytes());
+                    compressed.extend_from_slice(&range.to_le_bytes());
+                    
+                    // Quantize subspace to 8-bit
+                    for &val in subvector {
+                        let quantized = if range > 0.0 {
+                            ((val - min_val) / range * 255.0).round().clamp(0.0, 255.0) as u8
+                        } else {
+                            0
+                        };
+                        compressed.push(quantized);
+                    }
+                }
+                
+                Ok(compressed)
+            }
+            _ => {
+                // Fall back to 8-bit quantization for other types
+                Self::quantize_8bit(data, data_type)
+            }
+        }
+    }
+
+    /// Sparse encoding for vectors with many zeros
+    fn sparse_encode(data: &[u8], data_type: VectorDataType) -> VexfsResult<Vec<u8>> {
+        match data_type {
+            VectorDataType::Float32 => {
+                let floats = Self::bytes_to_f32_slice(data)?;
+                let mut compressed = Vec::new();
+                
+                // Store original dimension count
+                compressed.extend_from_slice(&(floats.len() as u32).to_le_bytes());
+                
+                // Find non-zero elements (with small threshold)
+                let threshold = 1e-6f32;
+                let mut non_zero_count = 0u32;
+                let mut indices = Vec::new();
+                let mut values = Vec::new();
+                
+                for (i, &val) in floats.iter().enumerate() {
+                    if val.abs() > threshold {
+                        indices.push(i as u32);
+                        values.push(val);
+                        non_zero_count += 1;
+                    }
+                }
+                
+                // Store non-zero count
+                compressed.extend_from_slice(&non_zero_count.to_le_bytes());
+                
+                // Store indices (4 bytes each)
+                for &idx in &indices {
+                    compressed.extend_from_slice(&idx.to_le_bytes());
+                }
+                
+                // Store values (4 bytes each)
+                for &val in &values {
+                    compressed.extend_from_slice(&val.to_le_bytes());
+                }
+                
+                Ok(compressed)
+            }
+            _ => {
+                // For other types, use run-length encoding
+                Self::run_length_encode(data)
+            }
+        }
+    }
+
+    /// Delta encoding for correlated data
+    fn delta_encode(data: &[u8]) -> VexfsResult<Vec<u8>> {
+        if data.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        let mut compressed = Vec::new();
+        compressed.push(data[0]); // Store first value as-is
+        
+        for i in 1..data.len() {
+            let delta = data[i].wrapping_sub(data[i-1]);
+            compressed.push(delta);
+        }
+        
+        Ok(compressed)
+    }
+
+    /// Run-length encoding for repetitive data
+    fn run_length_encode(data: &[u8]) -> VexfsResult<Vec<u8>> {
+        if data.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        let mut compressed = Vec::new();
+        let mut current_byte = data[0];
+        let mut count = 1u8;
+        
+        for &byte in &data[1..] {
+            if byte == current_byte && count < 255 {
+                count += 1;
+            } else {
+                compressed.push(count);
+                compressed.push(current_byte);
+                current_byte = byte;
+                count = 1;
+            }
+        }
+        
+        // Add final run
+        compressed.push(count);
+        compressed.push(current_byte);
+        
+        Ok(compressed)
+    }
+
+    /// Dequantize 4-bit data
+    fn dequantize_4bit(data: &[u8], original_size: u32, data_type: VectorDataType) -> VexfsResult<Vec<u8>> {
+        match data_type {
+            VectorDataType::Float32 => {
+                if data.len() < 8 {
+                    return Err(VexfsError::VectorError(crate::shared::errors::VectorErrorKind::DeserializationError));
+                }
+                
+                // Read quantization parameters
+                let min_val = f32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let range = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                
+                let packed_data = &data[8..];
+                let mut floats = Vec::new();
+                
+                // Unpack 4-bit values
+                for &packed_byte in packed_data {
+                    let val1 = (packed_byte >> 4) & 0x0F;
+                    let val2 = packed_byte & 0x0F;
+                    
+                    let float1 = min_val + (val1 as f32 / 15.0) * range;
+                    let float2 = min_val + (val2 as f32 / 15.0) * range;
+                    
+                    floats.push(float1);
+                    floats.push(float2);
+                }
+                
+                // Truncate to original size
+                let expected_floats = original_size as usize / 4;
+                floats.truncate(expected_floats);
+                
+                Ok(Self::f32_slice_to_bytes(&floats))
+            }
+            _ => {
+                Self::dequantize_8bit(data, original_size, data_type)
+            }
+        }
+    }
+
+    /// Dequantize 8-bit data
+    fn dequantize_8bit(data: &[u8], original_size: u32, data_type: VectorDataType) -> VexfsResult<Vec<u8>> {
+        match data_type {
+            VectorDataType::Float32 => {
+                if data.len() < 8 {
+                    return Err(VexfsError::VectorError(crate::shared::errors::VectorErrorKind::DeserializationError));
+                }
+                
+                // Read quantization parameters
+                let min_val = f32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let range = f32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                
+                let quantized_data = &data[8..];
+                let mut floats = Vec::new();
+                
+                for &quantized in quantized_data {
+                    let float_val = min_val + (quantized as f32 / 255.0) * range;
+                    floats.push(float_val);
+                }
+                
+                Ok(Self::f32_slice_to_bytes(&floats))
+            }
+            VectorDataType::Float16 => {
+                // Reconstruct 16-bit values (simple upsampling)
+                let mut result = Vec::new();
+                for &byte in data {
+                    result.push(0); // Low byte
+                    result.push(byte); // High byte
+                }
+                Ok(result)
+            }
+            _ => {
+                Self::delta_decode(data)
+            }
+        }
+    }
+
+    /// Product dequantization
+    fn product_dequantize(data: &[u8], original_size: u32, data_type: VectorDataType) -> VexfsResult<Vec<u8>> {
+        match data_type {
+            VectorDataType::Float32 => {
+                if data.len() < 8 {
+                    return Err(VexfsError::VectorError(crate::shared::errors::VectorErrorKind::DeserializationError));
+                }
+                
+                // Read metadata
+                let dimensions = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+                let subspace_size = u32::from_le_bytes([data[4], data[5], data[6], data[7]]) as usize;
+                
+                let mut floats = vec![0.0f32; dimensions];
+                let mut offset = 8;
+                
+                // Reconstruct each subspace
+                for subspace in 0..8 {
+                    let start_idx = subspace * subspace_size;
+                    let end_idx = (start_idx + subspace_size).min(dimensions);
+                    
+                    if start_idx >= dimensions || offset + 8 > data.len() {
+                        break;
+                    }
+                    
+                    // Read subspace parameters
+                    let min_val = f32::from_le_bytes([data[offset], data[offset+1], data[offset+2], data[offset+3]]);
+                    let range = f32::from_le_bytes([data[offset+4], data[offset+5], data[offset+6], data[offset+7]]);
+                    offset += 8;
+                    
+                    // Dequantize subspace
+                    for i in start_idx..end_idx {
+                        if offset >= data.len() {
+                            break;
+                        }
+                        let quantized = data[offset];
+                        floats[i] = min_val + (quantized as f32 / 255.0) * range;
+                        offset += 1;
+                    }
+                }
+                
+                Ok(Self::f32_slice_to_bytes(&floats))
+            }
+            _ => {
+                Self::dequantize_8bit(data, original_size, data_type)
+            }
+        }
+    }
+
+    /// Sparse decoding
+    fn sparse_decode(data: &[u8], original_size: u32, data_type: VectorDataType) -> VexfsResult<Vec<u8>> {
+        match data_type {
+            VectorDataType::Float32 => {
+                if data.len() < 8 {
+                    return Err(VexfsError::VectorError(crate::shared::errors::VectorErrorKind::DeserializationError));
+                }
+                
+                // Read metadata
+                let dimensions = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+                let non_zero_count = u32::from_le_bytes([data[4], data[5], data[6], data[7]]) as usize;
+                
+                let mut floats = vec![0.0f32; dimensions];
+                let mut offset = 8;
+                
+                // Read indices
+                let mut indices = Vec::new();
+                for _ in 0..non_zero_count {
+                    if offset + 4 > data.len() {
+                        return Err(VexfsError::VectorError(crate::shared::errors::VectorErrorKind::DeserializationError));
+                    }
+                    let idx = u32::from_le_bytes([data[offset], data[offset+1], data[offset+2], data[offset+3]]) as usize;
+                    indices.push(idx);
+                    offset += 4;
+                }
+                
+                // Read values
+                for (i, &idx) in indices.iter().enumerate() {
+                    if offset + 4 > data.len() || idx >= dimensions {
+                        return Err(VexfsError::VectorError(crate::shared::errors::VectorErrorKind::DeserializationError));
+                    }
+                    let val = f32::from_le_bytes([data[offset], data[offset+1], data[offset+2], data[offset+3]]);
+                    floats[idx] = val;
+                    offset += 4;
+                }
+                
+                Ok(Self::f32_slice_to_bytes(&floats))
+            }
+            _ => {
+                Self::run_length_decode(data)
+            }
+        }
+    }
+
+    /// Delta decoding
+    fn delta_decode(data: &[u8]) -> VexfsResult<Vec<u8>> {
+        if data.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        let mut decoded = Vec::new();
+        decoded.push(data[0]); // First value as-is
+        
+        for i in 1..data.len() {
+            let prev = decoded[i-1];
+            let delta = data[i];
+            decoded.push(prev.wrapping_add(delta));
+        }
+        
+        Ok(decoded)
+    }
+
+    /// Run-length decoding
+    fn run_length_decode(data: &[u8]) -> VexfsResult<Vec<u8>> {
+        let mut decoded = Vec::new();
+        
+        for chunk in data.chunks(2) {
+            if chunk.len() == 2 {
+                let count = chunk[0];
+                let value = chunk[1];
+                for _ in 0..count {
+                    decoded.push(value);
+                }
+            }
+        }
+        
+        Ok(decoded)
+    }
+
+    /// Helper: Convert bytes to f32 slice
+    fn bytes_to_f32_slice(data: &[u8]) -> VexfsResult<&[f32]> {
+        if data.len() % 4 != 0 {
+            return Err(VexfsError::VectorError(crate::shared::errors::VectorErrorKind::DeserializationError));
+        }
+        
+        // Safe conversion from bytes to f32 slice
+        let float_slice = unsafe {
+            core::slice::from_raw_parts(
+                data.as_ptr() as *const f32,
+                data.len() / 4
+            )
+        };
+        
+        Ok(float_slice)
+    }
+
+    /// Helper: Convert f32 slice to bytes
+    fn f32_slice_to_bytes(floats: &[f32]) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(floats.len() * 4);
+        for &f in floats {
+            bytes.extend_from_slice(&f.to_le_bytes());
+        }
+        bytes
     }
 }
 

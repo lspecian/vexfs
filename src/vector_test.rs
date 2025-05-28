@@ -24,7 +24,7 @@ pub struct TestMetadata {
 }
 
 /// Simple distance metrics for testing
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TestDistanceMetric {
     Euclidean,
     Cosine,
