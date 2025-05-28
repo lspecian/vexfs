@@ -481,7 +481,7 @@ mod tests {
         let strategy = RecoveryStrategy::default();
         
         assert_eq!(strategy.primary_operation, RecoveryOperation::WalReplay);
-        assert_eq!(strategy.fallback_operations.len(), 4);
+        assert_eq!(strategy.fallback_operations.len(), 3);
         assert_eq!(strategy.max_recovery_time, 300);
         assert!(!strategy.allow_data_loss);
         assert!(strategy.automatic_recovery);

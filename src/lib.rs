@@ -57,6 +57,9 @@ pub mod storage;
 // FS Core domain - file and directory operations using DDD architecture
 pub mod fs_core;
 
+// Security domain - encryption, ACL, capabilities, integrity, key management
+pub mod security;
+
 // Re-export shared domain components at crate level for easy access
 pub use shared::{
     errors::{VexfsError, VexfsResult},
@@ -94,6 +97,27 @@ pub use fs_core::{
     // Results - using VexfsResult from shared::errors instead
 };
 
+// Re-export security domain components at crate level for easy access
+pub use security::{
+    // Main security manager
+    SecurityManager, SecurityContext, SecurityError, VectorOperation,
+    // Encryption
+    VectorEncryption, EncryptionConfig, EncryptionKey, EncryptedData,
+    EncryptionError, EncryptionAlgorithm, encryption::EncryptionResult,
+    // ACL and extended attributes
+    AccessControlList, AclEntry, AclPermission, AclType, AclManager,
+    XattrManager,
+    // Capabilities
+    Capability, CapabilitySet, CapabilityManager, SecurityLevel,
+    IoctlSecurityValidator, PrivilegeEscalationDetector,
+    // Integrity
+    IntegrityChecker, ChecksumType, IntegrityMetadata, VerificationResult,
+    DataIntegrityManager,
+    // Key management
+    KeyManager, KeyDerivation, KeyRotation, SecureKeyStorage,
+    KeyMaterial, KeyVersion,
+};
+
 // Re-export macros at crate level
 
 // FFI module for C integration
@@ -118,9 +142,14 @@ pub mod superblock;     // Still needed for legacy kernel interface
 // pub mod inode;         // Replaced by fs_core::inode
 pub mod ioctl;
 
+// IPC module for embedding service communication
+pub mod ipc;
+
 // Userspace-only modules (require std types like Vec, String, etc.)
 #[cfg(not(feature = "kernel"))]
 pub mod vector_storage;
+#[cfg(not(feature = "kernel"))]
+pub mod vector_cache;
 #[cfg(not(feature = "kernel"))]
 pub mod vector_metrics;
 #[cfg(not(feature = "kernel"))]
@@ -147,6 +176,8 @@ pub mod vector_search_integration;
 pub mod enhanced_vector_search;
 #[cfg(not(feature = "kernel"))]
 pub mod hybrid_search;
+#[cfg(not(feature = "kernel"))]
+pub mod hybrid_query_optimizer;
 #[cfg(not(feature = "kernel"))]
 pub mod ioctl_integration;
 

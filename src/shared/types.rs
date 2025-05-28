@@ -853,7 +853,8 @@ mod tests {
         stats.miss_count = 20;
         
         assert_eq!(stats.hit_rate(), 0.8);
-        assert_eq!(stats.miss_rate(), 0.2);
+        // Use approximate comparison for floating point
+        assert!((stats.miss_rate() - 0.2).abs() < f64::EPSILON);
     }
 
     #[test]

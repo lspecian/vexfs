@@ -339,9 +339,9 @@ impl MemoryStats {
         self.utilization_percent() > 90.0
     }
 
-    /// Check if memory usage is high (>75%)
+    /// Check if memory usage is high (>=75%)
     pub fn is_high(&self) -> bool {
-        self.utilization_percent() > 75.0
+        self.utilization_percent() >= 75.0
     }
 }
 

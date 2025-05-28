@@ -416,7 +416,19 @@ impl AlignedVectorStorage {
             return None;
         }
         
-        let start_idx = id * self.dimensions;
+        // Account for alignment padding between vectors
+        let mut current_offset = 0;
+        for i in 0..id {
+            // Skip to next aligned position
+            let alignment_offset = (self.alignment - (current_offset % self.alignment)) % self.alignment;
+            current_offset += alignment_offset + self.dimensions;
+        }
+        
+        // Add final alignment for the target vector
+        let alignment_offset = (self.alignment - (current_offset % self.alignment)) % self.alignment;
+        current_offset += alignment_offset;
+        
+        let start_idx = current_offset;
         let end_idx = start_idx + self.dimensions;
         
         if end_idx <= self.data.len() {

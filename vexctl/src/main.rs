@@ -15,78 +15,272 @@
  * limitations under the License.
  */
 
-use clap::{Parser, Subcommand};
-use std::fs::File;
-use std::os::unix::io::AsRawFd;
-use nix::ioctl_none;
+//! VexFS Control Tool - Command-line interface for VexFS management
 
-// Define the IOCTL command number components, matching the kernel module's ioctl.rs
-const VEXFS_IOCTL_MAGIC: u8 = b'V'; // Uppercase V to match kernel module
-const VEXFS_IOCTL_CMD_GET_STATUS: u8 = 0x10; // Match kernel module definition
+use clap::{Parser, Subcommand, ValueEnum};
+use std::path::PathBuf;
+use std::process;
 
-// Use nix's ioctl macro to properly define the ioctl command
-ioctl_none!(vexfs_get_status, VEXFS_IOCTL_MAGIC, VEXFS_IOCTL_CMD_GET_STATUS);
+use vexctl::commands::{Command, CommandConfig, StatusCommand};
+use vexctl::output::OutputFormat;
+use vexctl::{Result, VexctlError};
 
-
+/// VexFS Control Tool - Manage and interact with VexFS filesystems
 #[derive(Parser)]
-#[clap(author, version, about, long_about = None)]
+#[command(author, version, about, long_about = None)]
+#[command(propagate_version = true)]
 struct Cli {
-    #[clap(subcommand)]
+    /// Output format
+    #[arg(short, long, value_enum, default_value_t = OutputFormat::Human)]
+    format: OutputFormat,
+
+    /// Enable verbose output
+    #[arg(short, long)]
+    verbose: bool,
+
+    /// Quiet mode (minimal output)
+    #[arg(short, long)]
+    quiet: bool,
+
+    /// Timeout for operations in seconds
+    #[arg(long, default_value_t = 30)]
+    timeout: u64,
+
+    #[command(subcommand)]
     command: Commands,
 }
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Get status of a mounted VexFS filesystem
+    /// Display filesystem status and health information
     Status {
-        /// Path to the mounted VexFS filesystem (e.g., /mnt/vexfs)
-        #[clap(value_parser)]
-        path: String,
+        /// Path to the mounted VexFS filesystem
+        #[arg(value_name = "MOUNT_POINT")]
+        mount_point: PathBuf,
+    },
+    /// Vector similarity search operations
+    Search {
+        /// Query vector file or dimensions
+        #[arg(short, long)]
+        query: Option<String>,
+        
+        /// Vector file to search with
+        #[arg(short, long)]
+        file: Option<PathBuf>,
+        
+        /// Number of nearest neighbors to find
+        #[arg(short = 'k', long, default_value_t = 10)]
+        top_k: u32,
+        
+        /// Distance metric (cosine, euclidean, dot, manhattan)
+        #[arg(short, long, default_value = "cosine")]
+        metric: String,
+        
+        /// Search strategy
+        #[arg(short, long)]
+        strategy: Option<String>,
+        
+        /// Mount point path
+        #[arg(value_name = "MOUNT_POINT")]
+        mount_point: PathBuf,
+    },
+    /// Add vector embeddings to files
+    AddEmbedding {
+        /// File to add embedding to
+        #[arg(short, long)]
+        file: Option<PathBuf>,
+        
+        /// Vector data (comma-separated floats)
+        #[arg(short, long)]
+        vector: Option<String>,
+        
+        /// Vector format (float32, float16, binary)
+        #[arg(long, default_value = "float32")]
+        format: String,
+        
+        /// Batch processing file
+        #[arg(short, long)]
+        batch: Option<PathBuf>,
+        
+        /// Mount point path
+        #[arg(value_name = "MOUNT_POINT")]
+        mount_point: PathBuf,
+    },
+    /// List and manage vector indexes
+    ListIndexes {
+        /// Show detailed information
+        #[arg(short, long)]
+        detailed: bool,
+        
+        /// Mount point path
+        #[arg(value_name = "MOUNT_POINT")]
+        mount_point: PathBuf,
+    },
+    /// Create a new vector index
+    CreateIndex {
+        /// Index name
+        #[arg(short, long)]
+        name: String,
+        
+        /// Index type (hnsw, ivf)
+        #[arg(short, long, default_value = "hnsw")]
+        index_type: String,
+        
+        /// Vector dimensions
+        #[arg(short, long)]
+        dimensions: u32,
+        
+        /// Configuration file
+        #[arg(short, long)]
+        config: Option<PathBuf>,
+        
+        /// Mount point path
+        #[arg(value_name = "MOUNT_POINT")]
+        mount_point: PathBuf,
+    },
+    /// Filesystem consistency check and repair
+    Fsck {
+        /// Perform repairs
+        #[arg(short, long)]
+        repair: bool,
+        
+        /// Check vector indexes
+        #[arg(long)]
+        check_vectors: bool,
+        
+        /// Mount point path
+        #[arg(value_name = "MOUNT_POINT")]
+        mount_point: PathBuf,
     },
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+// OutputFormat already implements the necessary traits in the output module
+
+fn main() {
     let cli = Cli::parse();
+    
+    // Set up logging based on verbosity
+    if cli.verbose {
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
+    } else if !cli.quiet {
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    }
 
-    match &cli.command {
-        Commands::Status { path } => {
-            println!("Attempting to get status for VexFS mounted at: {}", path);
+    // Create command configuration
+    let config = CommandConfig::new()
+        .with_format(cli.format)
+        .with_verbose(cli.verbose)
+        .with_quiet(cli.quiet)
+        .with_timeout(cli.timeout);
 
-            let file = match File::open(path) {
-                Ok(f) => f,
-                Err(e) => {
-                    eprintln!("Error opening '{}': {}", path, e);
-                    return Err(e.into());
-                }
-            };
+    // Execute the command
+    let result = match cli.command {
+        Commands::Status { mount_point } => {
+            let cmd = StatusCommand::new(config, mount_point);
+            cmd.execute()
+        }
+        Commands::Search {
+            query,
+            file,
+            top_k,
+            metric,
+            strategy,
+            mount_point
+        } => {
+            // TODO: Implement search command
+            eprintln!("Search command not yet implemented");
+            Ok(())
+        }
+        Commands::AddEmbedding {
+            file,
+            vector,
+            format,
+            batch,
+            mount_point
+        } => {
+            // TODO: Implement add-embedding command
+            eprintln!("Add-embedding command not yet implemented");
+            Ok(())
+        }
+        Commands::ListIndexes {
+            detailed,
+            mount_point
+        } => {
+            // TODO: Implement list-indexes command
+            eprintln!("List-indexes command not yet implemented");
+            Ok(())
+        }
+        Commands::CreateIndex {
+            name,
+            index_type,
+            dimensions,
+            config: index_config,
+            mount_point
+        } => {
+            // TODO: Implement create-index command
+            eprintln!("Create-index command not yet implemented");
+            Ok(())
+        }
+        Commands::Fsck {
+            repair,
+            check_vectors,
+            mount_point
+        } => {
+            // TODO: Implement fsck command
+            eprintln!("Fsck command not yet implemented");
+            Ok(())
+        }
+    };
 
-            let fd = file.as_raw_fd();
-            
-            // Use the properly defined ioctl function from nix
-            match unsafe { vexfs_get_status(fd) } {
-                Ok(status_code) => {
-                    // status_code is the direct integer return from the ioctl syscall.
-                    println!("VexFS status for '{}': {}", path, status_code);
-                    if status_code == 12345 {
-                        println!("Status interpretation: OK (Magic number 12345 received from kernel)");
-                    } else if status_code < 0 {
-                        // This should ideally not happen if the kernel module returns a positive status.
-                        // Negative values from ioctl syscall usually mean an error in the syscall itself.
-                        eprintln!("Received negative status code {}, which typically indicates an ioctl syscall error.", status_code);
-                    } else {
-                        println!("Received status code: {}. Expected 12345 for OK.", status_code);
-                    }
+    // Handle the result
+    if let Err(e) = result {
+        handle_error(e, cli.format);
+        process::exit(1);
+    }
+}
+
+/// Handle and display errors appropriately
+fn handle_error(error: VexctlError, format: OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            let error_obj = serde_json::json!({
+                "error": {
+                    "type": error.category(),
+                    "message": error.to_string(),
+                    "suggestion": error.suggestion()
                 }
-                Err(e) => {
-                    // This Err(e) is from the ioctl syscall failing (e.g., fd not open, device not supporting the ioctl, etc.)
-                    eprintln!("Error calling VEXFS_IOCTL_GET_STATUS on '{}': {}", path, e);
-                    // e is nix::Error, which can be converted to std::io::Error
-                    let std_io_error: std::io::Error = e.into();
-                    return Err(std_io_error.into());
-                }
+            });
+            eprintln!("{}", serde_json::to_string_pretty(&error_obj).unwrap());
+        }
+        _ => {
+            eprintln!("Error: {}", error);
+            if let Some(suggestion) = error.suggestion() {
+                eprintln!("Suggestion: {}", suggestion);
             }
         }
     }
+}
 
-    Ok(())
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cli_parsing() {
+        // Test basic status command
+        let cli = Cli::try_parse_from(&["vexctl", "status", "/mnt/vexfs"]).unwrap();
+        assert!(matches!(cli.command, Commands::Status { .. }));
+    }
+
+    #[test]
+    fn test_output_format_parsing() {
+        let cli = Cli::try_parse_from(&["vexctl", "--format", "json", "status", "/mnt/vexfs"]).unwrap();
+        assert_eq!(cli.format, OutputFormat::Json);
+    }
+
+    #[test]
+    fn test_verbose_flag() {
+        let cli = Cli::try_parse_from(&["vexctl", "--verbose", "status", "/mnt/vexfs"]).unwrap();
+        assert!(cli.verbose);
+    }
 }

@@ -33,6 +33,11 @@ pub mod permissions;
 pub mod operations;
 pub mod locking;
 pub mod enhanced_operation_context;
+pub mod cow;
+pub mod snapshot;
+pub mod cow_integration;
+pub mod cow_vector_integration;
+pub mod cow_garbage_collection;
 
 // Re-export commonly used types and functions
 pub use file::{File, FileOperations};
@@ -52,6 +57,24 @@ pub use enhanced_operation_context::{
 };
 pub use locking::{
     LockType, LockScope, LockManager, FileLock, DirectoryLock, LockGuard
+};
+pub use cow::{
+    CowManager, CowMapping, CowExtent, CowBlockRef, CowStats
+};
+pub use snapshot::{
+    SnapshotManager, SnapshotMetadata, SnapshotId, SnapshotStats,
+    DeltaStorage, DeltaEntry, GarbageCollectionResult
+};
+pub use cow_integration::{
+    CowFilesystemOperations, CowSnapshotIntegration, CowConfig,
+    CowFilesystemStats, GarbageCollectionSummary, OptimizationResult
+};
+pub use cow_vector_integration::{
+    VectorCowManager, VectorCowMapping, VectorCowStats, VectorOptimizationResult
+};
+
+pub use cow_garbage_collection::{
+    CowGarbageCollector, GcConfig, GcStats, CompactionResult
 };
 
 use crate::shared::{

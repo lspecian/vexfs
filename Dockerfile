@@ -57,7 +57,7 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install runtime dependencies (e.g., libfuse3 for userspace execution)
-RUN apt-get update &&     apt-get install -y --no-install-recommends     libfuse3     ca-certificates     && rm -rf /var/lib/apt/lists/*
+RUN apt-get update &&     apt-get install -y --no-install-recommends     libfuse3-3     ca-certificates     && rm -rf /var/lib/apt/lists/*
 
 # Create the same non-root user as in the builder stage
 ARG USER_ID=1000
