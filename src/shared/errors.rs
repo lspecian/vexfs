@@ -135,6 +135,15 @@ pub enum VexfsError {
     
     /// File already exists
     AlreadyExists,
+    
+    /// Operation timeout
+    Timeout(String),
+    
+    /// Resource limit exceeded
+    ResourceLimit(String),
+    
+    /// Operation cancelled
+    OperationCancelled(String),
 }
 
 /// I/O error kinds
@@ -321,6 +330,9 @@ impl fmt::Display for VexfsError {
             VexfsError::NotDirectory => write!(f, "Not a directory"),
             VexfsError::IsDirectory => write!(f, "Is a directory"),
             VexfsError::AlreadyExists => write!(f, "File already exists"),
+            VexfsError::Timeout(msg) => write!(f, "Operation timed out: {}", msg),
+            VexfsError::ResourceLimit(msg) => write!(f, "Resource limit exceeded: {}", msg),
+            VexfsError::OperationCancelled(msg) => write!(f, "Operation cancelled: {}", msg),
         }
     }
 }
@@ -504,6 +516,9 @@ impl VexfsError {
             VexfsError::IOError => -5,            // EIO
             VexfsError::InsufficientPermissions => -13, // EACCES
             VexfsError::Internal(_) => -22,       // EINVAL
+            VexfsError::Timeout(_) => -110,       // ETIMEDOUT
+            VexfsError::ResourceLimit(_) => -12,  // ENOMEM
+            VexfsError::OperationCancelled(_) => -125, // ECANCELED
             _ => -22,                             // EINVAL (generic)
         }
     }

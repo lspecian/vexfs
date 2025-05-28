@@ -143,6 +143,10 @@ pub mod search_cache;
 pub mod query_monitor;
 #[cfg(not(feature = "kernel"))]
 pub mod vector_search_integration;
+#[cfg(not(feature = "kernel"))]
+pub mod enhanced_vector_search;
+#[cfg(not(feature = "kernel"))]
+pub mod hybrid_search;
 
 // Conditional compilation for userspace-only modules
 #[cfg(not(feature = "kernel"))]

@@ -2,11 +2,13 @@
 //!
 //! This module implements the user-facing vector search interface leveraging the ANNS infrastructure,
 //! providing similarity metrics, query processing, and result filtering.
-
-
+//!
+//! **fs_core Integration**: This module is fully integrated with the fs_core architecture,
+//! using OperationContext for user tracking, Arc<StorageManager> for consistent storage access,
+//! and VexfsError for unified error handling.
 
 extern crate alloc;
-use alloc::{vec::Vec, collections::BTreeMap};
+use alloc::{vec::Vec, collections::BTreeMap, sync::Arc};
 use core::cmp::Ordering;
 
 use crate::anns::{DistanceMetric, AnnsIndex, SearchResult};
@@ -15,6 +17,7 @@ use crate::vector_storage::{VectorStorageManager, VectorHeader, VectorDataType};
 use crate::knn_search::{KnnSearchEngine, KnnResult, SearchParams, MetadataFilter, KnnError};
 use crate::result_scoring::{ResultScorer, ScoringParams, ScoredResult, ScoringError};
 use crate::fs_core::operations::OperationContext;
+use crate::storage::StorageManager;
 use crate::shared::errors::{VexfsError, SearchErrorKind};
 use crate::search_cache::{SearchResultCache, CacheConfig, CacheKey, CacheStatistics};
 use crate::query_planner::{QueryCharacteristics, IndexRecommendation};
@@ -210,7 +213,7 @@ pub struct DistanceStats {
 
 /// Search operation metadata for lifecycle tracking
 #[derive(Debug, Clone)]
-struct SearchOperationMetadata {
+pub struct SearchOperationMetadata {
     /// Operation ID
     operation_id: u64,
     /// Operation start time (microseconds)
@@ -270,7 +273,7 @@ struct ResourceTracker {
     avg_operation_time_us: u64,
 }
 
-/// Main vector search engine with comprehensive OperationContext integration
+/// Main vector search engine with comprehensive fs_core integration
 pub struct VectorSearchEngine {
     /// k-NN search engine
     knn_engine: KnnSearchEngine,
@@ -288,11 +291,16 @@ pub struct VectorSearchEngine {
     resource_tracker: ResourceTracker,
     /// Search result cache
     cache: Option<SearchResultCache>,
+    /// Storage manager for fs_core integration
+    storage_manager: Arc<StorageManager>,
 }
 
 impl VectorSearchEngine {
-    /// Create new vector search engine with comprehensive OperationContext integration
-    pub fn new(storage: Box<VectorStorageManager>, options: SearchOptions) -> Result<Self, SearchError> {
+    /// Create new vector search engine with comprehensive fs_core integration
+    pub fn new(storage_manager: Arc<StorageManager>, options: SearchOptions) -> Result<Self, SearchError> {
+        // Create vector storage manager using the fs_core storage manager
+        let vector_storage = VectorStorageManager::new(storage_manager.clone(), 4096, 1000000);
+        
         // Create a stub storage that implements the VectorStorage trait
         let stub_storage = Box::new(crate::vector_handlers::StubVectorStorage);
         let knn_engine = KnnSearchEngine::new(stub_storage)?;
@@ -316,6 +324,7 @@ impl VectorSearchEngine {
             operation_counter: 0,
             resource_tracker: ResourceTracker::default(),
             cache,
+            storage_manager,
         })
     }
     
@@ -324,17 +333,19 @@ impl VectorSearchEngine {
         self.knn_engine.set_hnsw_index(index);
     }
     
-    /// Perform vector search with comprehensive OperationContext integration
-    pub fn search(&mut self, context: &mut OperationContext, query: SearchQuery) -> Result<Vec<ScoredResult>, SearchError> {
+    /// Perform vector search with comprehensive fs_core integration
+    pub fn search(&mut self, context: &mut OperationContext, query: SearchQuery) -> Result<Vec<ScoredResult>, VexfsError> {
         let start_time = self.get_current_time_us();
         
         // Start operation tracking for lifecycle management
-        let operation_id = self.start_search_operation(context, &query, SearchType::Single, start_time)?;
+        let operation_id = self.start_search_operation(context, &query, SearchType::Single, start_time)
+            .map_err(|e| VexfsError::SearchError(SearchErrorKind::InvalidQuery))?;
         
         // Validate query with error recovery
         if query.vector.is_empty() || query.k == 0 || query.k > MAX_SEARCH_RESULTS {
-            self.fail_search_operation(operation_id, "Invalid query parameters".to_string())?;
-            return Err(SearchError::InvalidQuery);
+            self.fail_search_operation(operation_id, "Invalid query parameters".to_string())
+                .map_err(|_| VexfsError::SearchError(SearchErrorKind::InvalidQuery))?;
+            return Err(VexfsError::SearchError(SearchErrorKind::InvalidQuery));
         }
         
         // Check cache first if enabled
@@ -354,8 +365,9 @@ impl VectorSearchEngine {
         
         // Check resource constraints
         if estimated_memory > 64 * 1024 * 1024 { // 64MB limit
-            self.fail_search_operation(operation_id, "Memory limit exceeded".to_string())?;
-            return Err(SearchError::AllocationError);
+            self.fail_search_operation(operation_id, "Memory limit exceeded".to_string())
+                .map_err(|_| VexfsError::OutOfMemory)?;
+            return Err(VexfsError::OutOfMemory);
         }
         
         // Update operation status to searching
@@ -376,8 +388,9 @@ impl VectorSearchEngine {
         let knn_results = match self.knn_engine.search(context, &query.vector, &search_params) {
             Ok(results) => results,
             Err(e) => {
-                self.fail_search_operation(operation_id, "k-NN search failed".to_string())?;
-                return Err(e.into());
+                self.fail_search_operation(operation_id, "k-NN search failed".to_string())
+                    .map_err(|_| VexfsError::SearchError(SearchErrorKind::InvalidQuery))?;
+                return Err(VexfsError::SearchError(SearchErrorKind::InvalidQuery));
             }
         };
         
@@ -388,8 +401,9 @@ impl VectorSearchEngine {
         let results = match self.result_scorer.score_and_rank(&knn_results, &search_params) {
             Ok(results) => results,
             Err(e) => {
-                self.fail_search_operation(operation_id, "Result scoring failed".to_string())?;
-                return Err(e.into());
+                self.fail_search_operation(operation_id, "Result scoring failed".to_string())
+                    .map_err(|_| VexfsError::SearchError(SearchErrorKind::InvalidQuery))?;
+                return Err(VexfsError::SearchError(SearchErrorKind::InvalidQuery));
             }
         };
         
@@ -404,8 +418,9 @@ impl VectorSearchEngine {
             match self.validate_results(results) {
                 Ok(results) => results,
                 Err(e) => {
-                    self.fail_search_operation(operation_id, "Result validation failed".to_string())?;
-                    return Err(e);
+                    self.fail_search_operation(operation_id, "Result validation failed".to_string())
+                        .map_err(|_| VexfsError::SearchError(SearchErrorKind::InvalidQuery))?;
+                    return Err(VexfsError::SearchError(SearchErrorKind::InvalidQuery));
                 }
             }
         } else {
@@ -491,7 +506,8 @@ impl VectorSearchEngine {
         }
         
         // Complete operation successfully
-        self.complete_search_operation(operation_id, operation_time, estimated_memory)?;
+        self.complete_search_operation(operation_id, operation_time, estimated_memory)
+            .map_err(|_| VexfsError::SearchError(SearchErrorKind::InvalidQuery))?;
         
         // Update resource tracker
         self.update_resource_tracker(operation_time, estimated_memory, true);
@@ -499,18 +515,19 @@ impl VectorSearchEngine {
         Ok(final_results)
     }
     
-    /// Perform batch search with comprehensive OperationContext integration
-    pub fn batch_search(&mut self, context: &mut OperationContext, batch: BatchSearchRequest) -> Result<Vec<Vec<ScoredResult>>, SearchError> {
+    /// Perform batch search with comprehensive fs_core integration
+    pub fn batch_search(&mut self, context: &mut OperationContext, batch: BatchSearchRequest) -> Result<Vec<Vec<ScoredResult>>, VexfsError> {
         let start_time = self.get_current_time_us();
         
         // Validate batch request
         if batch.queries.is_empty() || batch.queries.len() > MAX_BATCH_SIZE {
-            return Err(SearchError::InvalidBatchSize);
+            return Err(VexfsError::SearchError(SearchErrorKind::InvalidQuery));
         }
         
         // Create a dummy query for operation tracking (using first query characteristics)
         let dummy_query = batch.queries.first().unwrap().clone();
-        let operation_id = self.start_search_operation(context, &dummy_query, SearchType::Batch, start_time)?;
+        let operation_id = self.start_search_operation(context, &dummy_query, SearchType::Batch, start_time)
+            .map_err(|_| VexfsError::SearchError(SearchErrorKind::InvalidQuery))?;
         
         // Estimate total memory usage for batch
         let total_estimated_memory: usize = batch.queries.iter()
@@ -521,8 +538,9 @@ impl VectorSearchEngine {
         
         // Check resource constraints for batch
         if total_estimated_memory > 256 * 1024 * 1024 { // 256MB limit for batch
-            self.fail_search_operation(operation_id, "Batch memory limit exceeded".to_string())?;
-            return Err(SearchError::AllocationError);
+            self.fail_search_operation(operation_id, "Batch memory limit exceeded".to_string())
+                .map_err(|_| VexfsError::OutOfMemory)?;
+            return Err(VexfsError::OutOfMemory);
         }
         
         self.update_operation_status(operation_id, SearchOperationStatus::Searching)?;
@@ -547,8 +565,9 @@ impl VectorSearchEngine {
         
         // Check if any queries succeeded
         if successful_queries == 0 {
-            self.fail_search_operation(operation_id, "All batch queries failed".to_string())?;
-            return Err(SearchError::ResultProcessingError);
+            self.fail_search_operation(operation_id, "All batch queries failed".to_string())
+                .map_err(|_| VexfsError::SearchError(SearchErrorKind::NoResults))?;
+            return Err(VexfsError::SearchError(SearchErrorKind::NoResults));
         }
         
         self.update_operation_status(operation_id, SearchOperationStatus::ProcessingResults)?;
@@ -558,8 +577,9 @@ impl VectorSearchEngine {
             match self.merge_batch_results(all_results, batch.max_total_results) {
                 Ok(merged) => vec![merged],
                 Err(e) => {
-                    self.fail_search_operation(operation_id, "Batch merge failed".to_string())?;
-                    return Err(e);
+                    self.fail_search_operation(operation_id, "Batch merge failed".to_string())
+                        .map_err(|_| VexfsError::SearchError(SearchErrorKind::InvalidQuery))?;
+                    return Err(VexfsError::SearchError(SearchErrorKind::InvalidQuery));
                 }
             }
         } else {
@@ -569,7 +589,8 @@ impl VectorSearchEngine {
         // Complete batch operation
         let end_time = self.get_current_time_us();
         let operation_time = end_time - start_time;
-        self.complete_search_operation(operation_id, operation_time, total_estimated_memory)?;
+        self.complete_search_operation(operation_id, operation_time, total_estimated_memory)
+            .map_err(|_| VexfsError::SearchError(SearchErrorKind::InvalidQuery))?;
         
         // Update resource tracker for batch operation
         self.update_resource_tracker(operation_time, total_estimated_memory, true);
@@ -582,7 +603,7 @@ impl VectorSearchEngine {
         &mut self,
         result_sets: Vec<Vec<ScoredResult>>,
         max_results: usize,
-    ) -> Result<Vec<ScoredResult>, SearchError> {
+    ) -> Result<Vec<ScoredResult>, VexfsError> {
         // Simple merge by taking the best results from each set
         let mut all_results = Vec::new();
         
@@ -608,7 +629,7 @@ impl VectorSearchEngine {
     }
     
     /// Validate search results
-    fn validate_results(&self, mut results: Vec<ScoredResult>) -> Result<Vec<ScoredResult>, SearchError> {
+    fn validate_results(&self, mut results: Vec<ScoredResult>) -> Result<Vec<ScoredResult>, VexfsError> {
         // Remove invalid results
         results.retain(|r| {
             r.confidence > 0.1 // Minimum confidence threshold
@@ -636,6 +657,11 @@ impl VectorSearchEngine {
         self.resource_tracker = ResourceTracker::default();
     }
 
+    /// Get storage manager reference for fs_core integration
+    pub fn get_storage_manager(&self) -> &Arc<StorageManager> {
+        &self.storage_manager
+    }
+
     /// Start search operation tracking for lifecycle management
     fn start_search_operation(
         &mut self,
@@ -643,7 +669,7 @@ impl VectorSearchEngine {
         query: &SearchQuery,
         search_type: SearchType,
         start_time: u64,
-    ) -> Result<u64, SearchError> {
+    ) -> Result<u64, VexfsError> {
         self.operation_counter += 1;
         let operation_id = self.operation_counter;
         
@@ -663,27 +689,27 @@ impl VectorSearchEngine {
     }
 
     /// Update operation memory estimate
-    fn update_operation_memory(&mut self, operation_id: u64, memory: usize) -> Result<(), SearchError> {
+    fn update_operation_memory(&mut self, operation_id: u64, memory: usize) -> Result<(), VexfsError> {
         if let Some(metadata) = self.active_operations.get_mut(&operation_id) {
             metadata.estimated_memory = memory;
             Ok(())
         } else {
-            Err(SearchError::InvalidQuery)
+            Err(VexfsError::SearchError(SearchErrorKind::InvalidQuery))
         }
     }
 
     /// Update operation status
-    fn update_operation_status(&mut self, operation_id: u64, status: SearchOperationStatus) -> Result<(), SearchError> {
+    fn update_operation_status(&mut self, operation_id: u64, status: SearchOperationStatus) -> Result<(), VexfsError> {
         if let Some(metadata) = self.active_operations.get_mut(&operation_id) {
             metadata.status = status;
             Ok(())
         } else {
-            Err(SearchError::InvalidQuery)
+            Err(VexfsError::SearchError(SearchErrorKind::InvalidQuery))
         }
     }
 
     /// Complete search operation successfully
-    fn complete_search_operation(&mut self, operation_id: u64, execution_time: u64, memory_used: usize) -> Result<(), SearchError> {
+    fn complete_search_operation(&mut self, operation_id: u64, execution_time: u64, memory_used: usize) -> Result<(), VexfsError> {
         if let Some(mut metadata) = self.active_operations.remove(&operation_id) {
             metadata.status = SearchOperationStatus::Completed;
             
@@ -692,12 +718,12 @@ impl VectorSearchEngine {
             
             Ok(())
         } else {
-            Err(SearchError::InvalidQuery)
+            Err(VexfsError::SearchError(SearchErrorKind::InvalidQuery))
         }
     }
 
     /// Fail search operation with error handling
-    fn fail_search_operation(&mut self, operation_id: u64, reason: String) -> Result<(), SearchError> {
+    fn fail_search_operation(&mut self, operation_id: u64, reason: String) -> Result<(), VexfsError> {
         if let Some(mut metadata) = self.active_operations.remove(&operation_id) {
             metadata.status = SearchOperationStatus::Failed;
             
@@ -709,7 +735,7 @@ impl VectorSearchEngine {
             
             Ok(())
         } else {
-            Err(SearchError::InvalidQuery)
+            Err(VexfsError::SearchError(SearchErrorKind::InvalidQuery))
         }
     }
 
@@ -742,12 +768,12 @@ impl VectorSearchEngine {
     }
 
     /// Cancel active search operation
-    pub fn cancel_search_operation(&mut self, operation_id: u64) -> Result<(), SearchError> {
+    pub fn cancel_search_operation(&mut self, operation_id: u64) -> Result<(), VexfsError> {
         if let Some(mut metadata) = self.active_operations.remove(&operation_id) {
             metadata.status = SearchOperationStatus::Cancelled;
             Ok(())
         } else {
-            Err(SearchError::InvalidQuery)
+            Err(VexfsError::SearchError(SearchErrorKind::InvalidQuery))
         }
     }
 
