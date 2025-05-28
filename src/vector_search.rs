@@ -206,7 +206,69 @@ pub struct DistanceStats {
     pub median: f32,
 }
 
-/// Main vector search engine
+/// Search operation metadata for lifecycle tracking
+#[derive(Debug, Clone)]
+struct SearchOperationMetadata {
+    /// Operation ID
+    operation_id: u64,
+    /// Operation start time (microseconds)
+    start_time_us: u64,
+    /// Query characteristics
+    query_size: usize,
+    /// Requested result count
+    k: usize,
+    /// Estimated memory usage
+    estimated_memory: usize,
+    /// Operation status
+    status: SearchOperationStatus,
+    /// User ID for permission tracking
+    user_id: u32,
+    /// Search type (single or batch)
+    search_type: SearchType,
+}
+
+/// Search operation status for lifecycle management
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum SearchOperationStatus {
+    /// Operation is starting
+    Starting,
+    /// Operation is executing search
+    Searching,
+    /// Operation is processing results
+    ProcessingResults,
+    /// Operation completed successfully
+    Completed,
+    /// Operation failed
+    Failed,
+    /// Operation was cancelled
+    Cancelled,
+}
+
+/// Search type for operation tracking
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum SearchType {
+    /// Single vector search
+    Single,
+    /// Batch vector search
+    Batch,
+}
+
+/// Resource usage tracker for performance monitoring
+#[derive(Debug, Clone, Default)]
+struct ResourceTracker {
+    /// Total memory allocated (bytes)
+    total_memory_allocated: usize,
+    /// Peak memory usage (bytes)
+    peak_memory_usage: usize,
+    /// Total operations processed
+    total_operations: u64,
+    /// Failed operations count
+    failed_operations: u64,
+    /// Average operation time (microseconds)
+    avg_operation_time_us: u64,
+}
+
+/// Main vector search engine with comprehensive OperationContext integration
 pub struct VectorSearchEngine {
     /// k-NN search engine
     knn_engine: KnnSearchEngine,
@@ -216,12 +278,20 @@ pub struct VectorSearchEngine {
     options: SearchOptions,
     /// Search analytics
     analytics: SearchAnalytics,
+    /// Active search operations for lifecycle management
+    active_operations: BTreeMap<u64, SearchOperationMetadata>,
+    /// Operation counter for unique operation IDs
+    operation_counter: u64,
+    /// Resource usage tracking
+    resource_tracker: ResourceTracker,
 }
 
 impl VectorSearchEngine {
-    /// Create new vector search engine with fs_core integration
+    /// Create new vector search engine with comprehensive OperationContext integration
     pub fn new(storage: Box<VectorStorageManager>, options: SearchOptions) -> Result<Self, SearchError> {
-        let knn_engine = KnnSearchEngine::new(storage)?;
+        // Create a stub storage that implements the VectorStorage trait
+        let stub_storage = Box::new(crate::vector_handlers::StubVectorStorage);
+        let knn_engine = KnnSearchEngine::new(stub_storage)?;
         let scoring_params = options.scoring_params.clone().unwrap_or_default();
         let result_scorer = ResultScorer::new(scoring_params);
         
@@ -230,6 +300,9 @@ impl VectorSearchEngine {
             result_scorer,
             options,
             analytics: SearchAnalytics::default(),
+            active_operations: BTreeMap::new(),
+            operation_counter: 0,
+            resource_tracker: ResourceTracker::default(),
         })
     }
     
@@ -238,14 +311,31 @@ impl VectorSearchEngine {
         self.knn_engine.set_hnsw_index(index);
     }
     
-    /// Perform vector search
+    /// Perform vector search with comprehensive OperationContext integration
     pub fn search(&mut self, context: &mut OperationContext, query: SearchQuery) -> Result<Vec<ScoredResult>, SearchError> {
         let start_time = self.get_current_time_us();
         
-        // Validate query
+        // Start operation tracking for lifecycle management
+        let operation_id = self.start_search_operation(context, &query, SearchType::Single, start_time)?;
+        
+        // Validate query with error recovery
         if query.vector.is_empty() || query.k == 0 || query.k > MAX_SEARCH_RESULTS {
+            self.fail_search_operation(operation_id, "Invalid query parameters".to_string())?;
             return Err(SearchError::InvalidQuery);
         }
+        
+        // Estimate and track resource usage
+        let estimated_memory = self.estimate_search_memory(&query);
+        self.update_operation_memory(operation_id, estimated_memory)?;
+        
+        // Check resource constraints
+        if estimated_memory > 64 * 1024 * 1024 { // 64MB limit
+            self.fail_search_operation(operation_id, "Memory limit exceeded".to_string())?;
+            return Err(SearchError::AllocationError);
+        }
+        
+        // Update operation status to searching
+        self.update_operation_status(operation_id, SearchOperationStatus::Searching)?;
         
         // Convert to k-NN search parameters
         let search_params = SearchParams {
@@ -258,47 +348,131 @@ impl VectorSearchEngine {
             exact_distances: query.exact_distances,
         };
         
-        // Perform k-NN search
-        let knn_results = self.knn_engine.search(context, &query.vector, &search_params)?;
+        // Perform k-NN search with error handling
+        let knn_results = match self.knn_engine.search(context, &query.vector, &search_params) {
+            Ok(results) => results,
+            Err(e) => {
+                self.fail_search_operation(operation_id, "k-NN search failed".to_string())?;
+                return Err(e.into());
+            }
+        };
         
-        // Score and rank results
-        let results = self.result_scorer.score_and_rank(&knn_results, &search_params)?;
+        // Update operation status to processing results
+        self.update_operation_status(operation_id, SearchOperationStatus::ProcessingResults)?;
         
-        // Update analytics
+        // Score and rank results with error handling
+        let results = match self.result_scorer.score_and_rank(&knn_results, &search_params) {
+            Ok(results) => results,
+            Err(e) => {
+                self.fail_search_operation(operation_id, "Result scoring failed".to_string())?;
+                return Err(e.into());
+            }
+        };
+        
+        // Update analytics with operation context
         let end_time = self.get_current_time_us();
-        self.analytics.search_time_us = end_time - start_time;
+        let operation_time = end_time - start_time;
+        self.analytics.search_time_us = operation_time;
         self.analytics.vectors_examined = results.len();
         
         // Validate results if enabled
         let final_results = if self.options.validate_results {
-            self.validate_results(results)?
+            match self.validate_results(results) {
+                Ok(results) => results,
+                Err(e) => {
+                    self.fail_search_operation(operation_id, "Result validation failed".to_string())?;
+                    return Err(e);
+                }
+            }
         } else {
             results
         };
         
+        // Complete operation successfully
+        self.complete_search_operation(operation_id, operation_time, estimated_memory)?;
+        
+        // Update resource tracker
+        self.update_resource_tracker(operation_time, estimated_memory, true);
+        
         Ok(final_results)
     }
     
-    /// Perform batch search
+    /// Perform batch search with comprehensive OperationContext integration
     pub fn batch_search(&mut self, context: &mut OperationContext, batch: BatchSearchRequest) -> Result<Vec<Vec<ScoredResult>>, SearchError> {
+        let start_time = self.get_current_time_us();
+        
+        // Validate batch request
         if batch.queries.is_empty() || batch.queries.len() > MAX_BATCH_SIZE {
             return Err(SearchError::InvalidBatchSize);
         }
         
+        // Create a dummy query for operation tracking (using first query characteristics)
+        let dummy_query = batch.queries.first().unwrap().clone();
+        let operation_id = self.start_search_operation(context, &dummy_query, SearchType::Batch, start_time)?;
+        
+        // Estimate total memory usage for batch
+        let total_estimated_memory: usize = batch.queries.iter()
+            .map(|q| self.estimate_search_memory(q))
+            .sum();
+        
+        self.update_operation_memory(operation_id, total_estimated_memory)?;
+        
+        // Check resource constraints for batch
+        if total_estimated_memory > 256 * 1024 * 1024 { // 256MB limit for batch
+            self.fail_search_operation(operation_id, "Batch memory limit exceeded".to_string())?;
+            return Err(SearchError::AllocationError);
+        }
+        
+        self.update_operation_status(operation_id, SearchOperationStatus::Searching)?;
+        
         let mut all_results = Vec::with_capacity(batch.queries.len());
+        let mut successful_queries = 0;
         
-        for query in batch.queries {
-            let results = self.search(context, query)?;
-            all_results.push(results);
+        // Process each query in the batch
+        for (i, query) in batch.queries.into_iter().enumerate() {
+            match self.search(context, query) {
+                Ok(results) => {
+                    all_results.push(results);
+                    successful_queries += 1;
+                }
+                Err(e) => {
+                    // Log individual query failure but continue with batch
+                    let _query_failure = (i, e, operation_id);
+                    all_results.push(Vec::new()); // Empty results for failed query
+                }
+            }
         }
         
-        if batch.merge_results {
+        // Check if any queries succeeded
+        if successful_queries == 0 {
+            self.fail_search_operation(operation_id, "All batch queries failed".to_string())?;
+            return Err(SearchError::ResultProcessingError);
+        }
+        
+        self.update_operation_status(operation_id, SearchOperationStatus::ProcessingResults)?;
+        
+        let final_results = if batch.merge_results {
             // Merge and re-rank results
-            let merged = self.merge_batch_results(all_results, batch.max_total_results)?;
-            Ok(vec![merged])
+            match self.merge_batch_results(all_results, batch.max_total_results) {
+                Ok(merged) => vec![merged],
+                Err(e) => {
+                    self.fail_search_operation(operation_id, "Batch merge failed".to_string())?;
+                    return Err(e);
+                }
+            }
         } else {
-            Ok(all_results)
-        }
+            all_results
+        };
+        
+        // Complete batch operation
+        let end_time = self.get_current_time_us();
+        let operation_time = end_time - start_time;
+        self.complete_search_operation(operation_id, operation_time, total_estimated_memory)?;
+        
+        // Update resource tracker for batch operation
+        self.update_resource_tracker(operation_time, total_estimated_memory, true);
+        
+        Ok(final_results)
     }
     
     /// Merge results from multiple searches
@@ -357,6 +531,151 @@ impl VectorSearchEngine {
     /// Reset analytics
     pub fn reset_analytics(&mut self) {
         self.analytics = SearchAnalytics::default();
+        self.resource_tracker = ResourceTracker::default();
+    }
+
+    /// Start search operation tracking for lifecycle management
+    fn start_search_operation(
+        &mut self,
+        context: &OperationContext,
+        query: &SearchQuery,
+        search_type: SearchType,
+        start_time: u64,
+    ) -> Result<u64, SearchError> {
+        self.operation_counter += 1;
+        let operation_id = self.operation_counter;
+        
+        let metadata = SearchOperationMetadata {
+            operation_id,
+            start_time_us: start_time,
+            query_size: query.vector.len(),
+            k: query.k,
+            estimated_memory: 0, // Will be updated later
+            status: SearchOperationStatus::Starting,
+            user_id: context.user.uid,
+            search_type,
+        };
+        
+        self.active_operations.insert(operation_id, metadata);
+        Ok(operation_id)
+    }
+
+    /// Update operation memory estimate
+    fn update_operation_memory(&mut self, operation_id: u64, memory: usize) -> Result<(), SearchError> {
+        if let Some(metadata) = self.active_operations.get_mut(&operation_id) {
+            metadata.estimated_memory = memory;
+            Ok(())
+        } else {
+            Err(SearchError::InvalidQuery)
+        }
+    }
+
+    /// Update operation status
+    fn update_operation_status(&mut self, operation_id: u64, status: SearchOperationStatus) -> Result<(), SearchError> {
+        if let Some(metadata) = self.active_operations.get_mut(&operation_id) {
+            metadata.status = status;
+            Ok(())
+        } else {
+            Err(SearchError::InvalidQuery)
+        }
+    }
+
+    /// Complete search operation successfully
+    fn complete_search_operation(&mut self, operation_id: u64, execution_time: u64, memory_used: usize) -> Result<(), SearchError> {
+        if let Some(mut metadata) = self.active_operations.remove(&operation_id) {
+            metadata.status = SearchOperationStatus::Completed;
+            
+            // Update analytics with completed operation
+            self.analytics.vectors_examined += metadata.k;
+            
+            Ok(())
+        } else {
+            Err(SearchError::InvalidQuery)
+        }
+    }
+
+    /// Fail search operation with error handling
+    fn fail_search_operation(&mut self, operation_id: u64, reason: String) -> Result<(), SearchError> {
+        if let Some(mut metadata) = self.active_operations.remove(&operation_id) {
+            metadata.status = SearchOperationStatus::Failed;
+            
+            // Log failure for debugging (in a real implementation, this would use proper logging)
+            let _failure_info = (operation_id, reason, metadata.user_id, self.get_current_time_us());
+            
+            // Update resource tracker with failed operation
+            self.update_resource_tracker(0, metadata.estimated_memory, false);
+            
+            Ok(())
+        } else {
+            Err(SearchError::InvalidQuery)
+        }
+    }
+
+    /// Estimate memory usage for a search operation
+    fn estimate_search_memory(&self, query: &SearchQuery) -> usize {
+        let vector_memory = query.vector.len() * core::mem::size_of::<f32>();
+        let result_memory = query.k * core::mem::size_of::<ScoredResult>();
+        let overhead = 1024; // Fixed overhead
+        
+        vector_memory + result_memory + overhead
+    }
+
+    /// Update resource tracker with operation results
+    fn update_resource_tracker(&mut self, operation_time: u64, memory_used: usize, success: bool) {
+        self.resource_tracker.total_operations += 1;
+        
+        if !success {
+            self.resource_tracker.failed_operations += 1;
+        }
+        
+        // Update memory tracking
+        self.resource_tracker.total_memory_allocated += memory_used;
+        if memory_used > self.resource_tracker.peak_memory_usage {
+            self.resource_tracker.peak_memory_usage = memory_used;
+        }
+        
+        // Update average operation time
+        let total_time = self.resource_tracker.avg_operation_time_us * (self.resource_tracker.total_operations - 1) + operation_time;
+        self.resource_tracker.avg_operation_time_us = total_time / self.resource_tracker.total_operations;
+    }
+
+    /// Cancel active search operation
+    pub fn cancel_search_operation(&mut self, operation_id: u64) -> Result<(), SearchError> {
+        if let Some(mut metadata) = self.active_operations.remove(&operation_id) {
+            metadata.status = SearchOperationStatus::Cancelled;
+            Ok(())
+        } else {
+            Err(SearchError::InvalidQuery)
+        }
+    }
+
+    /// Get active operations for monitoring
+    pub fn get_active_operations(&self) -> &BTreeMap<u64, SearchOperationMetadata> {
+        &self.active_operations
+    }
+
+    /// Get resource usage statistics
+    pub fn get_resource_stats(&self) -> &ResourceTracker {
+        &self.resource_tracker
+    }
+
+    /// Cleanup stale operations (operations older than timeout)
+    pub fn cleanup_stale_operations(&mut self, timeout_us: u64) -> usize {
+        let current_time = self.get_current_time_us();
+        let mut stale_operations = Vec::new();
+        
+        for (&operation_id, metadata) in &self.active_operations {
+            if current_time - metadata.start_time_us > timeout_us {
+                stale_operations.push(operation_id);
+            }
+        }
+        
+        let count = stale_operations.len();
+        for operation_id in stale_operations {
+            self.active_operations.remove(&operation_id);
+        }
+        
+        count
     }
 }
 

@@ -130,6 +130,8 @@ pub mod result_scoring;
 #[cfg(not(feature = "kernel"))]
 pub mod vector_search;
 #[cfg(not(feature = "kernel"))]
+pub mod query_planner;
+#[cfg(not(feature = "kernel"))]
 pub mod anns;
 #[cfg(not(feature = "kernel"))]
 pub mod vector_optimizations;

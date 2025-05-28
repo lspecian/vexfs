@@ -29,7 +29,7 @@ use std::{vec::Vec, collections::BTreeMap};
 use core::f32;
 
 /// Advanced indexing strategy types
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum IndexStrategy {
     /// Locality-Sensitive Hashing for approximate similarity search
     LSH,
