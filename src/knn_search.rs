@@ -1,5 +1,5 @@
 //! k-NN search algorithm with metadata filtering for VexFS
-//! 
+//!
 //! This module implements efficient k-NN search with metadata-based filtering support,
 //! integrating with the ANNS module and vector storage system.
 
@@ -14,6 +14,8 @@ use crate::vector_metrics::{VectorMetrics, MetricsError, ApproximateMetrics};
 use crate::vector_handlers::{VectorStorage, VectorEmbedding};
 use crate::vector_storage::{VectorHeader, VectorDataType};
 use crate::ondisk::VexfsInode;
+use crate::fs_core::operations::OperationContext;
+use crate::shared::errors::VexfsResult;
 
 /// Maximum number of results that can be returned
 pub const MAX_KNN_RESULTS: usize = 10000;
@@ -257,6 +259,7 @@ impl KnnSearchEngine {
     /// Perform k-NN search with metadata filtering
     pub fn search(
         &mut self,
+        context: &mut OperationContext,
         query: &[f32],
         params: &SearchParams,
     ) -> Result<Vec<KnnResult>, KnnError> {
@@ -274,15 +277,16 @@ impl KnnSearchEngine {
         
         // Determine search strategy
         if params.approximate && self.hnsw_index.is_some() {
-            self.approximate_search(query, params)
+            self.approximate_search(context, query, params)
         } else {
-            self.exact_search(query, params)
+            self.exact_search(context, query, params)
         }
     }
     
     /// Perform approximate k-NN search using HNSW index
     fn approximate_search(
         &mut self,
+        context: &mut OperationContext,
         query: &[f32],
         params: &SearchParams,
     ) -> Result<Vec<KnnResult>, KnnError> {
@@ -293,18 +297,19 @@ impl KnnSearchEngine {
         let search_k = search_k.min(MAX_CANDIDATES);
         
         // Perform HNSW search
-        let candidates = hnsw.search(query, search_k, None)
+        let candidates = hnsw.search(context, query, search_k, None)
             .map_err(|_| KnnError::IndexError)?;
         
         self.candidate_buffer.extend(candidates);
         
         // Convert candidates to k-NN results with metadata
-        self.process_candidates(query, params)
+        self.process_candidates(context, query, params)
     }
     
     /// Perform exact k-NN search by scanning all vectors
     fn exact_search(
         &mut self,
+        context: &mut OperationContext,
         query: &[f32],
         params: &SearchParams,
     ) -> Result<Vec<KnnResult>, KnnError> {
@@ -313,17 +318,18 @@ impl KnnSearchEngine {
             .map_err(|_| KnnError::StorageError)?;
         
         if vector_ids.len() <= EXACT_SEARCH_THRESHOLD {
-            self.exact_linear_scan(query, params, &vector_ids)
+            self.exact_linear_scan(context, query, params, &vector_ids)
         } else {
             // For large datasets, use approximate methods for candidate generation
             // then exact distances for final ranking
-            self.hybrid_search(query, params, &vector_ids)
+            self.hybrid_search(context, query, params, &vector_ids)
         }
     }
     
     /// Perform exact linear scan for small datasets
     fn exact_linear_scan(
         &mut self,
+        context: &mut OperationContext,
         query: &[f32],
         params: &SearchParams,
         vector_ids: &[u64],
@@ -379,6 +385,7 @@ impl KnnSearchEngine {
     /// Perform hybrid search combining approximate and exact methods
     fn hybrid_search(
         &mut self,
+        context: &mut OperationContext,
         query: &[f32],
         params: &SearchParams,
         vector_ids: &[u64],
@@ -461,6 +468,7 @@ impl KnnSearchEngine {
     /// Process search candidates and convert to k-NN results
     fn process_candidates(
         &mut self,
+        context: &mut OperationContext,
         query: &[f32],
         params: &SearchParams,
     ) -> Result<Vec<KnnResult>, KnnError> {
@@ -542,13 +550,14 @@ impl KnnSearchEngine {
     /// Perform batch k-NN search for multiple queries
     pub fn batch_search(
         &mut self,
+        context: &mut OperationContext,
         queries: &[&[f32]],
         params: &SearchParams,
     ) -> Result<Vec<Vec<KnnResult>>, KnnError> {
         let mut batch_results = Vec::with_capacity(queries.len());
         
         for query in queries {
-            let results = self.search(query, params)?;
+            let results = self.search(context, query, params)?;
             batch_results.push(results);
         }
         
