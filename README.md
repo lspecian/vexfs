@@ -1,7 +1,7 @@
 # VexFS: Production-Ready Vector-Extended Filesystem
 
 [![Rust](https://img.shields.io/badge/rust-stable-brightgreen.svg)](https://www.rust-lang.org)
-[![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20GPL--2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/lspecian/vexfs)
 [![Production Ready](https://img.shields.io/badge/status-production%20ready-brightgreen.svg)](docs/status/PRODUCTION_READINESS_REPORT.md)
 [![Test Coverage](https://img.shields.io/badge/tests-95.8%25%20passing-brightgreen.svg)](docs/status/COMPREHENSIVE_TEST_REPORT.md)
@@ -328,24 +328,27 @@ VexFS v1.0.0 represents several significant achievements:
 
 ## 📝 **License**
 
-This project is dual-licensed to provide maximum flexibility while ensuring kernel compatibility:
+VexFS is licensed under the **Apache License 2.0**, providing maximum flexibility for both open-source and commercial use.
 
-- **Apache License 2.0** for userspace components (CLI, libraries, tools)
-- **GNU General Public License v2.0** for kernel module components
+### Why Apache 2.0?
 
-### License Details
+- **Enterprise-friendly**: Permissive license suitable for commercial adoption
+- **Patent protection**: Includes explicit patent grant and protection clauses
+- **Widely adopted**: Standard license for modern filesystem and infrastructure projects
+- **Compatible**: Works with both userspace and kernel components via C FFI
+- **Clear terms**: Well-understood licensing with minimal restrictions
 
-- **Userspace Components**: Licensed under [Apache License 2.0](LICENSE)
-  - VexCtl CLI tool
-  - Userland libraries and testing infrastructure
-  - Development and deployment tools
+### License Coverage
 
-- **Kernel Module**: Licensed under [GNU General Public License v2.0](LICENSE.kernel)
-  - Core filesystem kernel module
-  - Kernel-space vector operations
-  - VFS integration components
+This license applies to all VexFS components:
+- Core filesystem implementation
+- VexCtl CLI tool
+- Rust libraries and APIs
+- C FFI bindings
+- Documentation and examples
+- Build scripts and configuration
 
-See the respective license files for complete terms and conditions.
+See the [LICENSE](LICENSE) file for complete terms and conditions.
 
 ## 🙏 **Acknowledgments**
 
