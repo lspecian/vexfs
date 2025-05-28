@@ -315,18 +315,18 @@ impl PathValidator {
 
     /// Check if a path might be attempting directory traversal
     pub fn check_traversal_safety(path: &Path, base_depth: usize) -> FsResult<()> {
-        let normalized = path.normalize()?;
-        let mut current_depth = base_depth;
+        // Check the raw components before normalization to detect traversal attempts
+        let mut current_depth = base_depth as i32;
         
-        for component in normalized.components() {
+        for component in path.components() {
             match component {
                 PathComponent::Parent => {
-                    if current_depth == 0 {
+                    current_depth -= 1;
+                    if current_depth < 0 {
                         return Err(VexfsError::PermissionDenied(
                             "Directory traversal attempt detected".into()
                         ));
                     }
-                    current_depth -= 1;
                 }
                 PathComponent::Normal(_) => {
                     current_depth += 1;

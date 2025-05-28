@@ -33,6 +33,14 @@ pub const VEXFS_IOCTL_SET_SEARCH_PARAMS: u8 = 0x12;
 pub const VEXFS_IOCTL_GET_INDEX_INFO: u8 = 0x13;
 pub const VEXFS_IOCTL_VALIDATE_INDEX: u8 = 0x14;
 
+/// IPC-related commands for embedding services
+pub const VEXFS_IOCTL_IPC_REGISTER_SERVICE: u8 = 0x20;
+pub const VEXFS_IOCTL_IPC_UNREGISTER_SERVICE: u8 = 0x21;
+pub const VEXFS_IOCTL_IPC_SEND_EMBEDDING_REQUEST: u8 = 0x22;
+pub const VEXFS_IOCTL_IPC_GET_SERVICE_STATUS: u8 = 0x23;
+pub const VEXFS_IOCTL_IPC_LIST_SERVICES: u8 = 0x24;
+pub const VEXFS_IOCTL_IPC_GET_STATS: u8 = 0x25;
+
 /// Security and validation constants
 pub const MAX_SEARCH_RESULTS: usize = 10000;
 pub const MAX_IOCTL_VECTOR_DIMENSIONS: u32 = 8192;
@@ -468,6 +476,132 @@ pub struct SearchParamsConfig {
     pub reserved: [u32; 8],
 }
 
+/// IPC service registration request - VEXFS_IOCTL_IPC_REGISTER_SERVICE
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct IpcServiceRegisterRequest {
+    /// Service ID string pointer (user space)
+    pub service_id_ptr: u64,
+    /// Service ID length
+    pub service_id_len: u32,
+    /// Service name string pointer (user space)
+    pub service_name_ptr: u64,
+    /// Service name length
+    pub service_name_len: u32,
+    /// Service version string pointer (user space)
+    pub version_ptr: u64,
+    /// Service version length
+    pub version_len: u32,
+    /// Supported dimensions array pointer (user space)
+    pub dimensions_ptr: u64,
+    /// Number of supported dimensions
+    pub dimensions_count: u32,
+    /// Maximum batch size
+    pub max_batch_size: u32,
+    /// Service endpoint address pointer (user space)
+    pub endpoint_ptr: u64,
+    /// Service endpoint length
+    pub endpoint_len: u32,
+    /// Registration flags
+    pub flags: u32,
+    /// Reserved for future use
+    pub reserved: [u32; 4],
+}
+
+/// IPC service unregistration request - VEXFS_IOCTL_IPC_UNREGISTER_SERVICE
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct IpcServiceUnregisterRequest {
+    /// Service ID string pointer (user space)
+    pub service_id_ptr: u64,
+    /// Service ID length
+    pub service_id_len: u32,
+    /// Unregistration flags
+    pub flags: u32,
+    /// Reserved for future use
+    pub reserved: [u32; 8],
+}
+
+/// IPC embedding request - VEXFS_IOCTL_IPC_SEND_EMBEDDING_REQUEST
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct IpcEmbeddingRequest {
+    /// Request ID (0 = auto-assign)
+    pub request_id: u64,
+    /// Vector dimensions
+    pub dimensions: u32,
+    /// Input data pointer (user space)
+    pub data_ptr: u64,
+    /// Data size in bytes
+    pub data_size: u32,
+    /// Data type
+    pub data_type: u8,
+    /// Priority (0-255)
+    pub priority: u8,
+    /// Timeout in milliseconds
+    pub timeout_ms: u32,
+    /// Model name pointer (user space, optional)
+    pub model_ptr: u64,
+    /// Model name length
+    pub model_len: u32,
+    /// Service ID pointer (user space, optional for auto-selection)
+    pub service_id_ptr: u64,
+    /// Service ID length
+    pub service_id_len: u32,
+    /// Request flags
+    pub flags: u32,
+    /// Reserved for future use
+    pub reserved: [u32; 2],
+}
+
+/// IPC service status request - VEXFS_IOCTL_IPC_GET_SERVICE_STATUS
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct IpcServiceStatusRequest {
+    /// Service ID string pointer (user space)
+    pub service_id_ptr: u64,
+    /// Service ID length
+    pub service_id_len: u32,
+    /// Status request flags
+    pub flags: u32,
+    /// Reserved for future use
+    pub reserved: [u32; 8],
+}
+
+/// IPC service list request - VEXFS_IOCTL_IPC_LIST_SERVICES
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct IpcServiceListRequest {
+    /// Output buffer pointer (user space)
+    pub buffer_ptr: u64,
+    /// Buffer size in bytes
+    pub buffer_size: u32,
+    /// Filter dimensions (0 = no filter)
+    pub filter_dimensions: u32,
+    /// Filter flags
+    pub filter_flags: u32,
+    /// List request flags
+    pub flags: u32,
+    /// Reserved for future use
+    pub reserved: [u32; 6],
+}
+
+/// IPC statistics request - VEXFS_IOCTL_IPC_GET_STATS
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct IpcStatsRequest {
+    /// Statistics type (0 = overall, 1 = service-specific)
+    pub stats_type: u32,
+    /// Service ID pointer for service-specific stats (user space)
+    pub service_id_ptr: u64,
+    /// Service ID length
+    pub service_id_len: u32,
+    /// Stats request flags
+    pub flags: u32,
+    /// Reserved for future use
+    pub reserved: [u32; 8],
+}
+
 /// IOCTL error codes specific to vector operations
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u32)]
@@ -691,4 +825,146 @@ fn sanitize_user_string(ptr: u64, len: u32) -> Result<Vec<u8>, VectorIoctlError>
     
     // Would use copy_from_user in real kernel implementation
     Ok(Vec::new())
+}
+
+/// IPC service registration response
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct IpcServiceRegisterResponse {
+    /// Operation result code
+    pub result: VectorIoctlError,
+    /// Assigned service handle
+    pub service_handle: u64,
+    /// Registration timestamp
+    pub registration_time: u64,
+    /// Response flags
+    pub flags: u32,
+    /// Reserved for future use
+    pub reserved: [u32; 6],
+}
+
+/// IPC embedding response
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct IpcEmbeddingResponse {
+    /// Request ID
+    pub request_id: u64,
+    /// Operation result code
+    pub result: VectorIoctlError,
+    /// Response status
+    pub status: u8,
+    /// Processing time in microseconds
+    pub processing_time_us: u64,
+    /// Embedding vector pointer (user space)
+    pub embedding_ptr: u64,
+    /// Embedding dimensions
+    pub embedding_dimensions: u32,
+    /// Service ID that processed the request
+    pub service_id_hash: u32,
+    /// Response flags
+    pub flags: u32,
+    /// Reserved for future use
+    pub reserved: [u32; 4],
+}
+
+/// IPC service status response
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct IpcServiceStatusResponse {
+    /// Operation result code
+    pub result: VectorIoctlError,
+    /// Service state
+    pub state: u8,
+    /// Health score (0-100)
+    pub health_score: u8,
+    /// Current load (0-255, scaled from 0.0-1.0)
+    pub current_load: u8,
+    /// Active requests
+    pub active_requests: u32,
+    /// Total requests processed
+    pub total_requests: u64,
+    /// Failed requests
+    pub failed_requests: u64,
+    /// Average response time in microseconds
+    pub avg_response_time_us: u64,
+    /// Last heartbeat timestamp
+    pub last_heartbeat: u64,
+    /// Response flags
+    pub flags: u32,
+    /// Reserved for future use
+    pub reserved: [u32; 2],
+}
+
+/// IPC service list response
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct IpcServiceListResponse {
+    /// Operation result code
+    pub result: VectorIoctlError,
+    /// Number of services returned
+    pub service_count: u32,
+    /// Total number of services available
+    pub total_services: u32,
+    /// Buffer bytes used
+    pub bytes_used: u32,
+    /// Response flags
+    pub flags: u32,
+    /// Reserved for future use
+    pub reserved: [u32; 6],
+}
+
+/// IPC statistics response
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct IpcStatsResponse {
+    /// Operation result code
+    pub result: VectorIoctlError,
+    /// Total IPC requests
+    pub total_requests: u64,
+    /// Successful requests
+    pub successful_requests: u64,
+    /// Failed requests
+    pub failed_requests: u64,
+    /// Average response time in microseconds
+    pub avg_response_time_us: u64,
+    /// Active services count
+    pub active_services: u32,
+    /// Queued requests count
+    pub queued_requests: u32,
+    /// Response flags
+    pub flags: u32,
+    /// Reserved for future use
+    pub reserved: [u32; 4],
+}
+
+/// IPC service entry for service listing
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct IpcServiceEntry {
+    /// Service ID hash (for identification)
+    pub service_id_hash: u32,
+    /// Service name hash
+    pub service_name_hash: u32,
+    /// Service state
+    pub state: u8,
+    /// Health score (0-100)
+    pub health_score: u8,
+    /// Current load (0-255)
+    pub current_load: u8,
+    /// Priority
+    pub priority: u8,
+    /// Supported dimensions count
+    pub dimensions_count: u32,
+    /// Maximum batch size
+    pub max_batch_size: u32,
+    /// Active requests
+    pub active_requests: u32,
+    /// Total requests processed
+    pub total_requests: u64,
+    /// Average response time in microseconds
+    pub avg_response_time_us: u64,
+    /// Entry flags
+    pub flags: u32,
+    /// Reserved for future use
+    pub reserved: [u32; 2],
 }

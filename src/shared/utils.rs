@@ -626,7 +626,7 @@ mod tests {
         assert_eq!(parent_path("/a/b/c"), Some("/a/b".to_string()));
         assert_eq!(parent_path("/a"), Some("/".to_string()));
         assert_eq!(parent_path("/"), None);
-        assert_eq!(parent_path("a/b"), Some(".".to_string()));
+        assert_eq!(parent_path("a/b"), Some("a".to_string()));
     }
 
     #[test]

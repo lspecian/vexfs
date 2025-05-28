@@ -20,14 +20,26 @@ hashbrown = { version = "0.14", default-features = false }
 libm = { version = "0.2", default-features = false }
 derivative = "2.2"
 
+[dev-dependencies]
+fastrand = "2.0"
+chrono = { version = "0.4", features = ["serde"] }
+
 [lib]
 crate-type = ["staticlib"]
 path = "src/lib.rs"
 
-# Test binaries will be added as development progresses
-# [[bin]]
-# name = "vector_test_runner"
-# path = "src/bin/vector_test_runner.rs"
+# Test binaries
+[[bin]]
+name = "comprehensive_test_runner"
+path = "src/bin/comprehensive_test_runner.rs"
+
+[[bin]]
+name = "vector_test_runner"
+path = "src/bin/vector_test_runner.rs"
+
+[[bin]]
+name = "vector_cache_benchmark"
+path = "src/bin/vector_cache_benchmark.rs"
 
 [profile.release]
 panic = "abort"

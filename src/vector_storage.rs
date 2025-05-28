@@ -12,6 +12,7 @@ use crate::shared::errors::{VexfsError, VexfsResult};
 use crate::shared::types::{InodeNumber, BlockNumber, Result};
 use crate::fs_core::operations::OperationContext;
 use crate::storage::StorageManager;
+use crate::security::{SecurityManager, SecurityContext, VectorOperation};
 
 #[cfg(not(feature = "kernel"))]
 use std::sync::Arc;
@@ -194,6 +195,8 @@ pub struct VectorLocation {
 pub struct VectorStorageManager {
     /// Reference to storage manager for block operations
     storage_manager: Arc<StorageManager>,
+    /// Security manager for encryption and access control
+    security_manager: Option<SecurityManager>,
     /// Device block size
     pub block_size: u32,
     /// Total storage capacity in blocks
@@ -217,6 +220,7 @@ impl VectorStorageManager {
     pub fn new(storage_manager: Arc<StorageManager>, block_size: u32, total_blocks: u64) -> Self {
         Self {
             storage_manager,
+            security_manager: None,
             block_size,
             total_blocks,
             free_blocks: total_blocks,
@@ -234,6 +238,40 @@ impl VectorStorageManager {
             vector_index: BTreeMap::new(),
             file_vector_map: BTreeMap::new(),
         }
+    }
+
+    /// Create a new vector storage manager with security
+    pub fn new_with_security(
+        storage_manager: Arc<StorageManager>,
+        security_manager: SecurityManager,
+        block_size: u32,
+        total_blocks: u64
+    ) -> Self {
+        Self {
+            storage_manager,
+            security_manager: Some(security_manager),
+            block_size,
+            total_blocks,
+            free_blocks: total_blocks,
+            next_vector_id: 1,
+            alloc_stats: VectorAllocStats {
+                total_vectors: 0,
+                total_bytes: 0,
+                avg_vector_size: 0,
+                max_vector_size: 0,
+                fragmentation_score: 0,
+                free_blocks: total_blocks as u32,
+                largest_free_block: total_blocks as u32,
+            },
+            format_version: VECTOR_FORMAT_VERSION,
+            vector_index: BTreeMap::new(),
+            file_vector_map: BTreeMap::new(),
+        }
+    }
+
+    /// Set security manager
+    pub fn set_security_manager(&mut self, security_manager: SecurityManager) {
+        self.security_manager = Some(security_manager);
     }
 
     /// Store a vector with metadata using OperationContext pattern

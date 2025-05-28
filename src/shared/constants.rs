@@ -381,7 +381,7 @@ pub const VEXFS_VERSION_PATCH: u16 = 0;
 pub const VEXFS_VERSION_STRING: &str = "0.1.0";
 
 /// Minimum supported version for compatibility
-pub const VEXFS_MIN_SUPPORTED_VERSION: u32 = 0x00010000; // 0.1.0
+pub const VEXFS_MIN_SUPPORTED_VERSION: u32 = 0x00000100; // 0.1.0
 
 /// Current on-disk format version
 pub const VEXFS_DISK_FORMAT_VERSION: u32 = 1;
@@ -572,9 +572,11 @@ mod tests {
     #[test]
     fn test_version_format() {
         assert_eq!(VEXFS_VERSION_STRING, "0.1.0");
-        let version = (VEXFS_VERSION_MAJOR as u32) << 16 
-            | (VEXFS_VERSION_MINOR as u32) << 8 
+        let version = (VEXFS_VERSION_MAJOR as u32) << 16
+            | (VEXFS_VERSION_MINOR as u32) << 8
             | (VEXFS_VERSION_PATCH as u32);
+        // The calculated version should be 0x00000100 (256) for version 0.1.0
+        assert_eq!(version, 0x00000100);
         assert_eq!(version, VEXFS_MIN_SUPPORTED_VERSION);
     }
 }
