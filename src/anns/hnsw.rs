@@ -160,6 +160,11 @@ impl HnswGraph {
         self.nodes.is_empty()
     }
 
+    /// Check if a vector with the given ID exists in the graph
+    pub fn contains_vector(&self, vector_id: u64) -> bool {
+        self.nodes.iter().any(|node| node.vector_id == vector_id)
+    }
+
     /// Clear all nodes from the graph
     pub fn clear(&mut self) {
         self.nodes.clear();

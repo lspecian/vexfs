@@ -1,6 +1,17 @@
+SPDX-License-Identifier: Apache-2.0 OR GPL-2.0
+
 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
+
+   DUAL LICENSE NOTICE
+
+   This project is dual-licensed:
+
+   - The userspace components (CLI, userland libraries) are licensed under the Apache License 2.0.
+   - The kernel module (see `src/kernel/` or `vexfs.ko`) is licensed under the GNU General Public License v2.0.
+
+   See LICENSE.kernel for full details.
 
    TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
 
