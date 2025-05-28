@@ -15,17 +15,23 @@
 extern crate alloc;
 use alloc::{vec::Vec, collections::BTreeMap, format, sync::Arc, string::String};
 use core::ptr;
+use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use crate::shared::errors::{VexfsError, VexfsResult, SearchErrorKind};
 use crate::fs_core::operations::OperationContext;
+use crate::fs_core::enhanced_operation_context::{
+    EnhancedOperationContext, OperationType, OperationMetadata, CancellationToken,
+    CancellationReason, TimeoutConfig, TimeoutAction, TelemetryCollector,
+    TelemetryEventType, TelemetrySeverity, ProgressReporter, ResourceTracker,
+    MemoryAllocationType, LifecycleHooks, LifecycleEvent, LifecycleEventType,
+    OperationPriority, ResourceLimits, ResourceUsageSummary
+};
 use crate::storage::StorageManager;
 use crate::vector_search_integration::VectorSearchSubsystem;
 use crate::ioctl::*;
 use crate::vector_storage::{VectorStorageManager, VectorHeader, VectorDataType};
 use crate::anns::{DistanceMetric, SearchResult};
 use crate::result_scoring::ScoredResult;
-// Remove unused import for now
-// use crate::fs_core::enhanced_operation_context::EnhancedOperationContext;
 use crate::query_planner::QueryPlanner;
 use crate::search_cache::SearchResultCache;
 use crate::query_monitor::QueryPerformanceMonitor;
@@ -52,10 +58,18 @@ pub struct EnhancedIoctlHandler {
     error_recovery: ErrorRecoveryManager,
     /// Comprehensive logger
     logger: IoctlLogger,
-    /// Active operation tracking
-    active_operations: BTreeMap<u64, ActiveIoctlOperation>,
+    /// Active operation tracking with enhanced context
+    active_operations: BTreeMap<u64, EnhancedActiveOperation>,
     /// Operation counter for unique IDs
-    operation_counter: u64,
+    operation_counter: AtomicU64,
+    /// Operation state transitions tracking
+    state_transitions: BTreeMap<u64, Vec<OperationStateTransition>>,
+    /// Operation dependency tracking
+    operation_dependencies: BTreeMap<u64, Vec<u64>>,
+    /// Cancellation tokens for active operations
+    cancellation_tokens: BTreeMap<u64, Arc<CancellationToken>>,
+    /// Resource usage aggregator
+    resource_aggregator: ResourceUsageAggregator,
 }
 
 /// Security validator for enhanced ioctl security
@@ -518,7 +532,11 @@ impl EnhancedIoctlHandler {
             error_recovery,
             logger,
             active_operations: BTreeMap::new(),
-            operation_counter: 0,
+            operation_counter: AtomicU64::new(0),
+            state_transitions: BTreeMap::new(),
+            operation_dependencies: BTreeMap::new(),
+            cancellation_tokens: BTreeMap::new(),
+            resource_aggregator: ResourceUsageAggregator::new(),
         })
     }
     
@@ -556,8 +574,7 @@ impl EnhancedIoctlHandler {
         context: &OperationContext,
         cmd: u32,
     ) -> VexfsResult<u64> {
-        self.operation_counter += 1;
-        let operation_id = self.operation_counter;
+        let operation_id = self.operation_counter.fetch_add(1, Ordering::Relaxed);
         
         let operation_type = self.map_command_to_operation(cmd)?;
         let user_context = UserContext {
@@ -575,20 +592,12 @@ impl EnhancedIoctlHandler {
             audit_required: self.requires_audit(&operation_type),
         };
         
-        let active_operation = ActiveIoctlOperation {
+        let active_operation = EnhancedActiveOperation::new(
             operation_id,
             operation_type,
-            start_time_us: self.get_current_time_us(),
             user_context,
-            status: OperationStatus::Starting,
-            resource_usage: ResourceUsage {
-                memory_allocated: 0,
-                cpu_time_us: 0,
-                io_operations: 0,
-                network_bytes: 0,
-            },
             security_context,
-        };
+        );
         
         self.active_operations.insert(operation_id, active_operation);
         Ok(operation_id)
@@ -960,7 +969,7 @@ impl EnhancedIoctlHandler {
     }
     
     /// Get active operations for monitoring
-    pub fn get_active_operations(&self) -> &BTreeMap<u64, ActiveIoctlOperation> {
+    pub fn get_active_operations(&self) -> &BTreeMap<u64, EnhancedActiveOperation> {
         &self.active_operations
     }
     
@@ -968,7 +977,7 @@ impl EnhancedIoctlHandler {
     pub fn get_system_health(&self) -> SystemHealthStatus {
         SystemHealthStatus {
             active_operations: self.active_operations.len(),
-            total_operations: self.operation_counter,
+            total_operations: self.operation_counter.load(Ordering::Relaxed),
             security_violations: 0, // Would be tracked in real implementation
             performance_alerts: 0, // Would be tracked in real implementation
         }
@@ -976,8 +985,7 @@ impl EnhancedIoctlHandler {
     
     /// Generate next vector ID
     fn next_vector_id(&mut self) -> u64 {
-        self.operation_counter += 1;
-        self.operation_counter
+        self.operation_counter.fetch_add(1, Ordering::Relaxed)
     }
     
     /// Store vector header (stub implementation)
@@ -1318,7 +1326,118 @@ pub enum RotationStrategy {
     SizeAndTime,
 }
 
-/// Active ioctl operation tracking
+/// Enhanced active ioctl operation tracking with OperationContext integration
+#[derive(Debug, Clone)]
+pub struct EnhancedActiveOperation {
+    /// Operation ID
+    operation_id: u64,
+    /// Operation type
+    operation_type: VectorIoctlOperation,
+    /// Start time in microseconds
+    start_time_us: u64,
+    /// User context
+    user_context: UserContext,
+    /// Operation status
+    status: OperationStatus,
+    /// Resource usage
+    resource_usage: ResourceUsage,
+    /// Security context
+    security_context: SecurityContext,
+    /// Enhanced operation context metadata
+    operation_metadata: OperationMetadata,
+    /// Current operation state
+    current_state: EnhancedOperationState,
+    /// State transition history
+    state_history: Vec<OperationStateTransition>,
+    /// Operation dependencies
+    dependencies: Vec<u64>,
+    /// Cancellation token
+    cancellation_token: Arc<CancellationToken>,
+    /// Progress tracking
+    progress: f32,
+    /// Timeout configuration
+    timeout_config: TimeoutConfig,
+    /// Operation priority
+    priority: OperationPriority,
+}
+
+/// Operation state transitions for tracking
+#[derive(Debug, Clone)]
+pub struct OperationStateTransition {
+    /// Transition timestamp
+    timestamp_us: u64,
+    /// Previous state
+    from_state: EnhancedOperationState,
+    /// New state
+    to_state: EnhancedOperationState,
+    /// Transition reason
+    reason: String,
+    /// Additional context
+    context: BTreeMap<String, String>,
+}
+
+/// Enhanced operation states with more granular tracking
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum EnhancedOperationState {
+    /// Operation is being initialized
+    Initializing,
+    /// Waiting for dependencies
+    WaitingForDependencies,
+    /// Security validation in progress
+    SecurityValidation,
+    /// Resource allocation in progress
+    ResourceAllocation,
+    /// Operation is executing
+    Executing,
+    /// Preparing response
+    PreparingResponse,
+    /// Operation completed successfully
+    Completed,
+    /// Operation failed
+    Failed,
+    /// Operation was cancelled
+    Cancelled,
+    /// Operation timed out
+    TimedOut,
+    /// Operation is being cleaned up
+    CleaningUp,
+}
+
+/// Resource usage aggregator for system-wide tracking
+#[derive(Debug)]
+pub struct ResourceUsageAggregator {
+    /// Total memory allocated across all operations
+    total_memory_allocated: AtomicUsize,
+    /// Peak memory usage
+    peak_memory_usage: AtomicUsize,
+    /// Total CPU time used
+    total_cpu_time_us: AtomicU64,
+    /// Total I/O operations
+    total_io_operations: AtomicU64,
+    /// Total I/O bytes
+    total_io_bytes: AtomicU64,
+    /// Operation count by type
+    operation_counts: BTreeMap<VectorIoctlOperation, AtomicU64>,
+    /// Resource usage history
+    usage_history: Vec<ResourceUsageSnapshot>,
+}
+
+/// Resource usage snapshot for historical tracking
+#[derive(Debug, Clone)]
+pub struct ResourceUsageSnapshot {
+    /// Snapshot timestamp
+    timestamp_us: u64,
+    /// Memory usage at snapshot time
+    memory_usage_bytes: usize,
+    /// CPU usage at snapshot time
+    cpu_time_us: u64,
+    /// I/O operations at snapshot time
+    io_operations: u64,
+    /// Active operations count
+    active_operations: usize,
+}
+
+/// Active ioctl operation tracking (legacy - kept for compatibility)
 #[derive(Debug, Clone)]
 pub struct ActiveIoctlOperation {
     /// Operation ID
@@ -1416,4 +1535,148 @@ pub enum Permission {
     ManageIndex,
     /// Administrative operations
     Admin,
+}
+
+impl ResourceUsageAggregator {
+    /// Create new resource usage aggregator
+    pub fn new() -> Self {
+        Self {
+            total_memory_allocated: AtomicUsize::new(0),
+            peak_memory_usage: AtomicUsize::new(0),
+            total_cpu_time_us: AtomicU64::new(0),
+            total_io_operations: AtomicU64::new(0),
+            total_io_bytes: AtomicU64::new(0),
+            operation_counts: BTreeMap::new(),
+            usage_history: Vec::new(),
+        }
+    }
+    
+    /// Track memory allocation
+    pub fn track_memory_allocation(&self, size_bytes: usize) {
+        self.total_memory_allocated.fetch_add(size_bytes, Ordering::Relaxed);
+        
+        // Update peak if necessary
+        let current = self.total_memory_allocated.load(Ordering::Relaxed);
+        let mut peak = self.peak_memory_usage.load(Ordering::Relaxed);
+        while current > peak {
+            match self.peak_memory_usage.compare_exchange_weak(
+                peak, current, Ordering::Relaxed, Ordering::Relaxed
+            ) {
+                Ok(_) => break,
+                Err(new_peak) => peak = new_peak,
+            }
+        }
+    }
+    
+    /// Track memory deallocation
+    pub fn track_memory_deallocation(&self, size_bytes: usize) {
+        self.total_memory_allocated.fetch_sub(size_bytes, Ordering::Relaxed);
+    }
+    
+    /// Track CPU usage
+    pub fn track_cpu_usage(&self, cpu_time_us: u64) {
+        self.total_cpu_time_us.fetch_add(cpu_time_us, Ordering::Relaxed);
+    }
+    
+    /// Track I/O operation
+    pub fn track_io_operation(&self, bytes: u64) {
+        self.total_io_operations.fetch_add(1, Ordering::Relaxed);
+        self.total_io_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+    
+    /// Get current memory usage
+    pub fn get_current_memory_usage(&self) -> usize {
+        self.total_memory_allocated.load(Ordering::Relaxed)
+    }
+    
+    /// Get peak memory usage
+    pub fn get_peak_memory_usage(&self) -> usize {
+        self.peak_memory_usage.load(Ordering::Relaxed)
+    }
+    
+    /// Get total CPU time
+    pub fn get_total_cpu_time(&self) -> u64 {
+        self.total_cpu_time_us.load(Ordering::Relaxed)
+    }
+    
+    /// Get total I/O operations
+    pub fn get_total_io_operations(&self) -> u64 {
+        self.total_io_operations.load(Ordering::Relaxed)
+    }
+}
+
+impl EnhancedActiveOperation {
+    /// Create new enhanced active operation
+    pub fn new(
+        operation_id: u64,
+        operation_type: VectorIoctlOperation,
+        user_context: UserContext,
+        security_context: SecurityContext,
+    ) -> Self {
+        let current_time = Self::get_current_time_us();
+        let user_id = user_context.user_id;
+        
+        Self {
+            operation_id,
+            operation_type,
+            start_time_us: current_time,
+            user_context: user_context.clone(),
+            status: OperationStatus::Starting,
+            resource_usage: ResourceUsage {
+                memory_allocated: 0,
+                cpu_time_us: 0,
+                io_operations: 0,
+                network_bytes: 0,
+            },
+            security_context,
+            operation_metadata: OperationMetadata {
+                operation_id,
+                operation_type: Self::map_to_operation_type(operation_type),
+                start_time_us: current_time,
+                description: format!("IOCTL operation: {:?}", operation_type),
+                parent_operation_id: None,
+                user_id,
+                session_id: Some(operation_id),
+                request_id: None,
+                tags: BTreeMap::new(),
+            },
+            current_state: EnhancedOperationState::Initializing,
+            state_history: Vec::new(),
+            dependencies: Vec::new(),
+            cancellation_token: Arc::new(CancellationToken::new()),
+            progress: 0.0,
+            timeout_config: TimeoutConfig::default(),
+            priority: OperationPriority::Normal,
+        }
+    }
+    
+    /// Transition to new state
+    pub fn transition_state(&mut self, new_state: EnhancedOperationState, reason: String) {
+        let transition = OperationStateTransition {
+            timestamp_us: Self::get_current_time_us(),
+            from_state: self.current_state,
+            to_state: new_state,
+            reason,
+            context: BTreeMap::new(),
+        };
+        
+        self.state_history.push(transition);
+        self.current_state = new_state;
+    }
+    
+    /// Map VectorIoctlOperation to OperationType
+    fn map_to_operation_type(op: VectorIoctlOperation) -> OperationType {
+        match op {
+            VectorIoctlOperation::VectorSearch | VectorIoctlOperation::HybridSearch => OperationType::VectorSearch,
+            VectorIoctlOperation::BatchSearch => OperationType::BatchVectorSearch,
+            VectorIoctlOperation::IndexManagement => OperationType::IndexBuild,
+            _ => OperationType::FileSystemOperation,
+        }
+    }
+    
+    /// Get current time in microseconds
+    fn get_current_time_us() -> u64 {
+        // Placeholder implementation
+        1640995200_000_000
+    }
 }
