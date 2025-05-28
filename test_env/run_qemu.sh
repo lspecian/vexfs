@@ -1,78 +1,45 @@
 #!/bin/bash
 
-# VexFS QEMU Testing Environment (Legacy)
-# This script is kept for compatibility but the new vm_control.sh is recommended
+# Enhanced QEMU run script for VexFS development
 
-echo "⚠️  Legacy script detected!"
-echo "This script is deprecated in favor of the new simplified VM setup."
-echo
-echo "For the new simplified VM environment, use:"
-echo "  ./setup_vm.sh      # Initial setup"
-echo "  ./vm_control.sh    # VM management"
-echo "  ./test_module.sh   # Testing"
-echo
-echo "Continue with legacy Packer-based setup? (y/N)"
-read -r response
-
-if [[ ! "$response" =~ ^[Yy]$ ]]; then
-    echo "Aborting. Use the new scripts for a better experience!"
-    exit 0
-fi
-
-echo "Proceeding with legacy setup..."
-echo
-
-# Variables
-PACKER_OUTPUT_DIR="./packer_output"
-# Find the newest QCOW2 image in the Packer output directory
-VM_IMAGE=$(ls -t "$PACKER_OUTPUT_DIR"/*.qcow2 2>/dev/null | head -n1)
-EXTRA_DISK_IMAGE="vexfs_disk.img"
-EXTRA_DISK_SIZE="100M" # Size for the test VexFS disk
+VM_DIR="test_env/vm"
+VM_NAME="vexfs-dev"
+VM_IMAGE="$VM_DIR/images/$VM_NAME.qcow2"
+CLOUD_INIT_ISO="$VM_DIR/config/cloud-init.iso"
 
 # Check if VM image exists
-if [ -z "$VM_IMAGE" ]; then
-  echo "Error: No QCOW2 image found in $PACKER_OUTPUT_DIR."
-  echo "Please build the VM image using 'packer build vexfs.pkr.hcl' first."
-  echo
-  echo "Or better yet, use the new simplified setup:"
-  echo "  ./setup_vm.sh"
-  exit 1
-fi
-
-echo "Using VM image: $VM_IMAGE"
-
-# Create the extra disk image if it doesn't exist
-if [ ! -f "$EXTRA_DISK_IMAGE" ]; then
-  echo "Creating extra disk image: $EXTRA_DISK_IMAGE with size $EXTRA_DISK_SIZE..."
-  qemu-img create -f raw "$EXTRA_DISK_IMAGE" "$EXTRA_DISK_SIZE"
-  if [ $? -ne 0 ]; then
-    echo "Error: Failed to create $EXTRA_DISK_IMAGE."
+if [ ! -f "$VM_IMAGE" ]; then
+    echo "❌ VM image not found: $VM_IMAGE"
+    echo "Run: ./test_env/setup_vm.sh"
     exit 1
-  fi
-  echo "Extra disk image created."
-else
-  echo "Using existing extra disk image: $EXTRA_DISK_IMAGE"
 fi
 
-# QEMU command
-# Note: -nographic implies console=ttyS0 is often needed in kernel cmdline,
-# but Debian preseed setup usually configures serial console access.
-# We forward SSH port 2222 to VM's 22 for easier access.
-qemu-system-x86_64 \
-  -enable-kvm \
-  -m 2G \
-  -smp 2 \
-  -drive file="$VM_IMAGE",if=virtio,format=qcow2,index=0,media=disk \
-  -drive file="$EXTRA_DISK_IMAGE",if=virtio,format=raw,index=1,media=disk \
-  -netdev user,id=net0,hostfwd=tcp::2222-:22 \
-  -device virtio-net-pci,netdev=net0 \
-  -serial stdio \
-  -display none # Use this if -serial stdio is preferred over graphical window
-  # For a graphical window (if headless=false in Packer and needed for debug):
-  # -display gtk
-  # If using -display none or -nographic, ensure the guest OS is configured for serial console.
-  # The Debian preseed should handle this for ttyS0.
+# Check if cloud-init ISO exists
+if [ ! -f "$CLOUD_INIT_ISO" ]; then
+    echo "❌ Cloud-init ISO not found: $CLOUD_INIT_ISO"
+    echo "Run: ./test_env/setup_vm.sh"
+    exit 1
+fi
 
-echo "QEMU VM started. Connect via SSH: ssh root@localhost -p 2222 (password: password)"
-echo "Or interact via the serial console if -display none is used."
-echo "To shut down, use 'sudo halt -p' inside the VM."
+echo "🚀 Starting VexFS development VM..."
+echo "📁 VM Image: $VM_IMAGE"
+echo "☁️  Cloud-init: $CLOUD_INIT_ISO"
+echo "🌐 SSH: ssh -p 2222 -i test_env/vm/keys/vexfs_vm_key vexfs@localhost"
+echo "🖥️  VNC: localhost:5900 (if needed)"
+echo ""
+
+# Start QEMU with optimized settings
+exec qemu-system-x86_64 \
+  -name "$VM_NAME" \
+  -m 2048 \
+  -smp 2 \
+  -drive file="$VM_IMAGE",format=qcow2,if=virtio \
+  -drive file="$CLOUD_INIT_ISO",format=raw,if=virtio,readonly=on \
+  -netdev user,id=net0,hostfwd=tcp::2222-:22 \
+  -device virtio-net,netdev=net0 \
+  -virtfs local,path="$(pwd)",mount_tag=vexfs_source,security_model=passthrough,id=vexfs_source \
+  -display none \
+  -vnc :0 \
+  -enable-kvm \
+  -cpu host \
+  "$@"
