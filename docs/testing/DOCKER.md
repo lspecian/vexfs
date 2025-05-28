@@ -60,6 +60,22 @@ cargo build # Ensure everything is compiled
 docker run --rm -v "$(pwd)":/app vexfs-dev ./target/debug/vexctl --help
 ```
 
+### Running Benchmarks
+
+The `vector_test_runner` binary, included in the VexFS project, also serves as a preliminary performance benchmark tool for userspace vector operations. You can run these benchmarks using Docker to get an idea of the performance characteristics on your system within the containerized environment.
+
+To execute the userspace benchmarks:
+
+```bash
+docker run --rm -v "$(pwd)":/app vexfs-dev run-vector-tests
+```
+
+This command utilizes the `run-vector-tests` argument in the `docker-entrypoint.sh` script, which specifically compiles and runs the `vector_test_runner`. As described in the main project README, this test runner performs a sequence of operations, including vector insertions and k-NN searches using different metrics, and reports the time taken for these operations, typically in milliseconds.
+
+Look for these timing outputs in the console. They provide a baseline understanding of userspace vector operation performance with the current build of VexFS.
+
+It's important to remember that these are **userspace benchmarks only**. They test the vector algorithms and data structures as compiled and run in a standard userspace process. These results do not reflect the performance of VexFS when operating as a kernel module, which would involve different execution paths and overheads.
+
 ## Volume Mounts for Test Files and Data
 
 As shown in the `docker run` examples, you can use the `-v` flag to mount data into the container.
@@ -79,6 +95,81 @@ As shown in the `docker run` examples, you can use the `-v` flag to mount data i
     docker run -it --rm       -v "$(pwd)":/app       -v ~/vexfs_test_data:/mnt/external_data       -v vexfs_data:/mnt/vexfs_data       vexfs-dev
     ```
 3.  Inside the container, you can then access your data from `/mnt/external_data` and use it with `vexctl` or your test scripts, potentially processing it and storing results in `/mnt/vexfs_data`.
+
+## Example Usage: Using `vexctl`
+
+This section provides a conceptual example of how you might use the `vexctl` command-line tool within the Docker container to manage vector data.
+**Note:** The exact `vexctl` commands and workflow may vary based on its current implementation. Refer to `vexctl --help` for actual available commands.
+
+**Prerequisites:**
+*   You have built the Docker image (`docker build -t vexfs-dev .`).
+*   You have some sample vector data. For this example, let's assume you have a file named `sample_vectors.json` in a local directory, e.g., `~/my_vexfs_data/sample_vectors.json`.
+
+**Steps:**
+
+1.  **Start the Docker Container Interactively:**
+
+    Mount your local project directory and a directory for your data:
+    ```bash
+    # Create a directory for your test data on the host if it doesn't exist
+    mkdir -p ~/my_vexfs_data
+
+    # (Optional) Create a dummy sample_vectors.json for demonstration if you don't have one
+    # echo '[{"id": "vec1", "vector": [0.1, 0.2, 0.3]}, {"id": "vec2", "vector": [0.4, 0.5, 0.6]}]' > ~/my_vexfs_data/sample_vectors.json
+
+    docker run -it --rm \
+      -v "$(pwd)":/app \
+      -v ~/my_vexfs_data:/mnt/host_data \
+      -v vexfs_data:/mnt/vexfs_data \
+      vexfs-dev
+    ```
+    This makes your project available at `/app` (for `vexctl` binary), your local data at `/mnt/host_data`, and uses a named volume `vexfs_data` for persistent storage at `/mnt/vexfs_data` within the container.
+
+2.  **Inside the Container: Compile `vexctl` (if not already done by entrypoint):**
+
+    The entrypoint script usually compiles the project. If you need to recompile or ensure it's built:
+    ```bash
+    cargo build
+    ```
+    The `vexctl` binary will be at `./target/debug/vexctl`.
+
+3.  **Explore `vexctl` commands:**
+    ```bash
+    ./target/debug/vexctl --help
+    ```
+
+4.  **Conceptual: Create a Vector Index (Example Command):**
+
+    Let's assume `vexctl` has a command to create a new vector index. This might store metadata in `/mnt/vexfs_data`.
+    ```bash
+    # Replace with actual vexctl command if available
+    ./target/debug/vexctl create-index --name my_index --dimension 3 --path /mnt/vexfs_data/my_index_data
+    # (The above is a hypothetical command)
+    ```
+
+5.  **Conceptual: Ingest Sample Data (Example Command):**
+
+    Ingest data from the `sample_vectors.json` file you mounted from your host.
+    ```bash
+    # Replace with actual vexctl command if available
+    ./target/debug/vexctl ingest --index /mnt/vexfs_data/my_index_data --file /mnt/host_data/sample_vectors.json
+    # (The above is a hypothetical command)
+    ```
+    This command would read data from `/mnt/host_data/sample_vectors.json` (which is `~/my_vexfs_data/sample_vectors.json` on your host) and store it in the index located within `/mnt/vexfs_data`.
+
+6.  **Conceptual: Perform a Vector Search (Example Command):**
+
+    Perform a search using `vexctl`.
+    ```bash
+    # Replace with actual vexctl command if available
+    ./target/debug/vexctl search --index /mnt/vexfs_data/my_index_data --query_vector "[0.1,0.2,0.3]" --top_k 1
+    # (The above is a hypothetical command)
+    ```
+
+7.  **Exiting the Container:**
+    Type `exit` to leave the interactive shell. The data stored in the named volume `/mnt/vexfs_data` will persist across container runs. Data in `/mnt/host_data` is directly from your host.
+
+This example illustrates a potential workflow. The actual commands and capabilities of `vexctl` should be verified with its help documentation and the project's specific examples.
 
 ## Privileged vs. Non-Privileged Mode
 
