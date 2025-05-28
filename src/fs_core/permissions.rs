@@ -482,7 +482,7 @@ pub fn permission_bits(mode: FileMode) -> u16 {
 }
 
 pub fn apply_umask(mode: FileMode, umask: u16) -> FileMode {
-    mode & !(umask as u32)
+    FileMode(mode.0 & !(umask as u32))
 }
 
 pub fn check_read_permission(inode: &Inode, user: &UserContext) -> FsResult<()> {
