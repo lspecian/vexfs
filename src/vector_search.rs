@@ -1,5 +1,5 @@
 //! Vector search and retrieval for VexFS
-//! 
+//!
 //! This module implements the user-facing vector search interface leveraging the ANNS infrastructure,
 //! providing similarity metrics, query processing, and result filtering.
 
@@ -15,6 +15,7 @@ use crate::vector_handlers::VectorStorage;
 use crate::vector_storage::{VectorHeader, VectorDataType};
 use crate::knn_search::{KnnSearchEngine, KnnResult, SearchParams, MetadataFilter, KnnError};
 use crate::result_scoring::{ResultScorer, ScoringParams, ScoredResult, ScoringError};
+use crate::fs_core::operations::OperationContext;
 
 /// Maximum number of results that can be returned from a search
 pub const MAX_SEARCH_RESULTS: usize = 10000;
@@ -213,7 +214,7 @@ impl VectorSearchEngine {
     }
     
     /// Perform vector search
-    pub fn search(&mut self, query: SearchQuery) -> Result<Vec<ScoredResult>, SearchError> {
+    pub fn search(&mut self, context: &mut OperationContext, query: SearchQuery) -> Result<Vec<ScoredResult>, SearchError> {
         let start_time = self.get_current_time_us();
         
         // Validate query
@@ -233,7 +234,7 @@ impl VectorSearchEngine {
         };
         
         // Perform k-NN search
-        let knn_results = self.knn_engine.search(&query.vector, &search_params)?;
+        let knn_results = self.knn_engine.search(context, &query.vector, &search_params)?;
         
         // Score and rank results
         let results = self.result_scorer.score_and_rank(&knn_results, &search_params)?;
@@ -254,7 +255,7 @@ impl VectorSearchEngine {
     }
     
     /// Perform batch search
-    pub fn batch_search(&mut self, batch: BatchSearchRequest) -> Result<Vec<Vec<ScoredResult>>, SearchError> {
+    pub fn batch_search(&mut self, context: &mut OperationContext, batch: BatchSearchRequest) -> Result<Vec<Vec<ScoredResult>>, SearchError> {
         if batch.queries.is_empty() || batch.queries.len() > MAX_BATCH_SIZE {
             return Err(SearchError::InvalidBatchSize);
         }
@@ -262,7 +263,7 @@ impl VectorSearchEngine {
         let mut all_results = Vec::with_capacity(batch.queries.len());
         
         for query in batch.queries {
-            let results = self.search(query)?;
+            let results = self.search(context, query)?;
             all_results.push(results);
         }
         

@@ -1,14 +1,29 @@
 //! Approximate Nearest Neighbor Search (ANNS) implementation for VexFS
-//! 
+//!
 //! This module provides efficient vector similarity search capabilities using
 //! the Hierarchical Navigable Small World (HNSW) algorithm.
+//!
+//! This module has been integrated with the fs_core architecture to use OperationContext
+//! patterns and work seamlessly with the established VexFS components.
 
-use std::collections::BTreeMap;
-use std::vec::Vec;
-use std::mem;
-
+use crate::shared::errors::{VexfsError, VexfsResult};
+use crate::shared::types::InodeNumber;
+use crate::fs_core::operations::OperationContext;
 use crate::vector_storage::{VectorHeader, VectorStorageManager, VectorStorageError};
 pub use crate::vector_metrics::{DistanceMetric, calculate_distance};
+use crate::storage::StorageManager;
+
+#[cfg(not(feature = "kernel"))]
+use std::sync::Arc;
+#[cfg(feature = "kernel")]
+use alloc::sync::Arc;
+
+#[cfg(not(feature = "std"))]
+use alloc::{vec::Vec, collections::BTreeMap};
+#[cfg(feature = "std")]
+use std::{vec::Vec, collections::BTreeMap};
+
+use core::mem;
 
 // Re-export key components from submodules  
 pub mod hnsw;
@@ -22,7 +37,7 @@ pub use self::hnsw::{HnswGraph, HnswNode};
 pub use self::serialization::{IndexSerializer, IndexDeserializer};
 pub use self::indexing::{IndexBuilder, IncrementalUpdater, BuildingStats};
 
-/// Error types for ANNS operations
+/// Error types for ANNS operations - now integrated with VexfsError system
 #[derive(Debug, Clone)]
 pub enum AnnsError {
     InvalidDimensions,
@@ -39,6 +54,36 @@ pub enum AnnsError {
     InvalidMemoryBlock,
     WalCorrupted,
     WalFull,
+    // Integration with fs_core errors
+    VexfsError(VexfsError),
+}
+
+impl From<VexfsError> for AnnsError {
+    fn from(err: VexfsError) -> Self {
+        AnnsError::VexfsError(err)
+    }
+}
+
+impl From<AnnsError> for VexfsError {
+    fn from(err: AnnsError) -> Self {
+        match err {
+            AnnsError::InvalidDimensions => VexfsError::VectorError(crate::shared::errors::VectorErrorKind::InvalidDimensions(0)),
+            AnnsError::InvalidParameter => VexfsError::InvalidArgument("Invalid ANNS parameter".to_string()),
+            AnnsError::IndexNotInitialized => VexfsError::IndexError(crate::shared::errors::IndexErrorKind::IndexNotFound),
+            AnnsError::StorageFull => VexfsError::OutOfSpace,
+            AnnsError::VectorNotFound => VexfsError::VectorError(crate::shared::errors::VectorErrorKind::VectorNotFound),
+            AnnsError::InvalidVectorData => VexfsError::VectorError(crate::shared::errors::VectorErrorKind::CorruptedData),
+            AnnsError::SerializationError => VexfsError::VectorError(crate::shared::errors::VectorErrorKind::SerializationError),
+            AnnsError::MemoryAllocationFailed => VexfsError::OutOfMemory,
+            AnnsError::InvalidOperation => VexfsError::InvalidOperation("Invalid ANNS operation".to_string()),
+            AnnsError::IOError => VexfsError::VectorError(crate::shared::errors::VectorErrorKind::IoError),
+            AnnsError::OutOfMemory => VexfsError::OutOfMemory,
+            AnnsError::InvalidMemoryBlock => VexfsError::VectorError(crate::shared::errors::VectorErrorKind::CorruptedData),
+            AnnsError::WalCorrupted => VexfsError::JournalError(crate::shared::errors::JournalErrorKind::JournalCorrupted),
+            AnnsError::WalFull => VexfsError::JournalError(crate::shared::errors::JournalErrorKind::JournalFull),
+            AnnsError::VexfsError(vexfs_err) => vexfs_err,
+        }
+    }
 }
 
 impl From<VectorStorageError> for AnnsError {
@@ -128,12 +173,14 @@ impl Default for AnnsConfig {
     }
 }
 
-/// Main ANNS index structure
+/// Main ANNS index structure integrated with fs_core architecture
 pub struct AnnsIndex {
     config: AnnsConfig,
     graph: HnswGraph,
     vector_count: u64,
     is_initialized: bool,
+    /// Reference to storage manager for integration with fs_core
+    storage_manager: Option<Arc<StorageManager>>,
 }
 
 impl AnnsIndex {
@@ -146,17 +193,24 @@ impl AnnsIndex {
             graph,
             vector_count: 0,
             is_initialized: true,
+            storage_manager: None,
         })
     }
 
-    /// Insert a vector into the index
-    pub fn insert_vector(&mut self, vector_id: u64, vector_data: &[f32]) -> Result<(), AnnsError> {
+    /// Initialize with storage manager for fs_core integration
+    pub fn initialize_with_storage(&mut self, storage_manager: Arc<StorageManager>) -> Result<(), AnnsError> {
+        self.storage_manager = Some(storage_manager);
+        Ok(())
+    }
+
+    /// Insert a vector into the index using OperationContext pattern
+    pub fn insert_vector(&mut self, _context: &mut OperationContext, vector_id: u64, vector_data: &[f32]) -> VexfsResult<()> {
         if !self.is_initialized {
-            return Err(AnnsError::IndexNotInitialized);
+            return Err(VexfsError::IndexError(crate::shared::errors::IndexErrorKind::IndexNotFound));
         }
 
         if vector_data.len() != self.config.dimensions as usize {
-            return Err(AnnsError::InvalidDimensions);
+            return Err(VexfsError::VectorError(crate::shared::errors::VectorErrorKind::InvalidDimensions(vector_data.len() as u16)));
         }
 
         // Create a simple node for this vector
@@ -166,31 +220,31 @@ impl AnnsIndex {
             connections: Vec::new(),
         };
 
-        self.graph.add_node(node)?;
+        self.graph.add_node(node).map_err(|e| VexfsError::from(e))?;
         self.vector_count += 1;
 
         Ok(())
     }
 
-    /// Search for the k nearest neighbors of the query vector
-    pub fn search(&self, query: &[f32], k: usize, ef: Option<u16>) -> Result<Vec<SearchResult>, AnnsError> {
+    /// Search for the k nearest neighbors of the query vector using OperationContext pattern
+    pub fn search(&self, _context: &mut OperationContext, query: &[f32], _k: usize, ef: Option<u16>) -> VexfsResult<Vec<SearchResult>> {
         if !self.is_initialized {
-            return Err(AnnsError::IndexNotInitialized);
+            return Err(VexfsError::IndexError(crate::shared::errors::IndexErrorKind::IndexNotFound));
         }
 
         if query.len() != self.config.dimensions as usize {
-            return Err(AnnsError::InvalidDimensions);
+            return Err(VexfsError::VectorError(crate::shared::errors::VectorErrorKind::InvalidDimensions(query.len() as u16)));
         }
 
-        let ef_search = ef.unwrap_or(self.config.hnsw_params.ef_search);
+        let _ef_search = ef.unwrap_or(self.config.hnsw_params.ef_search);
         
         // Simple linear search for now - will be replaced with HNSW traversal
-        let mut results = Vec::new();
+        let _results = Vec::new();
         
         // For now, return empty results
         // In a full implementation, this would traverse the HNSW graph
         
-        Ok(results)
+        Ok(_results)
     }
 
     /// Get the number of vectors in the index
@@ -202,12 +256,21 @@ impl AnnsIndex {
     pub fn is_initialized(&self) -> bool {
         self.is_initialized
     }
+
+    /// Get storage manager reference for integration
+    pub fn storage_manager(&self) -> Option<&Arc<StorageManager>> {
+        self.storage_manager.as_ref()
+    }
 }
 
-/// Simplified ANNS system for initial compilation
+/// Integrated ANNS system with fs_core architecture support
 pub struct IntegratedAnnsSystem {
     config: AnnsConfig,
     index: Option<AnnsIndex>,
+    /// Reference to vector storage manager for integration
+    vector_storage: Option<Arc<VectorStorageManager>>,
+    /// Reference to storage manager for fs_core integration
+    storage_manager: Option<Arc<StorageManager>>,
 }
 
 impl IntegratedAnnsSystem {
@@ -216,29 +279,36 @@ impl IntegratedAnnsSystem {
         Ok(Self {
             config,
             index: None,
+            vector_storage: None,
+            storage_manager: None,
         })
     }
 
-    /// Initialize the system with storage manager
-    pub fn initialize(&mut self, _storage: &VectorStorageManager) -> Result<(), AnnsError> {
-        let index = AnnsIndex::new(self.config.clone())?;
+    /// Initialize the system with storage manager and vector storage using OperationContext pattern
+    pub fn initialize(&mut self, _context: &mut OperationContext, storage_manager: Arc<StorageManager>, vector_storage: Arc<VectorStorageManager>) -> VexfsResult<()> {
+        let mut index = AnnsIndex::new(self.config.clone()).map_err(|e| VexfsError::from(e))?;
+        index.initialize_with_storage(storage_manager.clone()).map_err(|e| VexfsError::from(e))?;
+        
         self.index = Some(index);
+        self.vector_storage = Some(vector_storage);
+        self.storage_manager = Some(storage_manager);
+        
         Ok(())
     }
 
-    /// Insert a vector
-    pub fn insert_vector(&mut self, vector_id: u64, vector_data: &[f32]) -> Result<(), AnnsError> {
+    /// Insert a vector using OperationContext pattern
+    pub fn insert_vector(&mut self, context: &mut OperationContext, vector_id: u64, vector_data: &[f32]) -> VexfsResult<()> {
         match &mut self.index {
-            Some(index) => index.insert_vector(vector_id, vector_data),
-            None => Err(AnnsError::IndexNotInitialized),
+            Some(index) => index.insert_vector(context, vector_id, vector_data),
+            None => Err(VexfsError::IndexError(crate::shared::errors::IndexErrorKind::IndexNotFound)),
         }
     }
 
-    /// Search for similar vectors
-    pub fn search_vectors(&self, query: &[f32], k: usize) -> Result<Vec<SearchResult>, AnnsError> {
+    /// Search for similar vectors using OperationContext pattern
+    pub fn search_vectors(&self, context: &mut OperationContext, query: &[f32], k: usize) -> VexfsResult<Vec<SearchResult>> {
         match &self.index {
-            Some(index) => index.search(query, k, None),
-            None => Err(AnnsError::IndexNotInitialized),
+            Some(index) => index.search(context, query, k, None),
+            None => Err(VexfsError::IndexError(crate::shared::errors::IndexErrorKind::IndexNotFound)),
         }
     }
 
@@ -248,6 +318,43 @@ impl IntegratedAnnsSystem {
             Some(index) => index.vector_count(),
             None => 0,
         }
+    }
+
+    /// Get storage manager reference for integration
+    pub fn storage_manager(&self) -> Option<&Arc<StorageManager>> {
+        self.storage_manager.as_ref()
+    }
+
+    /// Get vector storage manager reference for integration
+    pub fn vector_storage(&self) -> Option<&Arc<VectorStorageManager>> {
+        self.vector_storage.as_ref()
+    }
+
+    /// Sync ANNS data to persistent storage using OperationContext pattern
+    pub fn sync(&mut self, _context: &mut OperationContext) -> VexfsResult<()> {
+        // Sync vector storage if available
+        if let Some(_vector_storage) = &mut self.vector_storage {
+            // Note: VectorStorageManager sync method would need to be updated to take Arc<VectorStorageManager>
+            // For now, we'll just ensure the storage manager is synced
+        }
+        
+        // Sync underlying storage manager
+        if let Some(storage_manager) = &self.storage_manager {
+            storage_manager.sync_all()?;
+        }
+        
+        Ok(())
+    }
+
+    /// Compact ANNS indices and storage using OperationContext pattern
+    pub fn compact(&mut self, _context: &mut OperationContext) -> VexfsResult<()> {
+        // Compact vector storage if available
+        if let Some(_vector_storage) = &mut self.vector_storage {
+            // Note: VectorStorageManager compact method would need to be updated to take Arc<VectorStorageManager>
+            // For now, this is a placeholder for future implementation
+        }
+        
+        Ok(())
     }
 }
 
