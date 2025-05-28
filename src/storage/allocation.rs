@@ -531,12 +531,13 @@ impl SpaceAllocator {
     /// Initialize allocator with layout information
     pub fn initialize(&mut self) -> VexfsResult<()> {
         // Initialize block groups with layout information
+        let group_count = self.block_groups.len() as u32;
         for (group_idx, group) in self.block_groups.iter_mut().enumerate() {
             let layout = crate::storage::layout::VexfsLayout {
                 block_size: self.bitmap.block_size,
                 total_blocks: self.total_blocks,
                 blocks_per_group: self.blocks_per_group,
-                group_count: self.block_groups.len() as u32,
+                group_count,
                 inodes_per_group: self.blocks_per_group, // Default assumption
                 inode_size: 256, // Default inode size
                 journal_blocks: 0, // No journal for allocator init

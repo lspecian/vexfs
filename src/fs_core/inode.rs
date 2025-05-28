@@ -39,7 +39,7 @@ use core::mem;
 use derivative::Derivative; // Import Derivative
 
 /// In-memory inode representation
-#[derive(Debug, Clone)] // Keep standard Debug for Inode for now
+#[derive(Debug, Clone, PartialEq)] // Add PartialEq to Inode
 pub struct Inode {
     pub ino: InodeNumber,
     pub file_type: FileType,
@@ -201,6 +201,7 @@ pub struct InodeManager {
     #[derivative(Debug="ignore")] // Ignore for Debug
     #[derivative(PartialEq="ignore")] // Ignore for PartialEq
     storage: StorageManager,
+    #[derivative(PartialEq="ignore")] // Ignore inode_cache for PartialEq
     inode_cache: BTreeMap<InodeNumber, Inode>,
     next_inode: InodeNumber,
     free_inodes: Vec<InodeNumber>,

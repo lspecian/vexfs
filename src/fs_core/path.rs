@@ -285,7 +285,7 @@ impl PathValidator {
         
         // Count parent directory references
         let mut parent_count = 0;
-        let mut depth = 0;
+        let mut depth: u32 = 0;
         
         for component in normalized.components() {
             match component {
@@ -294,7 +294,7 @@ impl PathValidator {
                     depth = depth.saturating_sub(1u32);
                 }
                 PathComponent::Normal(_) => {
-                    depth += 1;
+                    depth += 1u32;
                 }
                 _ => {}
             }
@@ -306,7 +306,7 @@ impl PathValidator {
         }
 
         // Check final depth
-        if depth > MAX_PATH_DEPTH {
+        if depth as usize > MAX_PATH_DEPTH {
             return Err(VexfsError::PathTooLong);
         }
 
