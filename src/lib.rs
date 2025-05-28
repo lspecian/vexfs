@@ -147,6 +147,8 @@ pub mod vector_search_integration;
 pub mod enhanced_vector_search;
 #[cfg(not(feature = "kernel"))]
 pub mod hybrid_search;
+#[cfg(not(feature = "kernel"))]
+pub mod ioctl_integration;
 
 // Conditional compilation for userspace-only modules
 #[cfg(not(feature = "kernel"))]
