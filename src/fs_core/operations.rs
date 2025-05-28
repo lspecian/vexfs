@@ -56,7 +56,7 @@ pub enum OperationResult {
 
 /// Filesystem operation context
 /// Context for path resolution operations
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ResolutionContext<'a> { // Added lifetime 'a
     /// Starting inode for relative path resolution
     pub current_dir_inode: InodeNumber,
@@ -117,9 +117,12 @@ impl<'a> OperationContext<'a> { // Added lifetime 'a
     
     /// Get resolution context for path operations
     pub fn resolution_context(&mut self) -> ResolutionContext<'_> { // Changed to &mut self and added lifetime
-        let mut ctx = ResolutionContext::new(self.cwd_inode, self.user.clone(), self.inode_manager);
-        ctx.follow_symlinks = self.follow_symlinks;
-        ctx
+        ResolutionContext {
+            current_dir_inode: self.cwd_inode,
+            user_context: self.user.clone(),
+            follow_symlinks: self.follow_symlinks,
+            inode_manager: self.inode_manager,
+        }
     }
 }
 
@@ -172,7 +175,7 @@ impl FilesystemOperations {
 
         let new_inode_arc = { // Shadowing to avoid confusion with file_inode_mut_guard
             let mut temp_inode = Inode::new(0, FileType::Regular, FileMode::new(mode), context.user.uid, context.user.gid); // ino will be set by allocate_inode
-            temp_inode.mode = crate::fs_core::permissions::apply_umask(mode, context.umask);
+            temp_inode.mode = crate::fs_core::permissions::apply_umask(FileMode(mode), context.umask as u16);
             // uid and gid are already set
             temp_inode.nlink = 1;
             // create_inode in InodeManager now handles allocation and returns Arc<Inode>
@@ -386,7 +389,7 @@ impl FilesystemOperations {
         // Create new inode for directory
         let dir_inode_arc = {
             let mut temp_inode = Inode::new(0, FileType::Directory, FileMode::new(mode), context.user.uid, context.user.gid);
-            temp_inode.mode = crate::fs_core::permissions::apply_umask(mode, context.umask);
+            temp_inode.mode = crate::fs_core::permissions::apply_umask(FileMode(mode), context.umask as u16);
             // uid and gid are set
             temp_inode.nlink = 2; // . and entry from parent
             context.inode_manager.create_inode(FileType::Directory, FileMode::new(mode), context.user.uid, context.user.gid)?
@@ -520,9 +523,10 @@ impl FilesystemOperations {
         crate::fs_core::directory::remove_entry(context.inode_manager, parent_inode_num, &dirname, &context.user)?;
         
         // Update parent directory link count (removing the .. reference)
-        let mut parent_updated = get_inode(context.inode_manager, parent_inode_num)?;
+        let parent_updated_arc = get_inode(context.inode_manager, parent_inode_num)?;
+        let mut parent_updated = parent_updated_arc.as_ref().clone();
         parent_updated.nlink -= 1;
-        put_inode(context.inode_manager, parent_updated)?;
+        put_inode(context.inode_manager, Arc::new(parent_updated))?;
         
         // Delete the directory inode
         delete_inode(context.inode_manager, dir_inode_number)?;
@@ -657,7 +661,7 @@ impl FilesystemOperations {
     /// # Returns
     /// 
     /// Returns Ok(()) on success or an error.
-    pub fn change_permissions(path: &str, mode: u32, context: &OperationContext) -> Result<()> {
+    pub fn change_permissions(path: &str, mode: u32, context: &mut OperationContext) -> Result<()> {
         // Resolve the path
         let inode_number = PathResolver::resolve_path(context.inode_manager, context.cwd_inode, &Path::from_str(path)?)?;
         
@@ -665,16 +669,19 @@ impl FilesystemOperations {
         let _lock = acquire_inode_lock(context.lock_manager, inode_number, LockType::Write, context.user.uid)?;
         
         // Get and check the inode
-        let mut inode = get_inode(context.inode_manager, inode_number)?;
+        let inode_arc = get_inode(context.inode_manager, inode_number)?;
+        let mut inode = (*inode_arc).clone();
         
-        // Check permissions to change mode
-        crate::fs_core::permissions::PermissionChecker::check_change_permissions(&inode, &context.user)?;
+        // Check permissions to change mode (owner or root can change permissions)
+        if context.user.uid != 0 && context.user.uid != inode.uid {
+            return Err(VexfsError::PermissionDenied("Permission denied".to_string()));
+        }
         
         // Update permissions
-        inode.mode = (inode.mode & !0o777) | (mode & 0o777);
+        inode.mode = FileMode((inode.mode.0 & !0o777) | (mode & 0o777));
         inode.touch_ctime();
         
-        put_inode(context.inode_manager, inode)?;
+        put_inode(context.inode_manager, Arc::new(inode))?;
         
         Ok(())
     }
