@@ -13,7 +13,7 @@ use crate::vector_storage::VectorDataType;
 use libm::{sqrtf, fmaf};
 
 /// Distance metrics for vector similarity calculation
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum DistanceMetric {
     /// Euclidean (L2) distance
     Euclidean,

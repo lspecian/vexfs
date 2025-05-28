@@ -138,7 +138,11 @@ pub mod vector_optimizations;
 #[cfg(not(feature = "kernel"))]
 pub mod vector_large_collections;
 #[cfg(not(feature = "kernel"))]
-// pub mod vector_search_integration; // Temporarily disabled due to compilation issues
+pub mod search_cache;
+#[cfg(not(feature = "kernel"))]
+pub mod query_monitor;
+#[cfg(not(feature = "kernel"))]
+pub mod vector_search_integration;
 
 // Conditional compilation for userspace-only modules
 #[cfg(not(feature = "kernel"))]
