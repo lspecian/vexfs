@@ -478,7 +478,7 @@ pub fn can_delete_from_directory(inode: &Inode, user: &UserContext) -> bool {
 }
 
 pub fn permission_bits(mode: FileMode) -> u16 {
-    mode & 0o777
+    mode.permissions() as u16
 }
 
 pub fn apply_umask(mode: FileMode, umask: u16) -> FileMode {
@@ -570,7 +570,7 @@ impl SecurityPolicy {
         }
 
         // Validate permissions for file type
-        PermissionChecker::validate_mode(mode.permissions(), file_type, user)?;
+        PermissionChecker::validate_mode(mode.permissions() as u16, file_type, user)?;
 
         Ok(())
     }

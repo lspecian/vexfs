@@ -291,7 +291,7 @@ impl PathValidator {
             match component {
                 PathComponent::Parent => {
                     parent_count += 1;
-                    depth = depth.saturating_sub(1);
+                    depth = depth.saturating_sub(1u32);
                 }
                 PathComponent::Normal(_) => {
                     depth += 1;

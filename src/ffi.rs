@@ -360,7 +360,7 @@ fn create_operation_context() -> VexfsResult<(InodeManager, LockManager, UserCon
     let cache_size = 64 * 1024 * 1024; // 64MB default cache
     
     let storage_manager = StorageManager::new(device, layout, cache_size)?;
-    let inode_manager = InodeManager::new(&storage_manager)?;
+    let inode_manager = InodeManager::new(storage_manager)?;
     let lock_manager = LockManager::new();
     let user_context = UserContext::root(); // TODO: Use actual user context
     
