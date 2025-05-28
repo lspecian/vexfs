@@ -11,11 +11,11 @@ use core::cmp::Ordering;
 
 use crate::anns::{DistanceMetric, AnnsIndex, SearchResult};
 use crate::vector_metrics::{VectorMetrics, MetricsError};
-use crate::vector_handlers::VectorStorage;
-use crate::vector_storage::{VectorHeader, VectorDataType};
+use crate::vector_storage::{VectorStorageManager, VectorHeader, VectorDataType};
 use crate::knn_search::{KnnSearchEngine, KnnResult, SearchParams, MetadataFilter, KnnError};
 use crate::result_scoring::{ResultScorer, ScoringParams, ScoredResult, ScoringError};
 use crate::fs_core::operations::OperationContext;
+use crate::shared::errors::{VexfsError, SearchErrorKind};
 
 /// Maximum number of results that can be returned from a search
 pub const MAX_SEARCH_RESULTS: usize = 10000;
@@ -23,7 +23,7 @@ pub const MAX_SEARCH_RESULTS: usize = 10000;
 /// Maximum batch size for search requests
 pub const MAX_BATCH_SIZE: usize = 100;
 
-/// Vector search error types
+/// Vector search error types (maintained for backward compatibility)
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SearchError {
     /// Invalid query parameters
@@ -61,6 +61,31 @@ impl From<MetricsError> for SearchError {
 impl From<ScoringError> for SearchError {
     fn from(error: ScoringError) -> Self {
         SearchError::ScoringError(error)
+    }
+}
+
+impl From<VexfsError> for SearchError {
+    fn from(error: VexfsError) -> Self {
+        match error {
+            VexfsError::SearchError(SearchErrorKind::InvalidQuery) => SearchError::InvalidQuery,
+            VexfsError::SearchError(SearchErrorKind::NoResults) => SearchError::ResultProcessingError,
+            VexfsError::OutOfMemory => SearchError::AllocationError,
+            _ => SearchError::StorageError,
+        }
+    }
+}
+
+impl From<SearchError> for VexfsError {
+    fn from(error: SearchError) -> Self {
+        match error {
+            SearchError::InvalidQuery => VexfsError::SearchError(SearchErrorKind::InvalidQuery),
+            SearchError::StorageError => VexfsError::SearchError(SearchErrorKind::InvalidQuery),
+            SearchError::IndexNotAvailable => VexfsError::SearchError(SearchErrorKind::InvalidQuery),
+            SearchError::ResultProcessingError => VexfsError::SearchError(SearchErrorKind::NoResults),
+            SearchError::AllocationError => VexfsError::OutOfMemory,
+            SearchError::InvalidBatchSize => VexfsError::SearchError(SearchErrorKind::InvalidQuery),
+            _ => VexfsError::SearchError(SearchErrorKind::InvalidQuery),
+        }
     }
 }
 
@@ -194,8 +219,8 @@ pub struct VectorSearchEngine {
 }
 
 impl VectorSearchEngine {
-    /// Create new vector search engine
-    pub fn new(storage: Box<dyn VectorStorage<Error = String>>, options: SearchOptions) -> Result<Self, SearchError> {
+    /// Create new vector search engine with fs_core integration
+    pub fn new(storage: Box<VectorStorageManager>, options: SearchOptions) -> Result<Self, SearchError> {
         let knn_engine = KnnSearchEngine::new(storage)?;
         let scoring_params = options.scoring_params.clone().unwrap_or_default();
         let result_scorer = ResultScorer::new(scoring_params);
