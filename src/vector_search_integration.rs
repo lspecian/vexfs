@@ -13,7 +13,7 @@ use crate::shared::errors::{VexfsError, VexfsResult, SearchErrorKind};
 use crate::fs_core::operations::OperationContext;
 use crate::storage::StorageManager;
 use crate::vector_search::{VectorSearchEngine, SearchQuery, SearchOptions, BatchSearchRequest, SearchError};
-use crate::vector_metrics::{VectorMetrics, MetricsError, MetricsConfig};
+use crate::vector_metrics::{VectorMetrics, MetricsError};
 use crate::knn_search::{KnnSearchEngine, SearchParams, MetadataFilter};
 use crate::result_scoring::{ScoredResult, ResultScorer, ScoringParams};
 use crate::vector_storage::{VectorStorageManager, VectorHeader};
@@ -279,12 +279,11 @@ pub struct VectorMetadataC {
 impl VectorSearchSubsystem {
     /// Create new vector search subsystem with comprehensive OperationContext integration
     pub fn new(storage_manager: Arc<StorageManager>) -> VexfsResult<Self> {
-        let vector_storage = VectorStorageManager::new(storage_manager.clone())?;
+        let vector_storage = VectorStorageManager::new(storage_manager.clone(), 4096, 1000000); // 4KB blocks, 1M blocks
         let options = SearchOptions::default();
         let search_engine = VectorSearchEngine::new(Box::new(vector_storage), options)
             .map_err(|e| VexfsError::SearchError(SearchErrorKind::InvalidQuery))?;
-        let metrics_config = MetricsConfig::default();
-        let metrics = VectorMetrics::new(metrics_config);
+        let metrics = VectorMetrics::new(true); // Enable SIMD optimizations
         
         Ok(Self {
             search_engine,
@@ -451,7 +450,7 @@ impl VectorSearchSubsystem {
         let metric = match request.metric {
             0 => DistanceMetric::Euclidean,
             1 => DistanceMetric::Cosine,
-            2 => DistanceMetric::InnerProduct,
+            2 => DistanceMetric::Dot,
             _ => return Err(VexfsError::InvalidArgument("Invalid distance metric".to_string())),
         };
         
@@ -586,22 +585,31 @@ impl VectorSearchSubsystem {
         };
         
         Ok(Some(MetadataFilter {
-            file_size_range: if filter.file_size_max > filter.file_size_min {
-                Some((filter.file_size_min, filter.file_size_max))
+            min_file_size: if filter.file_size_min > 0 {
+                Some(filter.file_size_min)
             } else {
                 None
             },
-            timestamp_range: if filter.timestamp_max > filter.timestamp_min {
-                Some((filter.timestamp_min, filter.timestamp_max))
+            max_file_size: if filter.file_size_max > filter.file_size_min {
+                Some(filter.file_size_max)
             } else {
                 None
             },
-            data_type_mask: if filter.data_type_mask != 0 {
-                Some(filter.data_type_mask)
+            min_created_timestamp: if filter.timestamp_min > 0 {
+                Some(filter.timestamp_min)
             } else {
                 None
             },
-            file_extension: extension,
+            max_created_timestamp: if filter.timestamp_max > filter.timestamp_min {
+                Some(filter.timestamp_max)
+            } else {
+                None
+            },
+            min_modified_timestamp: None,
+            max_modified_timestamp: None,
+            required_dimensions: None,
+            required_data_type: None,
+            max_distance: None,
         }))
     }
     

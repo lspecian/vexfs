@@ -16,6 +16,8 @@ use crate::knn_search::{KnnSearchEngine, KnnResult, SearchParams, MetadataFilter
 use crate::result_scoring::{ResultScorer, ScoringParams, ScoredResult, ScoringError};
 use crate::fs_core::operations::OperationContext;
 use crate::shared::errors::{VexfsError, SearchErrorKind};
+use crate::search_cache::{SearchResultCache, CacheConfig, CacheKey, CacheStatistics};
+use crate::query_planner::{QueryCharacteristics, IndexRecommendation};
 
 /// Maximum number of results that can be returned from a search
 pub const MAX_SEARCH_RESULTS: usize = 10000;
@@ -284,6 +286,8 @@ pub struct VectorSearchEngine {
     operation_counter: u64,
     /// Resource usage tracking
     resource_tracker: ResourceTracker,
+    /// Search result cache
+    cache: Option<SearchResultCache>,
 }
 
 impl VectorSearchEngine {
@@ -295,6 +299,14 @@ impl VectorSearchEngine {
         let scoring_params = options.scoring_params.clone().unwrap_or_default();
         let result_scorer = ResultScorer::new(scoring_params);
         
+        // Initialize cache if enabled
+        let cache = if options.enable_caching {
+            let cache_config = CacheConfig::default();
+            Some(SearchResultCache::new(cache_config))
+        } else {
+            None
+        };
+        
         Ok(Self {
             knn_engine,
             result_scorer,
@@ -303,6 +315,7 @@ impl VectorSearchEngine {
             active_operations: BTreeMap::new(),
             operation_counter: 0,
             resource_tracker: ResourceTracker::default(),
+            cache,
         })
     }
     
@@ -322,6 +335,17 @@ impl VectorSearchEngine {
         if query.vector.is_empty() || query.k == 0 || query.k > MAX_SEARCH_RESULTS {
             self.fail_search_operation(operation_id, "Invalid query parameters".to_string())?;
             return Err(SearchError::InvalidQuery);
+        }
+        
+        // Check cache first if enabled
+        if let Some(ref mut cache) = self.cache {
+            let cache_key = crate::search_cache::CacheKey::from_query(&query);
+            if let Ok(Some(cached_results)) = cache.lookup(context, &cache_key) {
+                // Cache hit - complete operation and return cached results
+                let end_time = self.get_current_time_us();
+                self.complete_search_operation(operation_id, end_time - start_time, 0)?;
+                return Ok(cached_results);
+            }
         }
         
         // Estimate and track resource usage
@@ -387,6 +411,84 @@ impl VectorSearchEngine {
         } else {
             results
         };
+        
+        // Cache results if cache is enabled
+        if let Some(cache) = &mut self.cache {
+            let cache_key = crate::search_cache::CacheKey::from_query(&query);
+            
+            // Create query characteristics for cache decision
+            let sparsity = {
+                let zero_count = query.vector.iter().filter(|&&x| x == 0.0).count();
+                zero_count as f32 / query.vector.len() as f32
+            };
+            let magnitude = query.vector.iter().map(|&x| x * x).sum::<f32>().sqrt();
+            let entropy = {
+                // Simplified entropy calculation
+                let mut histogram = [0u32; 10];
+                let max_val = query.vector.iter().fold(0.0f32, |a, &b| a.max(b.abs()));
+                if max_val > 0.0 {
+                    for &val in &query.vector {
+                        let normalized = (val.abs() / max_val * 9.0) as usize;
+                        let bin = normalized.min(9);
+                        histogram[bin] += 1;
+                    }
+                    let total = query.vector.len() as f32;
+                    let mut entropy = 0.0;
+                    for &count in &histogram {
+                        if count > 0 {
+                            let p = count as f32 / total;
+                            entropy -= p * p.log2();
+                        }
+                    }
+                    entropy
+                } else {
+                    0.0
+                }
+            };
+            let complexity = {
+                let dimension_factor = if query.vector.len() > 512 { 2.0 } else if query.vector.len() > 128 { 1.5 } else { 1.0 };
+                let k_factor = if query.k > 100 { 2.0 } else if query.k > 50 { 1.5 } else { 1.0 };
+                let filter_factor = if query.filter.is_some() { 1.5 } else { 1.0 };
+                let approx_factor = if query.approximate { 0.8 } else { 1.2 };
+                let complexity_score = dimension_factor * k_factor * filter_factor * approx_factor;
+                
+                if complexity_score >= 4.0 {
+                    crate::query_planner::QueryComplexity::HighlyComplex
+                } else if complexity_score >= 2.5 {
+                    crate::query_planner::QueryComplexity::Complex
+                } else if complexity_score >= 1.5 {
+                    crate::query_planner::QueryComplexity::Moderate
+                } else {
+                    crate::query_planner::QueryComplexity::Simple
+                }
+            };
+            
+            let query_characteristics = crate::query_planner::QueryCharacteristics {
+                dimensions: query.vector.len(),
+                sparsity,
+                magnitude,
+                entropy,
+                k: query.k,
+                metric: query.metric,
+                has_filters: query.filter.is_some(),
+                filter_selectivity: 1.0, // Default selectivity
+                complexity,
+                approximate_acceptable: query.approximate,
+            };
+            
+            // Create index recommendation for cache
+            let index_recommendation = crate::query_planner::IndexRecommendation {
+                primary_strategy: crate::anns::IndexStrategy::HNSW,
+                fallback_strategy: None,
+                confidence: 0.8,
+                expected_speedup: 2.0,
+                memory_estimate: estimated_memory,
+                reasoning: "Vector search result".to_string(),
+            };
+            
+            // Insert into cache (ignore errors to not affect search performance)
+            let _ = cache.insert(context, cache_key, final_results.clone(), query_characteristics, index_recommendation);
+        }
         
         // Complete operation successfully
         self.complete_search_operation(operation_id, operation_time, estimated_memory)?;
@@ -676,6 +778,66 @@ impl VectorSearchEngine {
         }
         
         count
+    }
+    
+    
+    /// Calculate vector sparsity (ratio of zero elements)
+    fn calculate_sparsity(&self, vector: &[f32]) -> f32 {
+        let zero_count = vector.iter().filter(|&&x| x == 0.0).count();
+        zero_count as f32 / vector.len() as f32
+    }
+    
+    /// Calculate vector magnitude (L2 norm)
+    fn calculate_magnitude(&self, vector: &[f32]) -> f32 {
+        vector.iter().map(|&x| x * x).sum::<f32>().sqrt()
+    }
+    
+    /// Calculate vector entropy (simplified measure of randomness)
+    fn calculate_entropy(&self, vector: &[f32]) -> f32 {
+        // Simplified entropy calculation based on value distribution
+        let mut histogram = [0u32; 10]; // 10 bins for simplicity
+        let max_val = vector.iter().fold(0.0f32, |a, &b| a.max(b.abs()));
+        
+        if max_val == 0.0 {
+            return 0.0;
+        }
+        
+        for &val in vector {
+            let normalized = (val.abs() / max_val * 9.0) as usize;
+            let bin = normalized.min(9);
+            histogram[bin] += 1;
+        }
+        
+        let total = vector.len() as f32;
+        let mut entropy = 0.0;
+        for &count in &histogram {
+            if count > 0 {
+                let p = count as f32 / total;
+                entropy -= p * p.log2();
+            }
+        }
+        
+        entropy
+    }
+    
+    /// Determine query complexity based on characteristics
+    fn determine_query_complexity(&self, query: &SearchQuery) -> crate::query_planner::QueryComplexity {
+        let dimension_factor = if query.vector.len() > 512 { 2.0 } else if query.vector.len() > 128 { 1.5 } else { 1.0 };
+        let k_factor = if query.k > 100 { 2.0 } else if query.k > 50 { 1.5 } else { 1.0 };
+        let filter_factor = if query.filter.is_some() { 1.5 } else { 1.0 };
+        let approx_factor = if query.approximate { 0.8 } else { 1.2 };
+        
+        let complexity_score = dimension_factor * k_factor * filter_factor * approx_factor;
+        
+        if complexity_score >= 4.0 {
+            crate::query_planner::QueryComplexity::HighlyComplex
+        } else if complexity_score >= 2.5 {
+            crate::query_planner::QueryComplexity::Complex
+        } else if complexity_score >= 1.5 {
+            crate::query_planner::QueryComplexity::Moderate
+        } else {
+            crate::query_planner::QueryComplexity::Simple
+        }
     }
 }
 

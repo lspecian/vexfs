@@ -51,7 +51,7 @@ pub enum AllocHint {
 }
 
 /// Vector data types supported
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum VectorDataType {
     Float32 = 0,
