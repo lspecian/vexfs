@@ -96,6 +96,23 @@ cd ../test_env
 ./run_qemu.sh
 ```
 
+## 🐳 Docker-Based Development Environment
+
+For a consistent and reproducible development environment, VexFS supports Docker. This allows you to build, test, and run VexFS components in a containerized setup, especially useful for userspace development and testing.
+
+For detailed instructions on how to build the Docker image, run containers, manage data volumes, and other specific considerations, please refer to the Docker development guide:
+
+➡️ **[Docker Development and Testing Guide](docs/testing/DOCKER.md)**
+
+This Docker environment is particularly helpful for:
+- Isolating dependencies.
+- Ensuring consistent build and test results across different machines.
+- Streamlining the userspace development part of our [Two-Tier Development Strategy](#-testing-strategy).
+
+For kernel module development and testing, the VM-based approach detailed in the `test_env/` directory remains the recommended method.
+
+---
+
 ## 🏗 **Architecture**
 
 VexFS implements a layered architecture optimized for both traditional file I/O and vector operations:
