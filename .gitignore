@@ -53,3 +53,17 @@ scripts/
 # Large VM images
 test_env/vm/images/*.qcow2
 test_env/vm/images/*.img
+
+# Docker related
+**/docker-build.log
+**/docker-run.log
+.dockerignore
+Dockerfile.local
+docker-compose.local.yml
+.env.docker
+# If build artifacts are consistently produced outside Docker's build context
+# or if specific local Docker configurations generate them:
+# target-docker/
+
+# Named volume data (usually managed by Docker, but good to ignore if mapped to local dir accidentally)
+vexfs_data/
