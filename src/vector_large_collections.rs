@@ -17,9 +17,11 @@ use crate::vector_storage::{
 use crate::vector_optimizations::{VectorOptimizer, BatchConfig, SimdStrategy, MemoryLayout};
 
 #[cfg(not(feature = "kernel"))]
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 #[cfg(feature = "kernel")]
 use alloc::sync::Arc;
+#[cfg(feature = "kernel")]
+use spin::Mutex;
 
 #[cfg(not(feature = "std"))]
 use alloc::{vec::Vec, string::String, collections::BTreeMap as StdBTreeMap};
@@ -153,7 +155,7 @@ pub struct CollectionPerformanceMetrics {
 /// Large collection optimization manager
 pub struct LargeCollectionOptimizer {
     /// Base vector storage manager
-    vector_storage: VectorStorageManager,
+    vector_storage: Arc<Mutex<VectorStorageManager>>,
     /// Vector optimizer for SIMD and batch operations
     vector_optimizer: VectorOptimizer,
     /// Collection metadata cache
@@ -168,7 +170,7 @@ pub struct LargeCollectionOptimizer {
 
 impl LargeCollectionOptimizer {
     /// Create new large collection optimizer
-    pub fn new(vector_storage: VectorStorageManager) -> Self {
+    pub fn new(vector_storage: Arc<Mutex<VectorStorageManager>>) -> Self {
         // Configure optimizer for large collections
         let batch_config = BatchConfig {
             batch_size: LARGE_COLLECTION_BATCH_SIZE,
@@ -359,7 +361,7 @@ impl LargeCollectionOptimizer {
         // Use existing vector storage with individual compression
         for vector_data in vectors {
             let compression = VectorCompressionStrategy::select_optimal(vector_data, data_type, dimensions);
-            let vector_id = self.vector_storage.store_vector(
+            let vector_id = self.vector_storage.lock().unwrap().store_vector(
                 context,
                 vector_data,
                 file_inode,
@@ -391,7 +393,7 @@ impl LargeCollectionOptimizer {
             for &vector_idx in &cluster.vector_ids {
                 if vector_idx < vectors.len() as u64 {
                     let vector_data = &vectors[vector_idx as usize];
-                    let vector_id = self.vector_storage.store_vector(
+                    let vector_id = self.vector_storage.lock().unwrap().store_vector(
                         context,
                         vector_data,
                         file_inode,
@@ -428,7 +430,7 @@ impl LargeCollectionOptimizer {
                 let compressed_batch = self.apply_cross_vector_compression(tier1_chunk, data_type)?;
                 
                 for compressed_data in compressed_batch.iter() {
-                    let vector_id = self.vector_storage.store_vector(
+                    let vector_id = self.vector_storage.lock().unwrap().store_vector(
                         context,
                         compressed_data,
                         file_inode,
@@ -460,7 +462,7 @@ impl LargeCollectionOptimizer {
         for chunk in vectors.chunks(batch_size) {
             // Apply aggressive compression for streaming
             for vector_data in chunk {
-                let vector_id = self.vector_storage.store_vector(
+                let vector_id = self.vector_storage.lock().unwrap().store_vector(
                     context,
                     vector_data,
                     file_inode,
@@ -669,7 +671,7 @@ impl LargeCollectionOptimizer {
         }
         
         // Get vectors for this collection
-        let vector_ids = self.vector_storage.get_file_vectors(context, file_inode)?;
+        let vector_ids = self.vector_storage.lock().unwrap().get_file_vectors(context, file_inode)?;
         
         // Simulate compaction (in production would actually move vectors)
         let vectors_moved = (vector_ids.len() as f32 * metadata.fragmentation_level) as usize;
@@ -713,7 +715,7 @@ mod tests {
         // Create a mock vector storage manager for testing
         // In a real test, we would use a proper mock
         let storage_manager = Arc::new(unsafe { std::mem::zeroed() });
-        let vector_storage = Arc::new(VectorStorageManager::new(storage_manager, 4096, 1000));
+        let vector_storage = Arc::new(Mutex::new(VectorStorageManager::new(storage_manager, 4096, 1000)));
         let optimizer = LargeCollectionOptimizer::new(vector_storage);
         
         assert_eq!(optimizer.select_optimal_layout(500), CollectionLayout::Standard);

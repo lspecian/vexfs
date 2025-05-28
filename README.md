@@ -1,7 +1,7 @@
 # VexFS: Vector-Native File System
 
 [![Rust](https://img.shields.io/badge/rust-stable-brightgreen.svg)](https://www.rust-lang.org)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20GPL--2.0-blue.svg)](LICENSE)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/lspecian/vexfs)
 
 **VexFS** is a revolutionary Linux kernel module that implements a POSIX-compliant file system with native vector search capabilities. By integrating vector embeddings directly into the file system layer, VexFS eliminates the impedance mismatch between traditional file storage and vector databases, providing unprecedented performance for AI/ML applications.
@@ -203,7 +203,21 @@ cargo run --bin vector_test_runner
 
 ## 📝 **License**
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is dual-licensed under:
+
+- **Apache License 2.0** for userspace components (CLI, userland libraries)
+- **GNU General Public License v2.0** for kernel module components
+
+### License Details
+
+- **Userspace Components**: Licensed under the [Apache License 2.0](LICENSE)
+- **Kernel Module**: Licensed under the [GNU General Public License v2.0](LICENSE.kernel)
+
+The userspace components (CLI tools, userland libraries, and testing infrastructure) are licensed under the Apache License 2.0 to provide maximum flexibility for integration and distribution. The kernel module components are licensed under GPL-2.0 to ensure compatibility with the Linux kernel licensing requirements.
+
+See the respective license files for full terms and conditions:
+- [LICENSE](LICENSE) - Apache 2.0 license text with dual license notice
+- [LICENSE.kernel](LICENSE.kernel) - GPL-2.0 license text for kernel components
 
 ## 🙏 **Acknowledgments**
 
