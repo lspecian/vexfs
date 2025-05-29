@@ -29,10 +29,19 @@ node_modules/
 
 # Rust build artifacts
 target/
+vexctl/target/
 *.rlib
 size_check
 size_test*
 vector_storage_test
+
+# Python virtual environments
+workbench/workbench_env/
+test_env/bin/
+test_env/lib/
+test_env/pyvenv.cfg
+*.pyc
+__pycache__/
 
 # OS specific
 .DS_Store
@@ -67,3 +76,27 @@ docker-compose.local.yml
 
 # Named volume data (usually managed by Docker, but good to ignore if mapped to local dir accidentally)
 vexfs_data/
+
+# Kernel module build artifacts
+*.ko
+*.o
+*.mod
+*.mod.c
+.*.cmd
+.tmp_versions/
+Module.symvers
+modules.order
+libvexfs.a
+vexfs_rust_combined.o
+vexfs_rust_combined_raw.o
+.rust_extract/
+
+# Kernel module backups
+kernel/vexfs_module_entry.c.backup
+
+# Test artifacts
+/tmp/vexfs_*
+/tmp/mkfs_vexfs_*
+*.img
+*.qcow2
+test_env/vm/
