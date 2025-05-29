@@ -20,5 +20,8 @@
   },
   "dependencies": {
     "node-fetch": "^3.0.0"
+  },
+  "peerDependencies": {
+    "@types/node": ">=16.0.0"
   }
 }
