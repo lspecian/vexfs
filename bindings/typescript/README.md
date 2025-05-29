@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../LICENSE)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/lspecian/vexfs)
 
-**VexFS TypeScript SDK** provides a modern, type-safe client library for VexFS, the world's first production-ready vector-extended filesystem. This SDK interfaces with the mounted VexFS filesystem through file operations and the `vexctl` command-line tool.
+**VexFS TypeScript SDK** provides a modern, type-safe client library for VexFS, an advanced vector-extended filesystem. This SDK interfaces with the mounted VexFS filesystem through file operations and the `vexctl` command-line tool.
 
 ## 🚀 **Why VexFS TypeScript SDK?**
 
@@ -16,7 +16,7 @@
 - **🔄 Async/Await**: Modern Promise-based API with full async support
 - **🛡️ Type Safety**: Compile-time error checking and runtime validation
 - **📦 Minimal Dependencies**: Lightweight with filesystem-focused design
-- **🧪 Production Tested**: Comprehensive test suite with 100% TypeScript coverage
+- **🧪 Comprehensively Tested**: Extensive test suite with 100% TypeScript coverage
 
 ## 📦 **Installation**
 

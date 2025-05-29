@@ -2,7 +2,9 @@
 
 # Enhanced QEMU run script for VexFS development
 
-VM_DIR="test_env/vm"
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VM_DIR="$SCRIPT_DIR/vm"
 VM_NAME="vexfs-dev"
 VM_IMAGE="$VM_DIR/images/$VM_NAME.qcow2"
 CLOUD_INIT_ISO="$VM_DIR/config/cloud-init.iso"
@@ -24,7 +26,7 @@ fi
 echo "🚀 Starting VexFS development VM..."
 echo "📁 VM Image: $VM_IMAGE"
 echo "☁️  Cloud-init: $CLOUD_INIT_ISO"
-echo "🌐 SSH: ssh -p 2222 -i test_env/vm/keys/vexfs_vm_key vexfs@localhost"
+echo "🌐 SSH: ssh -p 2222 -i $VM_DIR/keys/vexfs_vm_key vexfs@localhost"
 echo "🖥️  VNC: localhost:5900 (if needed)"
 echo ""
 
@@ -37,7 +39,7 @@ exec qemu-system-x86_64 \
   -drive file="$CLOUD_INIT_ISO",format=raw,if=virtio,readonly=on \
   -netdev user,id=net0,hostfwd=tcp::2222-:22 \
   -device virtio-net,netdev=net0 \
-  -virtfs local,path="$(pwd)",mount_tag=vexfs_source,security_model=passthrough,id=vexfs_source \
+  -virtfs local,path="$(dirname "$SCRIPT_DIR")",mount_tag=vexfs_source,security_model=passthrough,id=vexfs_source \
   -display none \
   -vnc :0 \
   -enable-kvm \

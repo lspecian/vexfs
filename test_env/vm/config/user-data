@@ -6,32 +6,21 @@ users:
     ssh_authorized_keys:
       - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFUefWT5WcN45B0Sin78RWnGi9ngRAT0yCNsJ3KRvIxl vexfs-vm-key
 
-package_update: true
-package_upgrade: true
+# Skip package updates for faster boot
+package_update: false
+package_upgrade: false
 
 packages:
   - build-essential
   - linux-headers-generic
-  - curl
-  - git
-  - vim
-  - htop
 
 runcmd:
-  # Install Rust
-  - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sudo -u vexfs sh -s -- -y
-  - sudo -u vexfs /home/vexfs/.cargo/bin/rustup target add x86_64-unknown-linux-gnu
-  
-  # Mount VexFS source
+  # Mount VexFS source quickly
   - mkdir -p /mnt/vexfs_source
   - echo "vexfs_source /mnt/vexfs_source 9p trans=virtio,version=9p2000.L,posix,rw 0 0" >> /etc/fstab
   - mount -a
   
   # Create build directory symlink
   - sudo -u vexfs ln -sf /mnt/vexfs_source /home/vexfs/vexfs_build
-  
-  # Set up environment
-  - echo 'source ~/.cargo/env' >> /home/vexfs/.bashrc
-  - echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> /home/vexfs/.bashrc
 
 final_message: "VexFS development VM is ready! Connect via SSH on port 2222"
