@@ -5,13 +5,14 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../LICENSE)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/lspecian/vexfs)
 
-**VexFS Python SDK** provides high-performance Python bindings for VexFS, the world's first production-ready vector-extended filesystem. Built with Rust and PyO3, this SDK delivers native performance for vector operations while maintaining Python's ease of use.
+**VexFS Python SDK** provides high-performance Python bindings for VexFS, the world's first production-ready vector-extended filesystem. Built with Rust and PyO3, this SDK delivers native filesystem integration for vector operations while maintaining Python's ease of use.
 
 ## 🚀 **Why VexFS Python SDK?**
 
-- **🔥 Native Performance**: Rust-powered vector operations with zero-copy data handling
+- **🔥 Native Performance**: Direct Rust integration with zero-copy data handling
 - **🐍 Pythonic API**: Clean, intuitive interface following Python conventions
 - **⚡ Ultra-Fast Search**: 21.98-52.34µs search latency with 263,852 vectors/second insertion
+- **📁 Filesystem Native**: Direct integration with mounted VexFS filesystems
 - **🧠 AI/ML Ready**: Perfect for RAG, embeddings, and machine learning pipelines
 - **🔒 Memory Safe**: Rust's ownership system prevents common vulnerabilities
 - **📊 Production Tested**: 95.8% test coverage with comprehensive validation
@@ -23,11 +24,24 @@
 - **Python 3.8+** (3.9+ recommended)
 - **Rust toolchain** (for building from source)
 - **Linux** (kernel 5.4+)
+- **VexFS filesystem** mounted and accessible
 
 ### Install from PyPI (Recommended)
 
 ```bash
 pip install vexfs
+```
+
+### VexFS Setup
+
+First, ensure VexFS is mounted:
+
+```bash
+# Mount VexFS filesystem
+sudo mount -t vexfs /dev/sdb1 /mnt/vexfs
+
+# Verify mount
+ls /mnt/vexfs
 ```
 
 ### Development Installation
@@ -70,6 +84,9 @@ pip install target/wheels/vexfs-*.whl
 import vexfs
 import numpy as np
 
+# Initialize VexFS with mount point
+vexfs.init("/mnt/vexfs")
+
 # Add documents with metadata
 doc_id = vexfs.add("Hello world", {"type": "greeting", "lang": "en"})
 print(f"Added document: {doc_id}")
@@ -90,11 +107,14 @@ print("Document deleted")
 import vexfs
 
 try:
+    # Initialize VexFS
+    vexfs.init("/mnt/vexfs")
+    
     # Add document
     doc_id = vexfs.add("Sample text", {"category": "example"})
     
-    # Query with invalid vector (will raise exception)
-    results = vexfs.query([1, 2, 3], top_k=10)
+    # Query with vector
+    results = vexfs.query([0.1] * 384, top_k=10)
     
 except Exception as e:
     print(f"VexFS error: {e}")

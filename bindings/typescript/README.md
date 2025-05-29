@@ -6,16 +6,16 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../LICENSE)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/lspecian/vexfs)
 
-**VexFS TypeScript SDK** provides a modern, type-safe client library for VexFS, the world's first production-ready vector-extended filesystem. Built for Node.js and TypeScript applications, this SDK offers seamless integration with web services, APIs, and modern JavaScript frameworks.
+**VexFS TypeScript SDK** provides a modern, type-safe client library for VexFS, the world's first production-ready vector-extended filesystem. This SDK interfaces with the mounted VexFS filesystem through file operations and the `vexctl` command-line tool.
 
 ## 🚀 **Why VexFS TypeScript SDK?**
 
 - **🔷 Full TypeScript Support**: Complete type definitions with IntelliSense support
-- **⚡ High Performance**: Direct integration with VexFS's ultra-fast vector operations
-- **🌐 REST API Ready**: Built for web services and microservices architectures
+- **⚡ High Performance**: Direct filesystem integration with VexFS's ultra-fast vector operations
+- **📁 Filesystem Native**: Works with mounted VexFS filesystems, not web APIs
 - **🔄 Async/Await**: Modern Promise-based API with full async support
 - **🛡️ Type Safety**: Compile-time error checking and runtime validation
-- **📦 Zero Dependencies**: Lightweight with minimal external dependencies
+- **📦 Minimal Dependencies**: Lightweight with filesystem-focused design
 - **🧪 Production Tested**: Comprehensive test suite with 100% TypeScript coverage
 
 ## 📦 **Installation**
@@ -24,7 +24,8 @@
 
 - **Node.js 16+** (18+ recommended)
 - **TypeScript 5.0+** (for TypeScript projects)
-- **VexFS Server** running and accessible
+- **VexFS Filesystem** mounted and accessible
+- **vexctl** command-line tool installed
 
 ### Install via npm
 
@@ -42,6 +43,18 @@ yarn add vexfs-sdk
 
 ```bash
 pnpm add vexfs-sdk
+```
+
+### VexFS Setup
+
+First, ensure VexFS is mounted:
+
+```bash
+# Mount VexFS filesystem
+sudo mount -t vexfs /dev/sdb1 /mnt/vexfs
+
+# Verify mount
+ls /mnt/vexfs
 ```
 
 ### TypeScript Configuration
@@ -72,10 +85,10 @@ Ensure your `tsconfig.json` includes:
 import VexFSClient from 'vexfs-sdk';
 
 async function main() {
-  // Initialize client
+  // Initialize client with VexFS mount point
   const client = new VexFSClient({
-    baseUrl: 'http://localhost:8080',
-    timeout: 30000
+    mountPoint: '/mnt/vexfs',
+    vexctlPath: '/usr/local/bin/vexctl'
   });
 
   try {
@@ -109,8 +122,8 @@ main().catch(console.error);
 import { VexFSClient, VexFSConfig, VexFSResult } from 'vexfs-sdk';
 
 const config: VexFSConfig = {
-  baseUrl: 'https://api.example.com/vexfs',
-  timeout: 60000
+  mountPoint: '/mnt/vexfs',
+  vexctlPath: '/usr/local/bin/vexctl'
 };
 
 const client = new VexFSClient(config);
@@ -122,7 +135,7 @@ const client = new VexFSClient(config);
 const VexFSClient = require('vexfs-sdk');
 
 const client = new VexFSClient({
-  baseUrl: 'http://localhost:8080'
+  mountPoint: '/mnt/vexfs'
 });
 ```
 
@@ -147,11 +160,11 @@ Configuration options for the VexFS client.
 
 ```typescript
 interface VexFSConfig {
-  baseUrl?: string;    // Default: 'http://localhost:8080'
-  timeout?: number;    // Default: 30000 (30 seconds)
-  apiKey?: string;     // Optional API key for authentication
-  retries?: number;    // Default: 3
-  retryDelay?: number; // Default: 1000ms
+  mountPoint?: string;   // Default: '/mnt/vexfs'
+  vexctlPath?: string;   // Default: 'vexctl' (assumes in PATH)
+  timeout?: number;      // Default: 30000 (30 seconds)
+  retries?: number;      // Default: 3
+  retryDelay?: number;   // Default: 1000ms
 }
 ```
 
