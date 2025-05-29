@@ -1,0 +1,53 @@
+[Unit]
+Description=VexFS - Vector Extended File System Server
+Documentation=https://github.com/vexfs/vexfs
+After=network.target
+Wants=network.target
+
+[Service]
+Type=exec
+User=vexfs
+Group=vexfs
+ExecStart=/usr/bin/vexfs_server
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/vexfs /var/log/vexfs /run/vexfs
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictNamespaces=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Environment
+Environment=RUST_LOG=info
+Environment=RUST_BACKTRACE=1
+EnvironmentFile=-/etc/vexfs/vexfs.conf
+
+# Working directory
+WorkingDirectory=/var/lib/vexfs
+
+# Standard streams
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vexfs
+
+[Install]
+WantedBy=multi-user.target

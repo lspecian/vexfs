@@ -1,0 +1,270 @@
+# Default values for VexFS Helm chart
+# This is a YAML-formatted file.
+
+# Global configuration
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  storageClass: ""
+
+# VexFS Server configuration
+vexfs:
+  # Image configuration
+  image:
+    registry: ghcr.io
+    repository: vexfs/vexfs
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+    pullSecrets: []
+
+  # Replica configuration
+  replicaCount: 3
+  
+  # Update strategy
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+
+  # Pod configuration
+  podAnnotations: {}
+  podLabels: {}
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    fsGroup: 65534
+    seccompProfile:
+      type: RuntimeDefault
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - NET_BIND_SERVICE
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 65534
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 8000
+    targetPort: 8000
+    annotations: {}
+
+  # Ingress configuration
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/rewrite-target: /
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    hosts:
+      - host: vexfs.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: vexfs-tls
+        hosts:
+          - vexfs.example.com
+
+  # Resource configuration
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+
+  # Horizontal Pod Autoscaler
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+  # Node selection
+  nodeSelector: {}
+  tolerations: []
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                    - vexfs
+            topologyKey: kubernetes.io/hostname
+
+  # Liveness and readiness probes
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: http
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /ready
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  # Environment variables
+  env:
+    RUST_LOG: "info"
+    RUST_BACKTRACE: "1"
+    VEXFS_DATA_DIR: "/data"
+    VEXFS_LOG_LEVEL: "info"
+    VEXFS_METRICS_ENABLED: "true"
+    VEXFS_HEALTH_CHECK_ENABLED: "true"
+    VEXFS_MAX_CONNECTIONS: "1000"
+    VEXFS_REQUEST_TIMEOUT: "30s"
+    VEXFS_RATE_LIMIT_REQUESTS: "100"
+    VEXFS_RATE_LIMIT_WINDOW: "60s"
+    VEXFS_TLS_ENABLED: "false"
+    VEXFS_CORS_ENABLED: "true"
+
+  # Additional environment variables from secrets/configmaps
+  envFrom: []
+
+# Persistence configuration
+persistence:
+  enabled: true
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 10Gi
+  annotations: {}
+
+# ConfigMap configuration
+configMap:
+  enabled: true
+  data: {}
+
+# Secret configuration
+secret:
+  enabled: true
+  data: {}
+
+# Service Account
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# RBAC configuration
+rbac:
+  create: true
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# Network Policy
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8000
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9090
+  egress:
+    - to: []
+      ports:
+        - protocol: TCP
+          port: 53
+        - protocol: UDP
+          port: 53
+    - to: []
+      ports:
+        - protocol: TCP
+          port: 443
+
+# Monitoring configuration
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+    annotations: {}
+
+# Prometheus configuration (if enabled as dependency)
+prometheus:
+  enabled: false
+  server:
+    persistentVolume:
+      enabled: true
+      size: 20Gi
+    retention: "15d"
+
+# Grafana configuration (if enabled as dependency)
+grafana:
+  enabled: false
+  persistence:
+    enabled: true
+    size: 5Gi
+  adminPassword: "admin"
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: 'vexfs'
+          orgId: 1
+          folder: 'VexFS'
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/vexfs
+  dashboards:
+    vexfs:
+      vexfs-overview:
+        gnetId: 1860
+        revision: 27
+        datasource: Prometheus
+
+# Backup configuration
+backup:
+  enabled: false
+  schedule: "0 2 * * *"
+  retention: "7d"
+  storageClass: ""
+  size: 50Gi
+
+# Security scanning
+security:
+  podSecurityPolicy:
+    enabled: false
+  networkPolicy:
+    enabled: true

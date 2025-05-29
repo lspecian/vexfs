@@ -1,0 +1,115 @@
+site_name: VexFS v1.0 Documentation
+site_description: Complete documentation for VexFS - The world's first production-ready vector-extended filesystem
+site_author: VexFS Team
+site_url: https://vexfs.github.io/
+
+repo_name: lspecian/vexfs
+repo_url: https://github.com/lspecian/vexfs
+edit_uri: edit/main/docs/user-guide/docs/
+
+theme:
+  name: material
+  palette:
+    # Palette toggle for light mode
+    - scheme: default
+      primary: blue
+      accent: cyan
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Palette toggle for dark mode
+    - scheme: slate
+      primary: blue
+      accent: cyan
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.action.edit
+    - content.action.view
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+  - git-revision-date-localized:
+      enable_creation_date: true
+  - minify:
+      minify_html: true
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Quick Start: getting-started/quick-start.md
+    - Installation: getting-started/installation.md
+    - System Requirements: getting-started/requirements.md
+    - First Steps: getting-started/first-steps.md
+  - User Guide:
+    - Basic Operations: user-guide/basic-operations.md
+    - Vector Search: user-guide/vector-search.md
+    - Hybrid Queries: user-guide/hybrid-queries.md
+    - Batch Operations: user-guide/batch-operations.md
+    - Performance Optimization: user-guide/performance.md
+  - SDK Documentation:
+    - Python SDK: sdk/python.md
+    - TypeScript SDK: sdk/typescript.md
+    - REST API: sdk/rest-api.md
+    - CLI Tool (vexctl): sdk/vexctl.md
+  - Examples:
+    - Python Examples: examples/python.md
+    - TypeScript Examples: examples/typescript.md
+    - Real-world Use Cases: examples/use-cases.md
+    - Integration Patterns: examples/integration.md
+  - Deployment:
+    - Production Setup: deployment/production.md
+    - Docker Deployment: deployment/docker.md
+    - Security Configuration: deployment/security.md
+    - Monitoring & Logging: deployment/monitoring.md
+    - Backup & Recovery: deployment/backup.md
+  - Migration:
+    - From ChromaDB: migration/chromadb.md
+    - From Pinecone: migration/pinecone.md
+    - From Milvus: migration/milvus.md
+    - From Weaviate: migration/weaviate.md
+    - From FAISS: migration/faiss.md
+    - Data Format Conversion: migration/data-conversion.md
+  - Troubleshooting:
+    - Common Issues: troubleshooting/common-issues.md
+    - Error Messages: troubleshooting/error-messages.md
+    - Performance Issues: troubleshooting/performance.md
+    - Debugging Guide: troubleshooting/debugging.md
+  - Reference:
+    - Configuration: reference/configuration.md
+    - Performance Metrics: reference/metrics.md
+    - Limitations: reference/limitations.md
+    - Changelog: reference/changelog.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/lspecian/vexfs
+  version:
+    provider: mike

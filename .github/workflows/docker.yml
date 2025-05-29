@@ -1,0 +1,260 @@
+name: Docker Build and Publish
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME_DEV: ${{ github.repository }}
+  IMAGE_NAME_SERVER: ${{ github.repository }}-server
+
+jobs:
+  build-dev-image:
+    name: Build Development Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      if: github.event_name != 'pull_request'
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_DEV }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Docker image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        platforms: linux/amd64,linux/arm64
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        build-args: |
+          USER_ID=1000
+          GROUP_ID=1000
+
+    - name: Output image
+      id: image
+      run: |
+        echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME_DEV }}:${{ steps.meta.outputs.version }}" >> $GITHUB_OUTPUT
+
+  build-server-image:
+    name: Build Server Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      if: github.event_name != 'pull_request'
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_SERVER }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Docker image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile.server
+        platforms: linux/amd64,linux/arm64
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Output image
+      id: image
+      run: |
+        echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME_SERVER }}:${{ steps.meta.outputs.version }}" >> $GITHUB_OUTPUT
+
+  test-images:
+    name: Test Docker Images
+    needs: [build-dev-image, build-server-image]
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    steps:
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Test development image
+      run: |
+        echo "Testing development image: ${{ needs.build-dev-image.outputs.image }}"
+        docker run --rm ${{ needs.build-dev-image.outputs.image }} --version || true
+        docker run --rm ${{ needs.build-dev-image.outputs.image }} help
+
+    - name: Test server image
+      run: |
+        echo "Testing server image: ${{ needs.build-server-image.outputs.image }}"
+        # Start server in background
+        docker run -d --name vexfs-server-test -p 8000:8000 ${{ needs.build-server-image.outputs.image }}
+        
+        # Wait for server to start
+        sleep 10
+        
+        # Test health endpoint
+        curl -f http://localhost:8000/api/v1/version || (docker logs vexfs-server-test && exit 1)
+        
+        # Cleanup
+        docker stop vexfs-server-test
+        docker rm vexfs-server-test
+
+  security-scan:
+    name: Security Scan
+    needs: [build-dev-image, build-server-image]
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    strategy:
+      matrix:
+        image: 
+          - ${{ needs.build-dev-image.outputs.image }}
+          - ${{ needs.build-server-image.outputs.image }}
+    steps:
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ matrix.image }}
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  update-docker-compose:
+    name: Update Docker Compose
+    needs: [build-dev-image, build-server-image, test-images]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Update docker-compose.yml with new image tags
+      run: |
+        # Extract the tag from the image name
+        DEV_TAG=$(echo "${{ needs.build-dev-image.outputs.image }}" | cut -d':' -f2)
+        SERVER_TAG=$(echo "${{ needs.build-server-image.outputs.image }}" | cut -d':' -f2)
+        
+        # Update docker-compose.yml
+        sed -i "s|image: ghcr.io/${{ github.repository }}:.*|image: ghcr.io/${{ github.repository }}:${DEV_TAG}|g" docker-compose.yml
+        sed -i "s|image: ghcr.io/${{ github.repository }}-server:.*|image: ghcr.io/${{ github.repository }}-server:${SERVER_TAG}|g" docker-compose.yml
+
+    - name: Commit updated docker-compose.yml
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+        if git diff --quiet docker-compose.yml; then
+          echo "No changes to docker-compose.yml"
+        else
+          git add docker-compose.yml
+          git commit -m "chore: update docker-compose.yml with latest image tags"
+          git push origin main
+        fi
+
+  cleanup:
+    name: Cleanup Old Images
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+    - name: Delete old container images
+      uses: actions/delete-package-versions@v5
+      with:
+        package-name: ${{ github.event.repository.name }}
+        package-type: 'container'
+        min-versions-to-keep: 10
+        delete-only-untagged-versions: true
+
+    - name: Delete old server container images
+      uses: actions/delete-package-versions@v5
+      with:
+        package-name: ${{ github.event.repository.name }}-server
+        package-type: 'container'
+        min-versions-to-keep: 10
+        delete-only-untagged-versions: true

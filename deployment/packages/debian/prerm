@@ -1,0 +1,27 @@
+#!/bin/bash
+set -e
+
+# VexFS Debian package pre-removal script
+
+case "$1" in
+    remove|upgrade|deconfigure)
+        # Stop the service
+        if systemctl is-active --quiet vexfs.service; then
+            echo "Stopping VexFS service..."
+            systemctl stop vexfs.service || true
+        fi
+        
+        # Disable the service on removal (not upgrade)
+        if [ "$1" = "remove" ]; then
+            systemctl disable vexfs.service || true
+        fi
+        ;;
+    failed-upgrade)
+        ;;
+    *)
+        echo "prerm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

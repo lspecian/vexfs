@@ -1,0 +1,339 @@
+name: Security
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run security checks daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: ${{ runner.os }}-cargo-audit-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Install cargo-audit
+      run: cargo install cargo-audit
+
+    - name: Run security audit
+      run: cargo audit --json > audit-results.json
+
+    - name: Upload audit results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: security-audit-results
+        path: audit-results.json
+
+    - name: Check for vulnerabilities
+      run: |
+        if cargo audit --deny warnings; then
+          echo "✅ No security vulnerabilities found"
+        else
+          echo "❌ Security vulnerabilities detected"
+          exit 1
+        fi
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Dependency Review
+      uses: actions/dependency-review-action@v4
+      with:
+        fail-on-severity: moderate
+        allow-licenses: Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, Unicode-DFS-2016
+
+  cargo-deny:
+    name: Cargo Deny
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run cargo-deny
+      uses: EmbarkStudios/cargo-deny-action@v1
+      with:
+        log-level: warn
+        command: check
+        arguments: --all-features
+
+  codeql:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'rust', 'python', 'javascript' ]
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ matrix.language }}
+        queries: security-extended,security-and-quality
+
+    - name: Install system dependencies
+      if: matrix.language == 'rust'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          pkg-config \
+          libfuse3-dev \
+          libssl-dev
+
+    - name: Autobuild
+      uses: github/codeql-action/autobuild@v3
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: "/language:${{matrix.language}}"
+
+  semgrep:
+    name: Semgrep Security Scan
+    runs-on: ubuntu-latest
+    container:
+      image: returntocorp/semgrep
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Semgrep
+      run: |
+        semgrep --config=auto --json --output=semgrep-results.json .
+
+    - name: Upload Semgrep results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: semgrep-results
+        path: semgrep-results.json
+
+    - name: Upload to GitHub Security
+      if: github.event_name != 'pull_request'
+      run: |
+        semgrep --config=auto --sarif --output=semgrep.sarif .
+
+    - name: Upload SARIF file
+      if: github.event_name != 'pull_request'
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: semgrep.sarif
+
+  secrets-scan:
+    name: Secrets Scanning
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Run TruffleHog
+      uses: trufflesecurity/trufflehog@main
+      with:
+        path: ./
+        base: main
+        head: HEAD
+        extra_args: --debug --only-verified
+
+  supply-chain:
+    name: Supply Chain Security
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install cargo-supply-chain
+      run: cargo install cargo-supply-chain
+
+    - name: Run supply chain analysis
+      run: |
+        cargo supply-chain crates > supply-chain-crates.txt
+        cargo supply-chain authors > supply-chain-authors.txt
+        cargo supply-chain publishers > supply-chain-publishers.txt
+
+    - name: Upload supply chain analysis
+      uses: actions/upload-artifact@v4
+      with:
+        name: supply-chain-analysis
+        path: |
+          supply-chain-*.txt
+
+  python-security:
+    name: Python Security Scan
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install Python security tools
+      run: |
+        pip install bandit safety pip-audit
+
+    - name: Run Bandit security scan
+      working-directory: bindings/python
+      run: |
+        bandit -r src/ -f json -o bandit-results.json || true
+
+    - name: Run Safety check
+      working-directory: bindings/python
+      run: |
+        pip install -r requirements.txt || true
+        safety check --json --output safety-results.json || true
+
+    - name: Run pip-audit
+      working-directory: bindings/python
+      run: |
+        pip-audit --format=json --output=pip-audit-results.json || true
+
+    - name: Upload Python security results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: python-security-results
+        path: bindings/python/*-results.json
+
+  typescript-security:
+    name: TypeScript Security Scan
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Install dependencies
+      working-directory: bindings/typescript
+      run: npm ci
+
+    - name: Run npm audit
+      working-directory: bindings/typescript
+      run: |
+        npm audit --audit-level=moderate --json > npm-audit-results.json || true
+
+    - name: Upload TypeScript security results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: typescript-security-results
+        path: bindings/typescript/npm-audit-results.json
+
+  security-summary:
+    name: Security Summary
+    needs: [audit, cargo-deny, codeql, semgrep, secrets-scan, supply-chain, python-security, typescript-security]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+    - name: Download all security artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: security-results
+
+    - name: Generate security summary
+      run: |
+        echo "# Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## Job Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        # Check job results
+        if [ "${{ needs.audit.result }}" = "success" ]; then
+          echo "✅ **Cargo Audit**: No vulnerabilities found" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Cargo Audit**: Issues detected" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        if [ "${{ needs.cargo-deny.result }}" = "success" ]; then
+          echo "✅ **Cargo Deny**: All checks passed" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Cargo Deny**: Issues detected" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        if [ "${{ needs.codeql.result }}" = "success" ]; then
+          echo "✅ **CodeQL**: No security issues found" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **CodeQL**: Security issues detected" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        if [ "${{ needs.semgrep.result }}" = "success" ]; then
+          echo "✅ **Semgrep**: No issues found" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Semgrep**: Issues detected" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        if [ "${{ needs.secrets-scan.result }}" = "success" ]; then
+          echo "✅ **Secrets Scan**: No secrets detected" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Secrets Scan**: Potential secrets found" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## Recommendations" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- Review any failed security checks above" >> $GITHUB_STEP_SUMMARY
+        echo "- Check the Security tab for detailed findings" >> $GITHUB_STEP_SUMMARY
+        echo "- Update dependencies regularly" >> $GITHUB_STEP_SUMMARY
+        echo "- Follow secure coding practices" >> $GITHUB_STEP_SUMMARY
+
+  dependabot-auto-merge:
+    name: Auto-merge Dependabot PRs
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]' && github.event_name == 'pull_request'
+    needs: [audit, cargo-deny]
+    steps:
+    - name: Dependabot metadata
+      id: metadata
+      uses: dependabot/fetch-metadata@v1
+      with:
+        github-token: "${{ secrets.GITHUB_TOKEN }}"
+
+    - name: Auto-merge minor and patch updates
+      if: steps.metadata.outputs.update-type == 'version-update:semver-minor' || steps.metadata.outputs.update-type == 'version-update:semver-patch'
+      run: gh pr merge --auto --merge "$PR_URL"
+      env:
+        PR_URL: ${{ github.event.pull_request.html_url }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

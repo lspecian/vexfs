@@ -1,0 +1,19 @@
+Package: vexfs
+Version: 1.0.0
+Section: database
+Priority: optional
+Architecture: amd64
+Depends: libc6 (>= 2.31), libssl3 (>= 3.0.0), ca-certificates
+Maintainer: VexFS Contributors <maintainers@vexfs.org>
+Description: Vector Extended File System - A filesystem optimized for vector embeddings
+ VexFS is a high-performance filesystem specifically designed for storing and
+ querying vector embeddings. It provides ChromaDB-compatible APIs and supports
+ similarity search operations with advanced indexing capabilities.
+ .
+ Key features:
+  - ChromaDB-compatible REST API
+  - High-performance vector similarity search
+  - ANNS (Approximate Nearest Neighbor Search) support
+  - Production-ready with monitoring and logging
+  - Horizontal scaling capabilities
+Homepage: https://github.com/vexfs/vexfs

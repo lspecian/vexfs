@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vexfs.fullname" . }}
+  labels:
+    {{- include "vexfs.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.vexfs.autoscaling.enabled }}
+  replicas: {{ .Values.vexfs.replicaCount }}
+  {{- end }}
+  strategy:
+    {{- toYaml .Values.vexfs.updateStrategy | nindent 4 }}
+  selector:
+    matchLabels:
+      {{- include "vexfs.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.vexfs.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "vexfs.selectorLabels" . | nindent 8 }}
+        {{- with .Values.vexfs.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.vexfs.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "vexfs.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.vexfs.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.vexfs.securityContext | nindent 12 }}
+          image: "{{ .Values.vexfs.image.registry }}/{{ .Values.vexfs.image.repository }}:{{ .Values.vexfs.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.vexfs.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.vexfs.service.targetPort }}
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          livenessProbe:
+            {{- toYaml .Values.vexfs.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.vexfs.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.vexfs.resources | nindent 12 }}
+          env:
+            - name: PORT
+              value: {{ .Values.vexfs.service.targetPort | quote }}
+            {{- range $key, $value := .Values.vexfs.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          {{- with .Values.vexfs.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.configMap.enabled }}
+            - name: config
+              mountPath: /etc/vexfs
+              readOnly: true
+            {{- end }}
+            {{- if .Values.secret.enabled }}
+            - name: secrets
+              mountPath: /etc/vexfs/secrets
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "vexfs.fullname" . }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 100Mi
+        {{- if .Values.configMap.enabled }}
+        - name: config
+          configMap:
+            name: {{ include "vexfs.fullname" . }}
+        {{- end }}
+        {{- if .Values.secret.enabled }}
+        - name: secrets
+          secret:
+            secretName: {{ include "vexfs.fullname" . }}
+        {{- end }}
+      {{- with .Values.vexfs.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.vexfs.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.vexfs.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
