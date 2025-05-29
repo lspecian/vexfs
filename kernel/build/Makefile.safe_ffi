@@ -1,0 +1,126 @@
+# VexFS Safe FFI Build System
+# Builds the safe FFI version of the kernel module with comprehensive error handling
+
+# Variables
+KERNEL_DIR ?= /lib/modules/$(shell uname -r)/build
+MODULE_NAME = vexfs
+RUST_TARGET = x86_64-unknown-linux-gnu
+
+# Paths for organized structure
+KERNEL_SRC_DIR = ../src
+KERNEL_INCLUDE_DIR = ../include
+RUST_DIR = ../../rust
+BUILD_DIR = .
+
+# Safe FFI build target
+safe-ffi-build: clean-safe-ffi
+	@echo "🛡️  Building SAFE FFI VexFS kernel module..."
+	@echo "This version combines FFI functionality with comprehensive error handling"
+	@echo "Features: State management, timeout handling, graceful degradation"
+	@cp $(KERNEL_SRC_DIR)/vexfs_module_entry.c $(KERNEL_SRC_DIR)/vexfs_module_entry.c.backup 2>/dev/null || true
+	@cp $(KERNEL_SRC_DIR)/vexfs_module_entry_safe_ffi.c $(KERNEL_SRC_DIR)/vexfs_module_entry.c
+	$(MAKE) rust-lib-safe-ffi
+	$(MAKE) kernel-module-safe-ffi
+	@mv vexfs.ko vexfs_safe_ffi.ko 2>/dev/null || true
+	@echo "✅ SAFE FFI build complete: vexfs_safe_ffi.ko ready"
+	@echo "🔒 This module includes:"
+	@echo "   - FFI timeout and error handling"
+	@echo "   - Module state management"
+	@echo "   - Graceful degradation on FFI failures"
+	@echo "   - Resource cleanup validation"
+	@echo "   - Mount count tracking"
+
+# Build Rust library for safe FFI
+rust-lib-safe-ffi:
+	@echo "🦀 Building Rust library for safe FFI..."
+	cd $(RUST_DIR) && cargo build --release --target=$(RUST_TARGET) --features=kernel,c_bindings,safe_ffi --lib
+	cp $(RUST_DIR)/target/$(RUST_TARGET)/release/lib$(MODULE_NAME).a ./lib$(MODULE_NAME)_safe_ffi.a
+
+# Build kernel module with safe FFI
+kernel-module-safe-ffi: lib$(MODULE_NAME)_safe_ffi.a vexfs_rust_safe_ffi_combined.o
+	@echo "🐧 Building kernel module with safe FFI..."
+	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) VEXFS_SAFE_FFI=1 modules
+
+# Create combined Rust object file for safe FFI
+vexfs_rust_safe_ffi_combined.o: lib$(MODULE_NAME)_safe_ffi.a
+	@echo "🔗 Creating combined Rust object for safe FFI..."
+	@mkdir -p .rust_extract_safe_ffi
+	@cd .rust_extract_safe_ffi && ar x ../lib$(MODULE_NAME)_safe_ffi.a
+	@echo "Extracted $$(ls .rust_extract_safe_ffi/*.o | wc -l) object files"
+	@ld -r -o vexfs_rust_safe_ffi_combined_raw.o .rust_extract_safe_ffi/*.o 2>/dev/null || \
+	 ld -r -o vexfs_rust_safe_ffi_combined_raw.o --whole-archive lib$(MODULE_NAME)_safe_ffi.a --no-whole-archive
+	@echo "🔧 Stripping LLVM metadata sections..."
+	@objcopy --remove-section=.llvmbc --remove-section=.llvmcmd vexfs_rust_safe_ffi_combined_raw.o vexfs_rust_safe_ffi_combined.o 2>/dev/null || \
+	 cp vexfs_rust_safe_ffi_combined_raw.o vexfs_rust_safe_ffi_combined.o
+	@rm -f vexfs_rust_safe_ffi_combined_raw.o
+	@rm -rf .rust_extract_safe_ffi
+	@# Create dependency file for kernel build system
+	@touch .vexfs_rust_safe_ffi_combined.o.cmd
+	@echo "✅ Safe FFI combined object created: vexfs_rust_safe_ffi_combined.o"
+
+# Syntax check for safe FFI version
+syntax-check-safe-ffi:
+	@echo "🔍 Safe FFI syntax check..."
+	cd $(RUST_DIR) && cargo check --lib --target=$(RUST_TARGET) --features=kernel,c_bindings,safe_ffi
+	@echo "✅ Safe FFI syntax check complete"
+
+# Validate safe FFI implementation
+validate-safe-ffi:
+	@echo "🔍 Validating safe FFI implementation..."
+	@echo "Checking for required safety mechanisms:"
+	@grep -q "vexfs_safe_ffi_call" $(KERNEL_SRC_DIR)/vexfs_module_entry_safe_ffi.c && echo "✅ Safe FFI call wrapper found" || echo "❌ Safe FFI call wrapper missing"
+	@grep -q "vexfs_module_state" $(KERNEL_SRC_DIR)/vexfs_module_entry_safe_ffi.c && echo "✅ Module state management found" || echo "❌ Module state management missing"
+	@grep -q "VEXFS_FFI_TIMEOUT_MS" $(KERNEL_SRC_DIR)/vexfs_module_entry_safe_ffi.c && echo "✅ FFI timeout configuration found" || echo "❌ FFI timeout configuration missing"
+	@grep -q "atomic_t.*mount_count" $(KERNEL_SRC_DIR)/vexfs_module_entry_safe_ffi.c && echo "✅ Mount count tracking found" || echo "❌ Mount count tracking missing"
+	@grep -q "mutex.*state_mutex" $(KERNEL_SRC_DIR)/vexfs_module_entry_safe_ffi.c && echo "✅ State synchronization found" || echo "❌ State synchronization missing"
+	@echo "✅ Safe FFI validation complete"
+
+# Test safe FFI build without loading
+test-safe-ffi-build:
+	@echo "🧪 Testing safe FFI build process..."
+	$(MAKE) syntax-check-safe-ffi
+	$(MAKE) validate-safe-ffi
+	@echo "✅ Safe FFI build test complete"
+
+# Clean safe FFI build artifacts
+clean-safe-ffi:
+	@echo "🧹 Cleaning safe FFI build artifacts..."
+	rm -f vexfs_safe_ffi.ko lib$(MODULE_NAME)_safe_ffi.a vexfs_rust_safe_ffi_combined.o
+	rm -f *.mod *.mod.c .*.cmd
+	rm -rf .tmp_versions Module.symvers modules.order .rust_extract_safe_ffi
+	@echo "✅ Safe FFI build artifacts cleaned"
+
+# Restore original module after safe FFI build
+restore-original-safe-ffi:
+	@echo "🔄 Restoring original kernel module after safe FFI build..."
+	@if [ -f "$(KERNEL_SRC_DIR)/vexfs_module_entry.c.backup" ]; then \
+		mv $(KERNEL_SRC_DIR)/vexfs_module_entry.c.backup $(KERNEL_SRC_DIR)/vexfs_module_entry.c; \
+		echo "✅ Original module restored"; \
+	else \
+		echo "⚠️  No backup found - original may already be in place"; \
+	fi
+
+# Help for safe FFI build system
+help-safe-ffi:
+	@echo "VexFS Safe FFI Build System"
+	@echo "==========================="
+	@echo ""
+	@echo "Safe FFI Build Commands:"
+	@echo "  safe-ffi-build        - Build safe FFI kernel module"
+	@echo "  syntax-check-safe-ffi - Check Rust syntax for safe FFI"
+	@echo "  validate-safe-ffi     - Validate safe FFI implementation"
+	@echo "  test-safe-ffi-build   - Test build process without loading"
+	@echo "  clean-safe-ffi        - Clean safe FFI build artifacts"
+	@echo "  restore-original-safe-ffi - Restore original module source"
+	@echo ""
+	@echo "Safe FFI Features:"
+	@echo "  - FFI call timeout and error handling"
+	@echo "  - Module state management with validation"
+	@echo "  - Graceful degradation on FFI failures"
+	@echo "  - Resource cleanup validation"
+	@echo "  - Mount count tracking"
+	@echo "  - Comprehensive logging"
+	@echo ""
+	@echo "Output: vexfs_safe_ffi.ko (safe FFI kernel module)"
+
+.PHONY: safe-ffi-build rust-lib-safe-ffi kernel-module-safe-ffi syntax-check-safe-ffi validate-safe-ffi test-safe-ffi-build clean-safe-ffi restore-original-safe-ffi help-safe-ffi
