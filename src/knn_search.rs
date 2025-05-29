@@ -51,6 +51,20 @@ impl From<MetricsError> for KnnError {
     }
 }
 
+impl From<KnnError> for crate::shared::errors::VexfsError {
+    fn from(err: KnnError) -> Self {
+        match err {
+            KnnError::InvalidK => crate::shared::errors::VexfsError::InvalidArgument("Invalid k value".to_string()),
+            KnnError::InvalidQuery => crate::shared::errors::VexfsError::InvalidArgument("Invalid query vector".to_string()),
+            KnnError::StorageError => crate::shared::errors::VexfsError::IoError(crate::shared::errors::IoErrorKind::ReadError),
+            KnnError::MetricsError(_) => crate::shared::errors::VexfsError::VectorError(crate::shared::errors::VectorErrorKind::SearchError),
+            KnnError::IndexError => crate::shared::errors::VexfsError::IndexError(crate::shared::errors::IndexErrorKind::IndexCorrupted),
+            KnnError::AllocationError => crate::shared::errors::VexfsError::OutOfMemory,
+            KnnError::FilterError => crate::shared::errors::VexfsError::InvalidArgument("Filter error".to_string()),
+        }
+    }
+}
+
 /// Search result with distance and metadata
 #[derive(Debug, Clone)]
 pub struct KnnResult {

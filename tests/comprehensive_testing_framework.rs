@@ -18,19 +18,18 @@ use std::path::Path;
 use std::fmt;
 
 // Import from the current crate
-use crate::fs_core::{
+use vexfs::fs_core::{
     operations::OperationContext,
     permissions::UserContext,
     inode::InodeManager,
     locking::LockManager,
-    file::FileManager,
-    directory::DirectoryManager,
 };
-use crate::storage::{StorageManager, TransactionManager, layout::VexfsLayout, block::BlockDevice};
-use crate::vector_cache::VectorCacheManager;
-use crate::shared::types::*;
-use crate::shared::constants::*;
-use crate::shared::errors::VexfsError;
+use vexfs::storage::{StorageManager, TransactionManager, layout::VexfsLayout, block::BlockDevice};
+use vexfs::vector_cache::VectorCacheManager;
+use vexfs::shared::types::*;
+use vexfs::shared::constants::*;
+use vexfs::{VexfsError, VexfsResult};
+use vexfs::shared::errors::IoErrorKind;
 
 /// Test result status
 #[derive(Debug, Clone, PartialEq)]
@@ -42,7 +41,17 @@ pub enum TestStatus {
 }
 
 /// Test category for organization
-#[derive(Debug, Clone, PartialEq, Hash)]
+impl fmt::Display for TestStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TestStatus::Passed => write!(f, "PASSED"),
+            TestStatus::Failed(msg) => write!(f, "FAILED: {}", msg),
+            TestStatus::Skipped(msg) => write!(f, "SKIPPED: {}", msg),
+            TestStatus::Timeout => write!(f, "TIMEOUT"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TestCategory {
     Unit,
     Integration,
@@ -98,7 +107,7 @@ impl TestCase {
 }
 
 /// Test execution statistics
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct TestStats {
     pub total_tests: usize,
     pub passed: usize,
@@ -175,7 +184,7 @@ impl VexfsTestFramework {
             environment: TestEnvironment::default(),
             storage: None,
             stats: TestStats::default(),
-            parallel_execution: true,
+            parallel_execution: false,
             max_parallel_tests: 4,
         }
     }
@@ -192,10 +201,10 @@ impl VexfsTestFramework {
     }
 
     /// Initialize test environment
-    pub fn initialize(&mut self) -> Result<(), VexfsError> {
+    pub fn initialize(&mut self) -> VexfsResult<()> {
         // Create temporary directory
         if let Err(e) = fs::create_dir_all(&self.environment.temp_dir) {
-            return Err(VexfsError::IoError(format!("Failed to create temp dir: {}", e)));
+            return Err(VexfsError::Other(format!("Failed to create temp dir: {}", e)));
         }
 
         // Create test storage
@@ -207,7 +216,12 @@ impl VexfsTestFramework {
             self.environment.enable_vector_cache,
         )?;
 
-        let device = BlockDevice::new_memory(self.environment.storage_size);
+        let device = BlockDevice::new(
+            self.environment.storage_size as u64,
+            4096, // block_size
+            false, // read_only
+            "test_device".to_string()
+        )?;
         let storage = Arc::new(StorageManager::new(device, layout, self.environment.cache_size)?);
         self.storage = Some(storage);
 
@@ -232,7 +246,7 @@ impl VexfsTestFramework {
     }
 
     /// Execute all tests
-    pub fn run_all_tests(&mut self) -> Result<TestStats, VexfsError> {
+    pub fn run_all_tests(&mut self) -> VexfsResult<TestStats> {
         let start_time = Instant::now();
         
         println!("🧪 VexFS Comprehensive Testing Framework");
@@ -254,25 +268,32 @@ impl VexfsTestFramework {
     }
 
     /// Run tests sequentially
-    fn run_tests_sequential(&mut self) -> Result<(), VexfsError> {
+    fn run_tests_sequential(&mut self) -> VexfsResult<()> {
         for i in 0..self.tests.len() {
             self.execute_test(i)?;
         }
         Ok(())
     }
 
-    /// Run tests in parallel
-    fn run_tests_parallel(&mut self) -> Result<(), VexfsError> {
+    /// Run tests in parallel (temporarily disabled due to threading issues)
+    fn run_tests_parallel(&mut self) -> VexfsResult<()> {
+        // TODO: Fix threading issues with StorageManager RefCell types
+        // For now, fall back to sequential execution
+        println!("⚠️  Parallel execution disabled due to threading constraints, running sequentially...");
+        self.run_tests_sequential()
+        
+        // Original parallel implementation commented out due to RefCell threading issues:
+        /*
         let test_indices: Vec<usize> = (0..self.tests.len()).collect();
         let chunk_size = (test_indices.len() + self.max_parallel_tests - 1) / self.max_parallel_tests;
         
         for chunk in test_indices.chunks(chunk_size) {
             let handles: Vec<_> = chunk.iter().map(|&i| {
-                let test = self.tests[i].clone();
+                let test_case = self.tests[i].clone();
                 let storage = self.storage.clone();
                 
                 thread::spawn(move || {
-                    Self::execute_test_isolated(test, storage)
+                    Self::execute_test_isolated(test_case, storage)
                 })
             }).collect();
 
@@ -291,46 +312,51 @@ impl VexfsTestFramework {
         }
 
         Ok(())
+        */
     }
 
     /// Execute a single test
-    fn execute_test(&mut self, test_idx: usize) -> Result<(), VexfsError> {
-        let test = &mut self.tests[test_idx];
+    fn execute_test(&mut self, test_idx: usize) -> VexfsResult<()> {
         let start_time = Instant::now();
 
-        println!("Running: {} [{}]", test.name, format!("{:?}", test.category));
+        // Extract test data to avoid borrowing conflicts
+        let test_name = self.tests[test_idx].name.clone();
+        let test_category = self.tests[test_idx].category.clone();
+        let dependencies = self.tests[test_idx].dependencies.clone();
+
+        println!("Running: {} [{}]", test_name, format!("{:?}", test_category));
 
         // Check dependencies
-        for dep in &test.dependencies.clone() {
+        for dep in &dependencies {
             if let Some(dep_test) = self.tests.iter().find(|t| t.name == *dep) {
                 if dep_test.status != TestStatus::Passed {
-                    test.status = TestStatus::Skipped(format!("Dependency {} not passed", dep));
-                    println!("  ⏭️  SKIPPED: {}", test.status);
+                    self.tests[test_idx].status = TestStatus::Skipped(format!("Dependency {} not passed", dep));
+                    println!("  ⏭️  SKIPPED: {}", self.tests[test_idx].status);
                     return Ok(());
                 }
             }
         }
 
         // Execute test with timeout
-        let result = match test.category {
-            TestCategory::Unit => self.execute_unit_test(&test.name),
-            TestCategory::Integration => self.execute_integration_test(&test.name),
-            TestCategory::Performance => self.execute_performance_test(&test.name),
-            TestCategory::PosixCompliance => self.execute_posix_test(&test.name),
-            TestCategory::Stress => self.execute_stress_test(&test.name),
-            TestCategory::DataIntegrity => self.execute_data_integrity_test(&test.name),
-            TestCategory::CrashRecovery => self.execute_crash_recovery_test(&test.name),
-            TestCategory::Fuzz => self.execute_fuzz_test(&test.name),
+        let result = match test_category {
+            TestCategory::Unit => self.execute_unit_test(&test_name),
+            TestCategory::Integration => self.execute_integration_test(&test_name),
+            TestCategory::Performance => self.execute_performance_test(&test_name),
+            TestCategory::PosixCompliance => self.execute_posix_test(&test_name),
+            TestCategory::Stress => self.execute_stress_test(&test_name),
+            TestCategory::DataIntegrity => self.execute_data_integrity_test(&test_name),
+            TestCategory::CrashRecovery => self.execute_crash_recovery_test(&test_name),
+            TestCategory::Fuzz => self.execute_fuzz_test(&test_name),
         };
 
-        test.execution_time = Some(start_time.elapsed());
-        test.status = match result {
+        self.tests[test_idx].execution_time = Some(start_time.elapsed());
+        self.tests[test_idx].status = match result {
             Ok(_) => TestStatus::Passed,
             Err(e) => TestStatus::Failed(e.to_string()),
         };
 
-        match &test.status {
-            TestStatus::Passed => println!("  ✅ PASSED ({:?})", test.execution_time.unwrap()),
+        match &self.tests[test_idx].status {
+            TestStatus::Passed => println!("  ✅ PASSED ({:?})", self.tests[test_idx].execution_time.unwrap()),
             TestStatus::Failed(msg) => println!("  ❌ FAILED: {}", msg),
             TestStatus::Skipped(msg) => println!("  ⏭️  SKIPPED: {}", msg),
             TestStatus::Timeout => println!("  ⏰ TIMEOUT"),
@@ -442,69 +468,69 @@ impl VexfsTestFramework {
     }
 
     // Test execution methods (to be implemented)
-    fn execute_unit_test(&self, _test_name: &str) -> Result<(), VexfsError> {
+    fn execute_unit_test(&self, _test_name: &str) -> VexfsResult<()> {
         // Implementation will be added in subsequent methods
         Ok(())
     }
 
-    fn execute_integration_test(&self, _test_name: &str) -> Result<(), VexfsError> {
+    fn execute_integration_test(&self, _test_name: &str) -> VexfsResult<()> {
         Ok(())
     }
 
-    fn execute_performance_test(&self, _test_name: &str) -> Result<(), VexfsError> {
+    fn execute_performance_test(&self, _test_name: &str) -> VexfsResult<()> {
         Ok(())
     }
 
-    fn execute_posix_test(&self, _test_name: &str) -> Result<(), VexfsError> {
+    fn execute_posix_test(&self, _test_name: &str) -> VexfsResult<()> {
         Ok(())
     }
 
-    fn execute_stress_test(&self, _test_name: &str) -> Result<(), VexfsError> {
+    fn execute_stress_test(&self, _test_name: &str) -> VexfsResult<()> {
         Ok(())
     }
 
-    fn execute_data_integrity_test(&self, _test_name: &str) -> Result<(), VexfsError> {
+    fn execute_data_integrity_test(&self, _test_name: &str) -> VexfsResult<()> {
         Ok(())
     }
 
-    fn execute_crash_recovery_test(&self, _test_name: &str) -> Result<(), VexfsError> {
+    fn execute_crash_recovery_test(&self, _test_name: &str) -> VexfsResult<()> {
         Ok(())
     }
 
-    fn execute_fuzz_test(&self, _test_name: &str) -> Result<(), VexfsError> {
+    fn execute_fuzz_test(&self, _test_name: &str) -> VexfsResult<()> {
         Ok(())
     }
 
     // Isolated test execution methods (for parallel execution)
-    fn execute_unit_test_isolated(_test_name: &str, _storage: Option<Arc<StorageManager>>) -> Result<(), VexfsError> {
+    fn execute_unit_test_isolated(_test_name: &str, _storage: Option<Arc<StorageManager>>) -> VexfsResult<()> {
         Ok(())
     }
 
-    fn execute_integration_test_isolated(_test_name: &str, _storage: Option<Arc<StorageManager>>) -> Result<(), VexfsError> {
+    fn execute_integration_test_isolated(_test_name: &str, _storage: Option<Arc<StorageManager>>) -> VexfsResult<()> {
         Ok(())
     }
 
-    fn execute_performance_test_isolated(_test_name: &str, _storage: Option<Arc<StorageManager>>) -> Result<(), VexfsError> {
+    fn execute_performance_test_isolated(_test_name: &str, _storage: Option<Arc<StorageManager>>) -> VexfsResult<()> {
         Ok(())
     }
 
-    fn execute_posix_test_isolated(_test_name: &str, _storage: Option<Arc<StorageManager>>) -> Result<(), VexfsError> {
+    fn execute_posix_test_isolated(_test_name: &str, _storage: Option<Arc<StorageManager>>) -> VexfsResult<()> {
         Ok(())
     }
 
-    fn execute_stress_test_isolated(_test_name: &str, _storage: Option<Arc<StorageManager>>) -> Result<(), VexfsError> {
+    fn execute_stress_test_isolated(_test_name: &str, _storage: Option<Arc<StorageManager>>) -> VexfsResult<()> {
         Ok(())
     }
 
-    fn execute_data_integrity_test_isolated(_test_name: &str, _storage: Option<Arc<StorageManager>>) -> Result<(), VexfsError> {
+    fn execute_data_integrity_test_isolated(_test_name: &str, _storage: Option<Arc<StorageManager>>) -> VexfsResult<()> {
         Ok(())
     }
 
-    fn execute_crash_recovery_test_isolated(_test_name: &str, _storage: Option<Arc<StorageManager>>) -> Result<(), VexfsError> {
+    fn execute_crash_recovery_test_isolated(_test_name: &str, _storage: Option<Arc<StorageManager>>) -> VexfsResult<()> {
         Ok(())
     }
 
-    fn execute_fuzz_test_isolated(_test_name: &str, _storage: Option<Arc<StorageManager>>) -> Result<(), VexfsError> {
+    fn execute_fuzz_test_isolated(_test_name: &str, _storage: Option<Arc<StorageManager>>) -> VexfsResult<()> {
         Ok(())
     }
 }

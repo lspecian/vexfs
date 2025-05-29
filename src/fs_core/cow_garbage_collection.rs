@@ -138,7 +138,7 @@ impl CowGarbageCollector {
 
         // Update statistics
         let end_time = 0; // TODO: Get current timestamp
-        result.duration_ms = end_time.saturating_sub(start_time) / 1_000_000; // Convert to ms
+        result.duration_ms = (end_time as u64).saturating_sub(start_time as u64) / 1_000_000; // Convert to ms
 
         self.update_gc_stats(&result)?;
 
