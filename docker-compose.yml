@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  vexfs-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    ports:
+      - "8000:8000"
+    environment:
+      - RUST_LOG=info
+      - PORT=8000
+    volumes:
+      - vexfs_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  vexfs_data:
+    driver: local
