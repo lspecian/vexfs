@@ -10,6 +10,9 @@ crate-type = ["cdylib"]
 [dependencies]
 pyo3 = { version = "0.21", features = ["extension-module"] }
 vexfs = { path = "../../" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rand = "0.8"
 
 [build-dependencies]
 pyo3-build-config = "0.21"

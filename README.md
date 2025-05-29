@@ -279,6 +279,9 @@ High-performance Python bindings built with Rust and PyO3, delivering native per
 ```python
 import vexfs
 
+# Initialize VexFS with mount point
+vexfs.init("/mnt/vexfs")
+
 # Add document with metadata
 doc_id = vexfs.add("Hello world", {"type": "greeting", "lang": "en"})
 
@@ -306,7 +309,7 @@ Modern, type-safe client library for Node.js and TypeScript applications, built 
 
 **Key Features:**
 - **🔷 Full TypeScript Support**: Complete type definitions with IntelliSense
-- **🌐 REST API Ready**: Built for web services and microservices architectures
+- **📁 Filesystem Native**: Direct integration with mounted VexFS filesystems
 - **🔄 Async/Await**: Modern Promise-based API with full async support
 - **🛡️ Type Safety**: Compile-time error checking and runtime validation
 
@@ -315,7 +318,7 @@ Modern, type-safe client library for Node.js and TypeScript applications, built 
 import VexFSClient from 'vexfs-sdk';
 
 const client = new VexFSClient({
-  baseUrl: 'http://localhost:8080'
+  mountPoint: '/mnt/vexfs'
 });
 
 // Add document
