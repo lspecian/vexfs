@@ -1,0 +1,17 @@
+# Development dependencies for Python bindings
+maturin>=1.0,<2.0
+pytest>=7.0.0
+pytest-cov>=4.0.0
+black>=23.0.0
+isort>=5.12.0
+mypy>=1.0.0
+flake8>=6.0.0
+
+# Documentation dependencies
+sphinx>=6.0.0
+sphinx-rtd-theme>=1.2.0
+myst-parser>=1.0.0
+
+# Security and quality tools
+bandit>=1.7.0
+safety>=2.3.0

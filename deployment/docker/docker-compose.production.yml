@@ -1,0 +1,245 @@
+version: '3.8'
+
+services:
+  vexfs-server:
+    build:
+      context: ../../
+      dockerfile: deployment/docker/Dockerfile.production
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    image: vexfs/server:1.0.0
+    container_name: vexfs-server
+    restart: unless-stopped
+    
+    # Security settings
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    
+    # Network configuration
+    ports:
+      - "8000:8000"
+    networks:
+      - vexfs-network
+    
+    # Environment configuration
+    environment:
+      - RUST_LOG=info
+      - RUST_BACKTRACE=1
+      - PORT=8000
+      - VEXFS_DATA_DIR=/data
+      - VEXFS_LOG_LEVEL=info
+      - VEXFS_METRICS_ENABLED=true
+      - VEXFS_HEALTH_CHECK_ENABLED=true
+      - VEXFS_MAX_CONNECTIONS=1000
+      - VEXFS_REQUEST_TIMEOUT=30s
+      - VEXFS_RATE_LIMIT_REQUESTS=100
+      - VEXFS_RATE_LIMIT_WINDOW=60s
+      - VEXFS_TLS_ENABLED=false
+      - VEXFS_CORS_ENABLED=true
+    
+    # Volume mounts
+    volumes:
+      - vexfs-data:/data
+      - vexfs-logs:/var/log/vexfs
+      - /tmp:/tmp:rw,noexec,nosuid,size=100m
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/vexfs_server", "--health-check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=vexfs-server"
+    
+    # Dependencies
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      grafana:
+        condition: service_healthy
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: vexfs-prometheus
+    restart: unless-stopped
+    
+    # Security settings
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    user: "65534:65534"
+    
+    ports:
+      - "9090:9090"
+    networks:
+      - vexfs-network
+    
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+      - /tmp:/tmp:rw,noexec,nosuid,size=100m
+    
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Grafana for metrics visualization
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: vexfs-grafana
+    restart: unless-stopped
+    
+    # Security settings
+    security_opt:
+      - no-new-privileges:true
+    user: "472:472"
+    
+    ports:
+      - "3000:3000"
+    networks:
+      - vexfs-network
+    
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SECURITY_DISABLE_GRAVATAR=true
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      - GF_SECURITY_COOKIE_SECURE=true
+      - GF_SECURITY_COOKIE_SAMESITE=strict
+    
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Log aggregation with Fluentd
+  fluentd:
+    image: fluent/fluentd:v1.16-1
+    container_name: vexfs-fluentd
+    restart: unless-stopped
+    
+    # Security settings
+    security_opt:
+      - no-new-privileges:true
+    user: "fluent:fluent"
+    
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+    networks:
+      - vexfs-network
+    
+    volumes:
+      - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf:ro
+      - vexfs-logs:/var/log/vexfs:ro
+      - fluentd-logs:/var/log/fluentd
+
+  # Nginx reverse proxy with TLS termination
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: vexfs-nginx
+    restart: unless-stopped
+    
+    # Security settings
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - vexfs-network
+    
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - /var/cache/nginx:/var/cache/nginx:rw
+      - /var/run:/var/run:rw
+      - /tmp:/tmp:rw,noexec,nosuid,size=100m
+    
+    depends_on:
+      - vexfs-server
+    
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  vexfs-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  vexfs-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/vexfs/data
+  
+  vexfs-logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/vexfs/logs
+  
+  prometheus-data:
+    driver: local
+  
+  grafana-data:
+    driver: local
+  
+  fluentd-logs:
+    driver: local

@@ -1,0 +1,104 @@
+#!/bin/bash
+set -e
+
+# VexFS Debian package post-installation script
+
+# Create vexfs user and group if they don't exist
+if ! getent group vexfs >/dev/null; then
+    addgroup --system vexfs
+fi
+
+if ! getent passwd vexfs >/dev/null; then
+    adduser --system --ingroup vexfs --home /var/lib/vexfs --shell /bin/false vexfs
+fi
+
+# Create necessary directories
+mkdir -p /var/lib/vexfs
+mkdir -p /var/log/vexfs
+mkdir -p /etc/vexfs
+mkdir -p /run/vexfs
+
+# Set proper ownership and permissions
+chown vexfs:vexfs /var/lib/vexfs
+chown vexfs:vexfs /var/log/vexfs
+chown root:vexfs /etc/vexfs
+chown vexfs:vexfs /run/vexfs
+
+chmod 750 /var/lib/vexfs
+chmod 750 /var/log/vexfs
+chmod 750 /etc/vexfs
+chmod 755 /run/vexfs
+
+# Create default configuration if it doesn't exist
+if [ ! -f /etc/vexfs/vexfs.conf ]; then
+    cat > /etc/vexfs/vexfs.conf << 'EOF'
+# VexFS Configuration File
+# See documentation at: https://github.com/vexfs/vexfs
+
+# Server configuration
+PORT=8000
+BIND_ADDRESS=127.0.0.1
+
+# Data directory
+VEXFS_DATA_DIR=/var/lib/vexfs
+
+# Logging
+VEXFS_LOG_LEVEL=info
+RUST_LOG=info
+
+# Performance tuning
+VEXFS_MAX_CONNECTIONS=1000
+VEXFS_REQUEST_TIMEOUT=30s
+
+# Rate limiting
+VEXFS_RATE_LIMIT_REQUESTS=100
+VEXFS_RATE_LIMIT_WINDOW=60s
+
+# Security
+VEXFS_TLS_ENABLED=false
+VEXFS_CORS_ENABLED=true
+
+# Monitoring
+VEXFS_METRICS_ENABLED=true
+VEXFS_HEALTH_CHECK_ENABLED=true
+EOF
+    chown root:vexfs /etc/vexfs/vexfs.conf
+    chmod 640 /etc/vexfs/vexfs.conf
+fi
+
+# Create logrotate configuration
+cat > /etc/logrotate.d/vexfs << 'EOF'
+/var/log/vexfs/*.log {
+    daily
+    missingok
+    rotate 30
+    compress
+    delaycompress
+    notifempty
+    create 640 vexfs vexfs
+    postrotate
+        systemctl reload vexfs || true
+    endscript
+}
+EOF
+
+# Enable and start the service
+systemctl daemon-reload
+systemctl enable vexfs.service
+
+# Start the service if this is a fresh install
+if [ "$1" = "configure" ] && [ -z "$2" ]; then
+    echo "Starting VexFS service..."
+    systemctl start vexfs.service || true
+fi
+
+echo "VexFS installation completed successfully!"
+echo "Configuration file: /etc/vexfs/vexfs.conf"
+echo "Data directory: /var/lib/vexfs"
+echo "Log directory: /var/log/vexfs"
+echo ""
+echo "To start VexFS: sudo systemctl start vexfs"
+echo "To check status: sudo systemctl status vexfs"
+echo "To view logs: sudo journalctl -u vexfs -f"
+
+exit 0
