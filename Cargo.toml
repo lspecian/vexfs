@@ -25,6 +25,17 @@ fuse = { version = "0.3", optional = true }
 clap = { version = "4.0", optional = true }
 libc = { version = "0.2", optional = true }
 
+# Server dependencies (optional for ChromaDB-compatible API)
+axum = { version = "0.7", optional = true }
+tokio = { version = "1.0", features = ["full"], optional = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+uuid = { version = "1.0", features = ["v4"], optional = true }
+tower = { version = "0.4", optional = true }
+tower-http = { version = "0.5", features = ["cors"], optional = true }
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", optional = true }
+
 [dev-dependencies]
 fastrand = "2.0"
 chrono = { version = "0.4", features = ["serde"] }
@@ -71,8 +82,14 @@ std = []
 kernel = []  # Keep for future RfL approach but disabled
 c_bindings = []  # New feature for current C FFI approach
 fuse_support = ["fuse", "clap", "libc"]  # FUSE userspace testing
+server = ["axum", "tokio", "serde", "serde_json", "uuid", "tower", "tower-http", "tracing", "tracing-subscriber"]  # ChromaDB-compatible server
 
 [[bin]]
 name = "vexfs_fuse"
 path = "src/bin/vexfs_fuse.rs"
 required-features = ["fuse_support"]
+
+[[bin]]
+name = "vexfs_server"
+path = "src/bin/vexfs_server.rs"
+required-features = ["server"]

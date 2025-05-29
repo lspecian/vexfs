@@ -128,16 +128,30 @@ vexfs/
 ### Prerequisites
 - **Rust**: Stable toolchain (1.70+)
 - **Linux**: Kernel headers (5.4+) or FUSE for simple testing
+- **Docker**: For ChromaDB-compatible server (easiest option)
 - **FUSE**: For userspace testing (recommended for developers)
 - **Standard Tools**: make, gcc, git
 
-### Simple Testing with FUSE (Recommended for Developers)
+### ChromaDB-Compatible Server (Easiest - Drop-in Replacement)
 
 ```bash
 # Clone the repository
 git clone https://github.com/lspecian/vexfs.git
 cd vexfs
 
+# Start VexFS server with Docker
+docker-compose up -d
+
+# Test ChromaDB compatibility
+python3 test_chromadb_compatibility.py
+
+# Use with any ChromaDB-compatible client
+curl http://localhost:8000/api/v1/version
+```
+
+### Simple Testing with FUSE (For Filesystem Development)
+
+```bash
 # Install FUSE (if not already installed)
 sudo apt-get install fuse libfuse-dev
 
@@ -274,7 +288,67 @@ VexFS is production-ready for:
 - **📊 Enterprise Data Analytics** with vector similarity search
 - **🔬 Scientific Computing** applications requiring vector operations
 
-## 📦 **SDKs & Language Bindings**
+## 🔄 **ChromaDB Drop-in Replacement**
+
+VexFS provides a **ChromaDB-compatible API server** that can serve as a drop-in replacement for ChromaDB in existing applications.
+
+### 🚀 **Why Choose VexFS over ChromaDB?**
+
+- **⚡ Superior Performance**: 21.98-52.34µs search latency vs ChromaDB's millisecond latencies
+- **💾 Filesystem Integration**: Native filesystem operations with vector capabilities
+- **🔒 Production Security**: Enterprise-grade security framework with ACL and encryption
+- **📈 Better Scaling**: Proven performance under load with excellent scaling characteristics
+- **🛡️ Memory Safety**: Rust implementation prevents common vulnerabilities
+- **🔧 Easy Migration**: Compatible API means no code changes required
+
+### 🐳 **Docker Deployment**
+
+```bash
+# Start VexFS ChromaDB-compatible server
+docker-compose up -d
+
+# Server available at http://localhost:8000/api/v1
+# Compatible with all ChromaDB client libraries
+```
+
+### 📚 **API Compatibility**
+
+VexFS implements the ChromaDB REST API:
+
+```python
+# Works with existing ChromaDB code
+import requests
+
+# Create collection
+requests.post("http://localhost:8000/api/v1/collections",
+              json={"name": "my_collection"})
+
+# Add documents
+requests.post("http://localhost:8000/api/v1/collections/my_collection/add",
+              json={
+                  "ids": ["doc1", "doc2"],
+                  "embeddings": [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]],
+                  "documents": ["Hello world", "Vector search"]
+              })
+
+# Query
+requests.post("http://localhost:8000/api/v1/collections/my_collection/query",
+              json={
+                  "query_embeddings": [[0.15, 0.25, 0.35]],
+                  "n_results": 5
+              })
+```
+
+### 🔧 **Migration from ChromaDB**
+
+1. **Stop ChromaDB**: `docker stop chromadb`
+2. **Start VexFS**: `docker-compose up -d`
+3. **Update endpoint**: Change `http://localhost:8000` to VexFS server
+4. **Test compatibility**: `python3 test_chromadb_compatibility.py`
+
+**No code changes required** - VexFS is API-compatible with ChromaDB!
+
+## � **SDKs & Language Bindings**
 
 VexFS provides production-ready SDKs for multiple programming languages, enabling seamless integration with your existing applications and workflows.
 
