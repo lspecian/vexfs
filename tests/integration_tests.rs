@@ -2,9 +2,7 @@
 //!
 //! Integration tests for VFS interactions and system-level functionality
 
-use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::collections::HashMap;
 
 /// Integration test result
 #[derive(Debug, Clone, PartialEq)]
@@ -12,6 +10,16 @@ pub enum IntegrationTestResult {
     Passed,
     Failed(String),
     Skipped(String),
+}
+
+impl std::fmt::Display for IntegrationTestResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IntegrationTestResult::Passed => write!(f, "PASSED"),
+            IntegrationTestResult::Failed(msg) => write!(f, "FAILED: {}", msg),
+            IntegrationTestResult::Skipped(msg) => write!(f, "SKIPPED: {}", msg),
+        }
+    }
 }
 
 /// Integration test case

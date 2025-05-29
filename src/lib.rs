@@ -191,6 +191,10 @@ pub mod ioctl_integration;
 #[cfg(not(feature = "kernel"))]
 pub mod chromadb_api;
 
+// VexFS Main API
+#[cfg(not(feature = "kernel"))]
+pub mod vexfs_api;
+
 // FUSE implementation for userspace testing
 #[cfg(feature = "fuse_support")]
 pub mod fuse_impl;

@@ -10,26 +10,15 @@
 //! - QEMU-based automated test execution
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::thread;
 use std::fs;
-use std::path::Path;
 use std::fmt;
 
 // Import from the current crate
-use vexfs::fs_core::{
-    operations::OperationContext,
-    permissions::UserContext,
-    inode::InodeManager,
-    locking::LockManager,
-};
-use vexfs::storage::{StorageManager, TransactionManager, layout::VexfsLayout, block::BlockDevice};
-use vexfs::vector_cache::VectorCacheManager;
-use vexfs::shared::types::*;
+use vexfs::storage::{StorageManager, VexfsLayout, BlockDevice};
 use vexfs::shared::constants::*;
 use vexfs::{VexfsError, VexfsResult};
-use vexfs::shared::errors::IoErrorKind;
 
 /// Test result status
 #[derive(Debug, Clone, PartialEq)]
@@ -61,6 +50,21 @@ pub enum TestCategory {
     DataIntegrity,
     CrashRecovery,
     Fuzz,
+}
+
+impl fmt::Display for TestCategory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TestCategory::Unit => write!(f, "Unit"),
+            TestCategory::Integration => write!(f, "Integration"),
+            TestCategory::Performance => write!(f, "Performance"),
+            TestCategory::PosixCompliance => write!(f, "POSIX Compliance"),
+            TestCategory::Stress => write!(f, "Stress"),
+            TestCategory::DataIntegrity => write!(f, "Data Integrity"),
+            TestCategory::CrashRecovery => write!(f, "Crash Recovery"),
+            TestCategory::Fuzz => write!(f, "Fuzz"),
+        }
+    }
 }
 
 /// Individual test case

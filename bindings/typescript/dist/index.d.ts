@@ -1,3 +1,3 @@
-export { VexFSClient, VexFSResult, VexFSConfig } from './client';
+export { VexFSClient, VexFSResult, VexFSConfig, Collection, QueryResponse, ApiResponse } from './client';
 export { default } from './client';
 //# sourceMappingURL=index.d.ts.map

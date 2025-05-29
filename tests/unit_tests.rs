@@ -2,7 +2,6 @@
 //!
 //! Comprehensive unit tests for VexFS kernel module components
 
-use std::sync::Arc;
 use std::time::Instant;
 
 /// Test result for individual unit tests
@@ -11,6 +10,16 @@ pub enum UnitTestResult {
     Passed,
     Failed(String),
     Skipped(String),
+}
+
+impl std::fmt::Display for UnitTestResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UnitTestResult::Passed => write!(f, "PASSED"),
+            UnitTestResult::Failed(msg) => write!(f, "FAILED: {}", msg),
+            UnitTestResult::Skipped(msg) => write!(f, "SKIPPED: {}", msg),
+        }
+    }
 }
 
 /// Unit test case
