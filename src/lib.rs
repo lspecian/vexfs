@@ -118,6 +118,12 @@ pub use security::{
     KeyMaterial, KeyVersion,
 };
 
+// Re-export ChromaDB API components at crate level for easy access
+#[cfg(not(feature = "kernel"))]
+pub use chromadb_api::{
+    ChromaDBApi, Collection, Document, QueryResult, DistanceFunction,
+};
+
 // Re-export macros at crate level
 
 // FFI module for C integration
@@ -180,6 +186,10 @@ pub mod hybrid_search;
 pub mod hybrid_query_optimizer;
 #[cfg(not(feature = "kernel"))]
 pub mod ioctl_integration;
+
+// ChromaDB-compatible API
+#[cfg(not(feature = "kernel"))]
+pub mod chromadb_api;
 
 // FUSE implementation for userspace testing
 #[cfg(feature = "fuse_support")]
