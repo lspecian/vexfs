@@ -1,0 +1,15 @@
+[package]
+name = "vexfs-python"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "vexfs"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.21", features = ["extension-module"] }
+vexfs = { path = "../../" }
+
+[build-dependencies]
+pyo3-build-config = "0.21"
