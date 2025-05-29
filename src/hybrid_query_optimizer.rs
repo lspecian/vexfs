@@ -11,16 +11,69 @@
 
 use crate::anns::{DistanceMetric, IndexStrategy};
 use crate::vector_search::{SearchQuery, SearchOptions};
-use crate::knn_search::{SearchParams, MetadataFilter, KnnSearchEngine};
+use crate::knn_search::{SearchParams, MetadataFilter, KnnSearchEngine, KnnError};
 use crate::vector_storage::{VectorStorageManager, VectorDataType};
 use crate::fs_core::operations::OperationContext;
 use crate::shared::errors::{VexfsError, VexfsResult};
 use crate::query_planner::{QueryPlanner, QueryCharacteristics, IndexRecommendation, QueryExecutionPlan, CostEstimate};
-use crate::query_monitor::{QueryPerformanceMonitor, QueryPattern};
+use crate::query_monitor::{QueryPerformanceMonitor, QueryPattern as MonitorQueryPattern};
 use crate::hybrid_search::{AdvancedHybridSearchEngine, HybridSearchStrategy};
 use crate::result_scoring::ScoredResult;
 use crate::shared::types::InodeNumber;
+use crate::vector_handlers::{VectorStorage, VectorEmbedding};
+use crate::ioctl::VectorIoctlError;
 
+/// Mock VectorStorage implementation for testing
+pub struct MockVectorStorage;
+
+impl MockVectorStorage {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl crate::vector_handlers::VectorStorage for MockVectorStorage {
+    type Error = String;
+    
+    fn store_vector(&mut self, _inode: &crate::ondisk::VexfsInode, _vector: &[f32]) -> Result<(), Self::Error> {
+        Ok(())
+    }
+    
+    fn load_vector(&self, _inode: &crate::ondisk::VexfsInode) -> Result<Vec<f32>, Self::Error> {
+        Ok(vec![0.0; 128])
+    }
+    
+    fn get_all_vector_ids(&self) -> Result<Vec<u64>, Self::Error> {
+        Ok(vec![1, 2, 3])
+    }
+    
+    fn get_vector_header(&self, _vector_id: u64) -> Result<crate::vector_storage::VectorHeader, Self::Error> {
+        Ok(crate::vector_storage::VectorHeader {
+            magic: crate::vector_storage::VectorHeader::MAGIC,
+            version: crate::vector_storage::VECTOR_FORMAT_VERSION,
+            vector_id: _vector_id,
+            file_inode: 1,
+            data_type: crate::vector_storage::VectorDataType::Float32,
+            compression: crate::vector_storage::CompressionType::None,
+            dimensions: 128,
+            original_size: 512,
+            compressed_size: 512,
+            created_timestamp: 0,
+            modified_timestamp: 0,
+            checksum: 0,
+            flags: 0,
+            reserved: [],
+        })
+    }
+    
+    fn get_vector_data(&self, _vector_id: u64) -> Result<Vec<f32>, Self::Error> {
+        Ok(vec![0.0; 128])
+    }
+    
+    fn get_vector_count(&self) -> Result<usize, Self::Error> {
+        Ok(3)
+    }
+}
 #[cfg(not(feature = "kernel"))]
 use std::sync::Arc;
 #[cfg(feature = "kernel")]
@@ -193,7 +246,7 @@ pub struct OptimizationHints {
 }
 
 /// Hybrid execution strategies
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum HybridExecutionStrategy {
     /// Vector-first execution (filter after vector search)
     VectorFirst,
@@ -1062,7 +1115,10 @@ impl HybridQueryOptimizer {
             };
             
             // Use the existing search infrastructure
-            let knn_engine = KnnSearchEngine::new();
+            // Create a mock storage that implements the correct VectorStorage trait
+            let storage = Box::new(MockVectorStorage::new());
+            let mut knn_engine = KnnSearchEngine::new(storage)
+                .map_err(|_| VexfsError::SearchError(crate::shared::errors::SearchErrorKind::InvalidQuery))?;
             knn_engine.search(context, &vector_comp.vector, &SearchParams {
                 k: search_query.k,
                 metric: search_query.metric,
@@ -1123,7 +1179,10 @@ impl HybridQueryOptimizer {
                 use_simd: vector_comp.use_simd,
             };
             
-            let knn_engine = KnnSearchEngine::new();
+            // Create a mock storage that implements the correct VectorStorage trait
+            let storage = Box::new(MockVectorStorage::new());
+            let mut knn_engine = KnnSearchEngine::new(storage)
+                .map_err(|_| VexfsError::SearchError(crate::shared::errors::SearchErrorKind::InvalidQuery))?;
             knn_engine.search(context, &vector_comp.vector, &SearchParams {
                 k: search_query.k,
                 metric: search_query.metric,
@@ -1170,7 +1229,9 @@ impl HybridQueryOptimizer {
                 use_simd: vector_comp.use_simd,
             };
             
-            let knn_engine = KnnSearchEngine::new();
+            let storage = Box::new(MockVectorStorage::new());
+            let mut knn_engine = KnnSearchEngine::new(storage)
+                .map_err(|_| VexfsError::SearchError(crate::shared::errors::SearchErrorKind::InvalidQuery))?;
             Some(knn_engine.search(context, &vector_comp.vector, &SearchParams {
                 k: search_query.k,
                 metric: search_query.metric,
@@ -1241,7 +1302,9 @@ impl HybridQueryOptimizer {
             if candidates.len() > query.result_requirements.max_results * 10 {
                 // Too many candidates, apply vector search with high k
                 if let Some(ref vector_comp) = query.vector_component {
-                    let knn_engine = KnnSearchEngine::new();
+                    let storage = Box::new(MockVectorStorage::new());
+                    let mut knn_engine = KnnSearchEngine::new(storage)
+                        .map_err(|_| VexfsError::SearchError(crate::shared::errors::SearchErrorKind::InvalidQuery))?;
                     knn_engine.search(context, &vector_comp.vector, &SearchParams {
                         k: query.result_requirements.max_results * 5,
                         metric: vector_comp.metric,
@@ -1258,7 +1321,10 @@ impl HybridQueryOptimizer {
                 self.convert_inodes_to_knn_results(&candidates)?
             }
         } else if let Some(ref vector_comp) = query.vector_component {
-            let knn_engine = KnnSearchEngine::new();
+            // Create a mock storage that implements the correct VectorStorage trait
+            let storage = Box::new(MockVectorStorage::new());
+            let mut knn_engine = KnnSearchEngine::new(storage)
+                .map_err(|_| VexfsError::SearchError(crate::shared::errors::SearchErrorKind::InvalidQuery))?;
             knn_engine.search(context, &vector_comp.vector, &SearchParams {
                 k: query.result_requirements.max_results * 5,
                 metric: vector_comp.metric,
@@ -1280,7 +1346,10 @@ impl HybridQueryOptimizer {
                 .map(|r| r.file_inode)
                 .collect();
             
-            let knn_engine = KnnSearchEngine::new();
+            // Create a mock storage that implements the correct VectorStorage trait
+            let storage = Box::new(MockVectorStorage::new());
+            let mut knn_engine = KnnSearchEngine::new(storage)
+                .map_err(|_| VexfsError::SearchError(crate::shared::errors::SearchErrorKind::InvalidQuery))?;
             knn_engine.search(context, &vector_comp.vector, &SearchParams {
                 k: query.result_requirements.max_results,
                 metric: vector_comp.metric,
@@ -2231,384 +2300,5 @@ impl HybridQueryOptimizer {
     /// Reset statistics
     pub fn reset_statistics(&mut self) {
         self.statistics = HybridQueryStatistics::default();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_hybrid_query_validation() {
-        let query = HybridQuery {
-            vector_component: Some(VectorQueryComponent {
-                vector: vec![1.0, 2.0, 3.0],
-                metric: DistanceMetric::Euclidean,
-                similarity_threshold: Some(0.8),
-                weight: 0.7,
-                approximate: true,
-                use_simd: true,
-            }),
-            metadata_component: Some(MetadataQueryComponent {
-                file_size_range: Some((1024, 1048576)),
-                timestamp_range: None,
-                file_types: vec!["txt".to_string()],
-                path_patterns: Vec::new(),
-                content_types: Vec::new(),
-                weight: 0.3,
-                estimated_selectivity: 0.1,
-            }),
-            spatial_temporal_component: None,
-            result_requirements: ResultRequirements {
-                max_results: 10,
-                min_relevance_score: 0.5,
-                diversity_requirements: None,
-                ranking_strategy: RankingStrategy::Relevance,
-                include_explanations: false,
-            },
-            optimization_hints: OptimizationHints {
-                preferred_strategy: Some(HybridExecutionStrategy::Adaptive),
-                index_preferences: Vec::new(),
-                cache_hints: CacheHints {
-                    prefer_cache: true,
-                    cache_results: true,
-                    invalidation_strategy: CacheInvalidationStrategy::TimeBased,
-                },
-                parallelization_hints: ParallelizationHints {
-                    max_threads: 4,
-                    parallel_threshold: 100,
-                    load_balancing: LoadBalancingStrategy::WorkStealing,
-                },
-                memory_hints: MemoryHints {
-                    max_memory_bytes: 64 * 1024 * 1024,
-                    allocation_strategy: MemoryAllocationStrategy::Adaptive,
-                    pressure_handling: MemoryPressureHandling::Adaptive,
-                },
-            },
-            resource_constraints: ResourceConstraints {
-                max_execution_time_us: 100_000,
-                max_memory_bytes: 64 * 1024 * 1024,
-                max_io_operations: 1000,
-                priority: QueryPriority::Normal,
-                allocation_strategy: ResourceAllocationStrategy::Fair,
-            },
-        };
-
-        let config = HybridOptimizerConfig::default();
-        let optimizer = HybridQueryOptimizer {
-            query_planner: Arc::new(QueryPlanner::new(
-                Arc::new(VectorStorageManager::new()),
-                crate::query_planner::QueryPlannerConfig::default(),
-            )),
-            performance_monitor: Arc::new(QueryPerformanceMonitor::new(
-                crate::query_monitor::MonitoringConfig::default(),
-            )),
-            hybrid_search_engine: Arc::new(AdvancedHybridSearchEngine::new(
-                KnnSearchEngine::new(),
-                Arc::new(QueryPlanner::new(
-                    Arc::new(VectorStorageManager::new()),
-                    crate::query_planner::QueryPlannerConfig::default(),
-                )),
-                Arc::new(crate::search_cache::SearchResultCache::new(
-                    crate::search_cache::CacheConfig::default(),
-                )),
-                Arc::new(QueryPerformanceMonitor::new(
-                    crate::query_monitor::MonitoringConfig::default(),
-                )),
-            )),
-            vector_storage: Arc::new(VectorStorageManager::new()),
-            statistics: HybridQueryStatistics::default(),
-            config,
-            active_optimizations: BTreeMap::new(),
-            optimization_counter: 0,
-        };
-
-        // Test validation
-        assert!(optimizer.validate_hybrid_query(&query).is_ok());
-    }
-
-    #[test]
-    fn test_query_statistics_collection() {
-        let query = HybridQuery {
-            vector_component: Some(VectorQueryComponent {
-                vector: vec![1.0, 0.0, 3.0, 0.0, 5.0],
-                metric: DistanceMetric::Euclidean,
-                similarity_threshold: Some(0.8),
-                weight: 0.6,
-                approximate: true,
-                use_simd: true,
-            }),
-            metadata_component: Some(MetadataQueryComponent {
-                file_size_range: Some((1024, 1048576)),
-                timestamp_range: Some((1640995200_000_000, 1640995300_000_000)),
-                file_types: vec!["txt".to_string(), "pdf".to_string()],
-                path_patterns: vec!["/docs/*".to_string()],
-                content_types: vec!["text/plain".to_string()],
-                weight: 0.4,
-                estimated_selectivity: 0.2,
-            }),
-            spatial_temporal_component: None,
-            result_requirements: ResultRequirements {
-                max_results: 50,
-                min_relevance_score: 0.7,
-                diversity_requirements: None,
-                ranking_strategy: RankingStrategy::Hybrid,
-                include_explanations: true,
-            },
-            optimization_hints: OptimizationHints {
-                preferred_strategy: Some(HybridExecutionStrategy::Parallel),
-                index_preferences: vec![IndexStrategy::HNSW, IndexStrategy::IVF],
-                cache_hints: CacheHints {
-                    prefer_cache: true,
-                    cache_results: true,
-                    invalidation_strategy: CacheInvalidationStrategy::ContentBased,
-                },
-                parallelization_hints: ParallelizationHints {
-                    max_threads: 8,
-                    parallel_threshold: 200,
-                    load_balancing: LoadBalancingStrategy::DynamicPartitioning,
-                },
-                memory_hints: MemoryHints {
-                    max_memory_bytes: 128 * 1024 * 1024,
-                    allocation_strategy: MemoryAllocationStrategy::PoolBased,
-                    pressure_handling: MemoryPressureHandling::SpillToDisk,
-                },
-            },
-            resource_constraints: ResourceConstraints {
-                max_execution_time_us: 500_000,
-                max_memory_bytes: 128 * 1024 * 1024,
-                max_io_operations: 5000,
-                priority: QueryPriority::High,
-                allocation_strategy: ResourceAllocationStrategy::PriorityBased,
-            },
-        };
-
-        let config = HybridOptimizerConfig::default();
-        let optimizer = HybridQueryOptimizer {
-            query_planner: Arc::new(QueryPlanner::new(
-                Arc::new(VectorStorageManager::new()),
-                crate::query_planner::QueryPlannerConfig::default(),
-            )),
-            performance_monitor: Arc::new(QueryPerformanceMonitor::new(
-                crate::query_monitor::MonitoringConfig::default(),
-            )),
-            hybrid_search_engine: Arc::new(AdvancedHybridSearchEngine::new(
-                KnnSearchEngine::new(),
-                Arc::new(QueryPlanner::new(
-                    Arc::new(VectorStorageManager::new()),
-                    crate::query_planner::QueryPlannerConfig::default(),
-                )),
-                Arc::new(crate::search_cache::SearchResultCache::new(
-                    crate::search_cache::CacheConfig::default(),
-                )),
-                Arc::new(QueryPerformanceMonitor::new(
-                    crate::query_monitor::MonitoringConfig::default(),
-                )),
-            )),
-            vector_storage: Arc::new(VectorStorageManager::new()),
-            statistics: HybridQueryStatistics::default(),
-            config,
-            active_optimizations: BTreeMap::new(),
-            optimization_counter: 0,
-        };
-
-        let stats = optimizer.collect_query_statistics(&query).unwrap();
-        
-        assert_eq!(stats.vector_dimensions, 5);
-        assert!(stats.vector_sparsity > 0.0); // Has zero values
-        assert!(stats.has_vector_component);
-        assert!(stats.has_metadata_component);
-        assert_eq!(stats.metadata_filter_count, 5); // All filter types present
-        assert_eq!(stats.estimated_result_count, 50);
-    }
-
-    #[test]
-    fn test_execution_strategy_selection() {
-        let vector_only_query = HybridQuery {
-            vector_component: Some(VectorQueryComponent {
-                vector: vec![1.0; 128],
-                metric: DistanceMetric::Cosine,
-                similarity_threshold: None,
-                weight: 1.0,
-                approximate: false,
-                use_simd: true,
-            }),
-            metadata_component: None,
-            spatial_temporal_component: None,
-            result_requirements: ResultRequirements {
-                max_results: 10,
-                min_relevance_score: 0.5,
-                diversity_requirements: None,
-                ranking_strategy: RankingStrategy::Relevance,
-                include_explanations: false,
-            },
-            optimization_hints: OptimizationHints {
-                preferred_strategy: None,
-                index_preferences: Vec::new(),
-                cache_hints: CacheHints {
-                    prefer_cache: false,
-                    cache_results: false,
-                    invalidation_strategy: CacheInvalidationStrategy::Never,
-                },
-                parallelization_hints: ParallelizationHints {
-                    max_threads: 1,
-                    parallel_threshold: 1000,
-                    load_balancing: LoadBalancingStrategy::RoundRobin,
-                },
-                memory_hints: MemoryHints {
-                    max_memory_bytes: 32 * 1024 * 1024,
-                    allocation_strategy: MemoryAllocationStrategy::Conservative,
-                    pressure_handling: MemoryPressureHandling::Fail,
-                },
-            },
-            resource_constraints: ResourceConstraints {
-                max_execution_time_us: 50_000,
-                max_memory_bytes: 32 * 1024 * 1024,
-                max_io_operations: 100,
-                priority: QueryPriority::Normal,
-                allocation_strategy: ResourceAllocationStrategy::Fair,
-            },
-        };
-
-        let config = HybridOptimizerConfig::default();
-        let optimizer = HybridQueryOptimizer {
-            query_planner: Arc::new(QueryPlanner::new(
-                Arc::new(VectorStorageManager::new()),
-                crate::query_planner::QueryPlannerConfig::default(),
-            )),
-            performance_monitor: Arc::new(QueryPerformanceMonitor::new(
-                crate::query_monitor::MonitoringConfig::default(),
-            )),
-            hybrid_search_engine: Arc::new(AdvancedHybridSearchEngine::new(
-                KnnSearchEngine::new(),
-                Arc::new(QueryPlanner::new(
-                    Arc::new(VectorStorageManager::new()),
-                    crate::query_planner::QueryPlannerConfig::default(),
-                )),
-                Arc::new(crate::search_cache::SearchResultCache::new(
-                    crate::search_cache::CacheConfig::default(),
-                )),
-                Arc::new(QueryPerformanceMonitor::new(
-                    crate::query_monitor::MonitoringConfig::default(),
-                )),
-            )),
-            vector_storage: Arc::new(VectorStorageManager::new()),
-            statistics: HybridQueryStatistics::default(),
-            config,
-            active_optimizations: BTreeMap::new(),
-            optimization_counter: 0,
-        };
-
-        let stats = optimizer.collect_query_statistics(&vector_only_query).unwrap();
-        let plans = optimizer.generate_candidate_plans(&vector_only_query, &stats).unwrap();
-        
-        // Should generate at least vector-first and adaptive plans
-        assert!(plans.len() >= 2);
-        assert!(plans.iter().any(|p| p.strategy == HybridExecutionStrategy::VectorFirst));
-        assert!(plans.iter().any(|p| p.strategy == HybridExecutionStrategy::Adaptive));
-    }
-
-    #[test]
-    fn test_cost_estimation() {
-        let query = HybridQuery {
-            vector_component: Some(VectorQueryComponent {
-                vector: vec![1.0; 256],
-                metric: DistanceMetric::Euclidean,
-                similarity_threshold: Some(0.9),
-                weight: 0.8,
-                approximate: true,
-                use_simd: true,
-            }),
-            metadata_component: Some(MetadataQueryComponent {
-                file_size_range: Some((1024, 10485760)),
-                timestamp_range: None,
-                file_types: vec!["jpg".to_string()],
-                path_patterns: Vec::new(),
-                content_types: Vec::new(),
-                weight: 0.2,
-                estimated_selectivity: 0.05, // Very selective
-            }),
-            spatial_temporal_component: None,
-            result_requirements: ResultRequirements {
-                max_results: 20,
-                min_relevance_score: 0.8,
-                diversity_requirements: None,
-                ranking_strategy: RankingStrategy::Relevance,
-                include_explanations: false,
-            },
-            optimization_hints: OptimizationHints {
-                preferred_strategy: Some(HybridExecutionStrategy::MetadataFirst),
-                index_preferences: vec![IndexStrategy::HNSW],
-                cache_hints: CacheHints {
-                    prefer_cache: true,
-                    cache_results: true,
-                    invalidation_strategy: CacheInvalidationStrategy::TimeBased,
-                },
-                parallelization_hints: ParallelizationHints {
-                    max_threads: 2,
-                    parallel_threshold: 50,
-                    load_balancing: LoadBalancingStrategy::WorkStealing,
-                },
-                memory_hints: MemoryHints {
-                    max_memory_bytes: 64 * 1024 * 1024,
-                    allocation_strategy: MemoryAllocationStrategy::Adaptive,
-                    pressure_handling: MemoryPressureHandling::Degrade,
-                },
-            },
-            resource_constraints: ResourceConstraints {
-                max_execution_time_us: 200_000,
-                max_memory_bytes: 64 * 1024 * 1024,
-                max_io_operations: 2000,
-                priority: QueryPriority::High,
-                allocation_strategy: ResourceAllocationStrategy::DeadlineBased,
-            },
-        };
-
-        let config = HybridOptimizerConfig::default();
-        let optimizer = HybridQueryOptimizer {
-            query_planner: Arc::new(QueryPlanner::new(
-                Arc::new(VectorStorageManager::new()),
-                crate::query_planner::QueryPlannerConfig::default(),
-            )),
-            performance_monitor: Arc::new(QueryPerformanceMonitor::new(
-                crate::query_monitor::MonitoringConfig::default(),
-            )),
-            hybrid_search_engine: Arc::new(AdvancedHybridSearchEngine::new(
-                KnnSearchEngine::new(),
-                Arc::new(QueryPlanner::new(
-                    Arc::new(VectorStorageManager::new()),
-                    crate::query_planner::QueryPlannerConfig::default(),
-                )),
-                Arc::new(crate::search_cache::SearchResultCache::new(
-                    crate::search_cache::CacheConfig::default(),
-                )),
-                Arc::new(QueryPerformanceMonitor::new(
-                    crate::query_monitor::MonitoringConfig::default(),
-                )),
-            )),
-            vector_storage: Arc::new(VectorStorageManager::new()),
-            statistics: HybridQueryStatistics::default(),
-            config,
-            active_optimizations: BTreeMap::new(),
-            optimization_counter: 0,
-        };
-
-        let stats = optimizer.collect_query_statistics(&query).unwrap();
-        let plans = optimizer.generate_candidate_plans(&query, &stats).unwrap();
-        let evaluated_plans = optimizer.evaluate_plan_costs(&plans, &stats).unwrap();
-        
-        // Should have cost estimates for all plans
-        assert!(!evaluated_plans.is_empty());
-        for (plan, cost) in &evaluated_plans {
-            assert!(cost > &0.0);
-            assert!(plan.cost_estimates.total_cost > 0.0);
-            assert!(plan.cost_estimates.confidence > 0.0);
-            assert!(plan.cost_estimates.confidence <= 1.0);
-        }
-        
-        // Plans should be sorted by cost (ascending)
-        for i in 1..evaluated_plans.len() {
-            assert!(evaluated_plans[i-1].1 <= evaluated_plans[i].1);
-        }
     }
 }

@@ -106,7 +106,7 @@ impl VectorCowManager {
         
         // Perform CoW on the block containing this vector
         let logical_block = mapping.vector_start_block + block_index as u64;
-        let physical_block = self.cow_manager.cow_block(inode, logical_block, &self.storage)?;
+        let physical_block = self.cow_manager.cow_write(inode, logical_block, &[])?;
         
         // Read current block data
         let mut block_data = self.storage.read_block(physical_block)?;
@@ -237,7 +237,7 @@ impl VectorCowManager {
             // Compress rarely accessed vectors
             if mapping.access_frequency < 0.1 {
                 // TODO: Implement compression
-                result.vectors_compressed += mapping.vector_count;
+                result.vectors_compressed += mapping.vector_count as u64;
             }
         }
         
@@ -380,7 +380,7 @@ impl VectorCowStats {
             return 100.0;
         }
         
-        (self.vector_space_saved as f64 / (self.total_vectors_modified as u64 * VEXFS_DEFAULT_VECTOR_DIMS * 4) as f64) * 100.0
+        (self.vector_space_saved as f64 / (self.total_vectors_modified * VEXFS_DEFAULT_VECTOR_DIMS as u64 * 4) as f64) * 100.0
     }
 }
 

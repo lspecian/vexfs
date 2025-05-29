@@ -3,7 +3,7 @@
 //! This module tests the vector caching system integration with VexFS.
 
 use vexfs::vector_cache::{VectorCacheManager, VectorCacheConfig, EvictionPolicy, PrefetchStrategy, CoherenceMode};
-use vexfs::shared::types::VectorId;
+
 use vexfs::vector_storage::{VectorHeader, VectorDataType, CompressionType};
 use std::time::Instant;
 
@@ -211,7 +211,7 @@ fn test_cache_performance_comparison() {
             policy,
             hit_rate * 100.0,
             elapsed,
-            stats.cache_stats.eviction_count
+            stats.eviction_count
         );
 
         // Basic performance assertions
@@ -264,10 +264,10 @@ fn test_cache_memory_pressure() {
 
     let stats = cache.get_stats();
     println!("Memory pressure: {:.1}%", stats.memory_pressure * 100.0);
-    println!("Evictions: {}", stats.cache_stats.eviction_count);
+    println!("Evictions: {}", stats.eviction_count);
 
     // Should have triggered evictions due to memory pressure
-    assert!(stats.cache_stats.eviction_count > 0);
+    assert!(stats.eviction_count > 0);
     assert!(stats.memory_pressure <= 1.0);
 }
 

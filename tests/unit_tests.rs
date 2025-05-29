@@ -119,9 +119,11 @@ impl VexfsUnitTestSuite {
 
         let start_time = Instant::now();
 
-        for test in &mut self.tests {
+        let mut tests = std::mem::take(&mut self.tests);
+        for test in &mut tests {
             self.execute_test(test);
         }
+        self.tests = tests;
 
         let total_time = start_time.elapsed();
 

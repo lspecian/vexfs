@@ -25,6 +25,7 @@ use crate::fs_core::{
 use crate::storage::{StorageManager, TransactionManager, layout::VexfsLayout, block::BlockDevice};
 use crate::shared::types::*;
 use crate::shared::constants::*;
+use crate::shared::errors::VexfsError;
 
 /// Performance benchmark configuration
 #[derive(Debug, Clone)]

@@ -15,6 +15,7 @@ pub enum IntegrationTestResult {
 }
 
 /// Integration test case
+#[derive(Clone)]
 pub struct IntegrationTest {
     pub name: String,
     pub description: String,
@@ -84,33 +85,33 @@ impl VexfsIntegrationTestSuite {
     /// Register all integration tests
     pub fn register_tests(&mut self) {
         // VFS Integration Tests
-        self.add_test("vfs_mount_unmount", "Test filesystem mount and unmount operations")
-            .with_kernel_requirement();
+        self.add_test("vfs_mount_unmount", "Test filesystem mount and unmount operations");
+        self.tests.last_mut().unwrap().requires_kernel = true;
         
-        self.add_test("vfs_file_operations", "Test VFS file operations (open, read, write, close)")
-            .with_kernel_requirement();
+        self.add_test("vfs_file_operations", "Test VFS file operations (open, read, write, close)");
+        self.tests.last_mut().unwrap().requires_kernel = true;
         
-        self.add_test("vfs_directory_operations", "Test VFS directory operations")
-            .with_kernel_requirement();
+        self.add_test("vfs_directory_operations", "Test VFS directory operations");
+        self.tests.last_mut().unwrap().requires_kernel = true;
         
-        self.add_test("vfs_metadata_operations", "Test VFS metadata operations (stat, chmod, etc.)")
-            .with_kernel_requirement();
+        self.add_test("vfs_metadata_operations", "Test VFS metadata operations (stat, chmod, etc.)");
+        self.tests.last_mut().unwrap().requires_kernel = true;
         
-        self.add_test("vfs_extended_attributes", "Test extended attribute operations")
-            .with_kernel_requirement();
+        self.add_test("vfs_extended_attributes", "Test extended attribute operations");
+        self.tests.last_mut().unwrap().requires_kernel = true;
 
         // System Call Integration Tests
-        self.add_test("syscall_open_close", "Test open/close system calls")
-            .with_kernel_requirement();
+        self.add_test("syscall_open_close", "Test open/close system calls");
+        self.tests.last_mut().unwrap().requires_kernel = true;
         
-        self.add_test("syscall_read_write", "Test read/write system calls")
-            .with_kernel_requirement();
+        self.add_test("syscall_read_write", "Test read/write system calls");
+        self.tests.last_mut().unwrap().requires_kernel = true;
         
-        self.add_test("syscall_seek_operations", "Test seek operations")
-            .with_kernel_requirement();
+        self.add_test("syscall_seek_operations", "Test seek operations");
+        self.tests.last_mut().unwrap().requires_kernel = true;
         
-        self.add_test("syscall_mmap_operations", "Test memory mapping operations")
-            .with_kernel_requirement();
+        self.add_test("syscall_mmap_operations", "Test memory mapping operations");
+        self.tests.last_mut().unwrap().requires_kernel = true;
 
         // Vector Operations Integration
         self.add_test("vector_storage_integration", "Test vector storage with filesystem operations");
@@ -129,8 +130,8 @@ impl VexfsIntegrationTestSuite {
         self.add_test("anns_recovery_integration", "Test ANNS recovery integration");
 
         // Security Integration Tests
-        self.add_test("security_acl_integration", "Test ACL integration with VFS")
-            .with_kernel_requirement();
+        self.add_test("security_acl_integration", "Test ACL integration with VFS");
+        self.tests.last_mut().unwrap().requires_kernel = true;
         
         self.add_test("security_encryption_integration", "Test encryption integration");
         
@@ -151,17 +152,17 @@ impl VexfsIntegrationTestSuite {
         self.add_test("snapshot_recovery_integration", "Test snapshot recovery integration");
 
         // QEMU Environment Tests
-        self.add_test("qemu_module_loading", "Test kernel module loading in QEMU")
-            .with_qemu_requirement();
+        self.add_test("qemu_module_loading", "Test kernel module loading in QEMU");
+        self.tests.last_mut().unwrap().requires_qemu = true;
         
-        self.add_test("qemu_filesystem_operations", "Test filesystem operations in QEMU")
-            .with_qemu_requirement();
+        self.add_test("qemu_filesystem_operations", "Test filesystem operations in QEMU");
+        self.tests.last_mut().unwrap().requires_qemu = true;
         
-        self.add_test("qemu_vector_operations", "Test vector operations in QEMU")
-            .with_qemu_requirement();
+        self.add_test("qemu_vector_operations", "Test vector operations in QEMU");
+        self.tests.last_mut().unwrap().requires_qemu = true;
         
-        self.add_test("qemu_stress_testing", "Test stress scenarios in QEMU")
-            .with_qemu_requirement();
+        self.add_test("qemu_stress_testing", "Test stress scenarios in QEMU");
+        self.tests.last_mut().unwrap().requires_qemu = true;
 
         // Cross-component Integration
         self.add_test("multicomponent_integration", "Test integration across multiple components");
@@ -171,9 +172,8 @@ impl VexfsIntegrationTestSuite {
         self.add_test("system_recovery_integration", "Test system recovery scenarios");
     }
 
-    fn add_test(&mut self, name: &str, description: &str) -> &mut IntegrationTest {
+    fn add_test(&mut self, name: &str, description: &str) {
         self.tests.push(IntegrationTest::new(name, description));
-        self.tests.last_mut().unwrap()
     }
 
     /// Execute all integration tests
@@ -187,9 +187,12 @@ impl VexfsIntegrationTestSuite {
 
         let start_time = Instant::now();
 
-        for test in &mut self.tests {
+        // Fix borrowing conflict by taking ownership temporarily
+        let mut tests = std::mem::take(&mut self.tests);
+        for test in &mut tests {
             self.execute_test(test);
         }
+        self.tests = tests;
 
         let total_time = start_time.elapsed();
 
@@ -214,7 +217,7 @@ impl VexfsIntegrationTestSuite {
         }
     }
 
-    fn execute_test(&mut self, test: &mut IntegrationTest) {
+    fn execute_test(&self, test: &mut IntegrationTest) {
         let start_time = Instant::now();
         
         print!("Running: {} ... ", test.name);

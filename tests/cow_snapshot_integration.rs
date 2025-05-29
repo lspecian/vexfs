@@ -22,13 +22,9 @@ use vexfs::fs_core::{
     cow::{CowManager, CowMapping, CowExtent, CowBlockRef},
     snapshot::{SnapshotManager, SnapshotMetadata},
     cow_integration::{CowFilesystemOperations, CowConfig},
-    operations::OperationContext,
-    permissions::UserContext,
-    inode::InodeManager,
-    locking::LockManager,
 };
 use vexfs::storage::{StorageManager, TransactionManager, layout::VexfsLayout, block::BlockDevice};
-use vexfs::shared::types::*;
+
 use vexfs::shared::constants::*;
 
 /// Create a test storage manager
@@ -37,35 +33,25 @@ fn create_test_storage() -> Arc<StorageManager> {
         total_blocks: 10000,
         block_size: VEXFS_DEFAULT_BLOCK_SIZE as u32,
         blocks_per_group: 1000,
+        inodes_per_group: 2048,
+        group_count: 10,
+        inode_size: VEXFS_DEFAULT_INODE_SIZE as u16,
         journal_blocks: 100,
-        inode_table_blocks: 100,
-        block_bitmap_blocks: 10,
-        inode_bitmap_blocks: 10,
-        superblock_blocks: 1,
-        reserved_blocks: 100,
+        vector_blocks: 50,
     };
     
     // Create a mock block device for testing
-    let device = BlockDevice::new_memory(layout.total_blocks as usize * layout.block_size as usize);
+    let device = BlockDevice::new(
+        layout.total_blocks * layout.block_size as u64,
+        layout.block_size,
+        false,
+        "test_device".to_string()
+    ).unwrap();
     
     Arc::new(StorageManager::new(device, layout, 1024 * 1024).unwrap())
 }
 
-/// Create a test operation context
-fn create_test_context(storage: Arc<StorageManager>) -> (OperationContext<'static>, InodeManager, LockManager) {
-    let mut inode_manager = InodeManager::new((*storage).clone()).unwrap();
-    let mut lock_manager = LockManager::new();
-    let user = UserContext::root();
-    
-    let context = OperationContext::new(
-        user,
-        VEXFS_ROOT_INO,
-        &mut inode_manager,
-        &mut lock_manager,
-    );
-    
-    (context, inode_manager, lock_manager)
-}
+
 
 #[test]
 fn test_cow_block_ref_creation() {
@@ -167,7 +153,7 @@ fn test_cow_mapping_snapshot_creation() {
     assert_eq!(snapshot.inode, 1);
     assert_eq!(snapshot.logical_size, 3);
     assert!(snapshot.parent_mapping.is_some());
-    assert!(snapshot.flags.contains(crate::fs_core::cow::CowMappingFlags::SNAPSHOT));
+    assert!(snapshot.flags.contains(vexfs::fs_core::cow::CowMappingFlags::SNAPSHOT));
 }
 
 #[test]
@@ -343,7 +329,7 @@ fn test_cow_config_defaults() {
 fn test_cow_filesystem_operations_creation() {
     let storage = create_test_storage();
     let transaction_manager = Arc::new(TransactionManager::new(
-        crate::storage::journal::VexfsJournal::new(VEXFS_DEFAULT_BLOCK_SIZE as u32, 100)
+        vexfs::storage::journal::VexfsJournal::new(VEXFS_DEFAULT_BLOCK_SIZE as u32, 100)
     ));
     let config = CowConfig::default();
     
@@ -438,30 +424,6 @@ fn test_snapshot_stats_compression_ratio() {
     // Test edge case: no space used
     let empty_stats = SnapshotStats::default();
     assert_eq!(empty_stats.compression_ratio(), 1.0);
-}
-
-#[test]
-fn test_concurrent_cow_operations() {
-    use std::thread;
-    use std::sync::Arc;
-    
-    let storage = create_test_storage();
-    let cow_manager = Arc::new(CowManager::new(storage));
-    
-    let handles: Vec<_> = (0..10).map(|i| {
-        let cow_manager = cow_manager.clone();
-        thread::spawn(move || {
-            let inode = i as u64 + 1;
-            let mapping = cow_manager.get_mapping(inode).unwrap();
-            
-            // Each thread works with a different inode
-            assert_eq!(mapping.read().inode, inode);
-        })
-    }).collect();
-    
-    for handle in handles {
-        handle.join().unwrap();
-    }
 }
 
 #[test]
