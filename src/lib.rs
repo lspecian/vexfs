@@ -181,6 +181,10 @@ pub mod hybrid_query_optimizer;
 #[cfg(not(feature = "kernel"))]
 pub mod ioctl_integration;
 
+// FUSE implementation for userspace testing
+#[cfg(feature = "fuse_support")]
+pub mod fuse_impl;
+
 // Conditional compilation for userspace-only modules
 #[cfg(not(feature = "kernel"))]
 #[path = "vector_handlers_stub.rs"]

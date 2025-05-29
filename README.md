@@ -127,30 +127,46 @@ vexfs/
 
 ### Prerequisites
 - **Rust**: Stable toolchain (1.70+)
-- **Linux**: Kernel headers (5.4+)
-- **QEMU**: For kernel module testing (optional)
+- **Linux**: Kernel headers (5.4+) or FUSE for simple testing
+- **FUSE**: For userspace testing (recommended for developers)
 - **Standard Tools**: make, gcc, git
 
-### Installation & Basic Usage
+### Simple Testing with FUSE (Recommended for Developers)
 
 ```bash
 # Clone the repository
 git clone https://github.com/lspecian/vexfs.git
 cd vexfs
 
+# Install FUSE (if not already installed)
+sudo apt-get install fuse libfuse-dev
+
+# Run the simple test script
+./test_vexfs_simple.sh
+
+# This will:
+# - Build VexFS with FUSE support
+# - Mount VexFS at /tmp/vexfs_test
+# - Run basic functionality tests
+# - Show usage examples
+```
+
+### Production Installation & Testing
+
+```bash
 # Build the project (production-ready)
 cargo build --release
 
 # Run comprehensive tests
 cargo test
 
-# Run performance benchmarks
-cargo run --bin vector_benchmark
-cargo run --bin vector_cache_benchmark
-cargo run --bin cow_snapshot_benchmark
+# Run performance benchmarks (when available)
+# cargo run --bin vector_benchmark
+# cargo run --bin vector_cache_benchmark
+# cargo run --bin cow_snapshot_benchmark
 
 # Run comprehensive test framework
-cargo run --bin comprehensive_test_runner
+# cargo run --bin comprehensive_test_runner
 ```
 
 ### Vector Operations Demo
