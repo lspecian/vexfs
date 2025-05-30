@@ -5,6 +5,8 @@
 
 pub mod level1_basic_validation;
 pub mod level2_vm_mount_operations;
+pub mod kselftest_integration;
 
 pub use level1_basic_validation::*;
 pub use level2_vm_mount_operations::*;
+pub use kselftest_integration::*;
