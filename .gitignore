@@ -108,3 +108,11 @@ tests/legacy/vm_management/vm/
 
 # Test results (generated artifacts, not source code)
 test_results/
+
+# VM ISO files - download separately
+*.iso
+tests/vm_testing/vm/*.iso
+
+# VM ISO files - download separately
+*.iso
+tests/vm_testing/vm/*.iso
