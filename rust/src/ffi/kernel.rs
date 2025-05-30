@@ -41,7 +41,7 @@ use alloc::{boxed::Box, string::ToString};
 use std::boxed::Box;
 
 // Import error constants from parent module
-use super::{VEXFS_SUCCESS, VEXFS_ERROR_GENERIC, VEXFS_ERROR_INVAL, to_ffi_result};
+use super::{VEXFS_SUCCESS, VEXFS_ERROR_GENERIC, VEXFS_ERROR_INVAL, VEXFS_ERROR_NOENT, to_ffi_result};
 
 // Global state management for kernel FFI
 #[cfg(feature = "kernel")]
@@ -206,7 +206,7 @@ pub extern "C" fn vexfs_rust_fill_super(sb_ptr: *mut c_void) -> c_int {
         // Userspace superblock initialization (for testing)
         match initialize_userspace_superblock(sb_ptr) {
             Ok(_) => VEXFS_SUCCESS,
-            Err(err) => to_ffi_result(Err(err)),
+            Err(err) => to_ffi_result::<()>(Err(err)),
         }
     }
 }
@@ -364,7 +364,7 @@ pub extern "C" fn vexfs_rust_init_inode(
         // Userspace inode initialization (for testing)
         match initialize_userspace_inode(inode_ptr, ino, mode) {
             Ok(_) => VEXFS_SUCCESS,
-            Err(err) => to_ffi_result(Err(err)),
+            Err(err) => to_ffi_result::<()>(Err(err)),
         }
     }
 }
@@ -424,7 +424,7 @@ pub extern "C" fn vexfs_rust_write_inode(inode_ptr: *mut c_void) -> c_int {
         // Write inode in userspace mode (for testing)
         match write_userspace_inode(inode_ptr) {
             Ok(_) => VEXFS_SUCCESS,
-            Err(err) => to_ffi_result(Err(err)),
+            Err(err) => to_ffi_result::<()>(Err(err)),
         }
     }
 }
@@ -460,7 +460,7 @@ pub extern "C" fn vexfs_rust_sync_fs(sb_ptr: *mut c_void, wait: c_int) -> c_int 
         // Sync filesystem in userspace mode (for testing)
         match sync_userspace_filesystem(sb_ptr, wait != 0) {
             Ok(_) => VEXFS_SUCCESS,
-            Err(err) => to_ffi_result(Err(err)),
+            Err(err) => to_ffi_result::<()>(Err(err)),
         }
     }
 }

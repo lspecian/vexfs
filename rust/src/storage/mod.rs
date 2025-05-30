@@ -84,6 +84,7 @@ use core::cell::RefCell;
 use alloc::{vec::Vec, string::{String, ToString}};
 
 /// Storage subsystem manager that coordinates all storage operations
+#[derive(Debug, Clone, PartialEq)]
 pub struct StorageManager {
     /// Block device interface
     block_manager: RefCell<BlockManager>,

@@ -132,7 +132,7 @@ scripts/test-vm.sh
 # 🏗️ Building VM with Packer...
 # 🚀 Starting VM and running tests...
 # ✅ VM testing complete
-# 📊 Test results available in test_env/results/
+# 📊 Test results available in tests/test_results/
 ```
 
 ## 📋 **Development Process**
@@ -177,7 +177,7 @@ scripts/test-vm.sh
    scripts/test-vm.sh
    
    # Review results
-   cat test_env/results/test-report.txt
+   cat tests/test_results/test-report.txt
    ```
 
 2. **Performance Validation**
@@ -278,10 +278,10 @@ qemu-system-x86_64 --version
 #### **Tests Fail in VM**
 ```bash
 # Check VM logs
-cat test_env/vm-build.log
+cat tests/legacy/shell_scripts/vm-build.log
 
 # Manual VM inspection
-test_env/run_qemu.sh --interactive
+tests/legacy/shell_scripts/run_qemu.sh --interactive
 
 # Inside VM:
 sudo dmesg | tail -50

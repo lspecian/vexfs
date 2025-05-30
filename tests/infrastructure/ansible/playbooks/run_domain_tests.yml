@@ -1,0 +1,207 @@
+---
+# VexFS Domain Test Execution Playbook
+# Executes tests for specific VexFS domains across test VMs
+
+- name: Execute VexFS Domain Tests
+  hosts: test_vms
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    # Default test configuration
+    test_domains: "{{ domains | default(['kernel_module']) }}"
+    result_format: "{{ format | default('structured_json') }}"
+    test_timeout: "{{ timeout | default(1800) }}"  # 30 minutes
+    test_retry_count: "{{ retry_count | default(2) }}"
+    parallel_execution: "{{ parallel | default(false) }}"
+    
+    # VexFS configuration
+    vexfs_source_path: "/mnt/vexfs_source"
+    test_artifacts_path: "/home/vexfs/test_artifacts"
+    result_output_path: "/home/vexfs/test_results"
+    
+    # Test result schema
+    test_result_schema:
+      metadata:
+        test_id: "{{ ansible_date_time.epoch }}-{{ inventory_hostname }}"
+        domain: "{{ item }}"
+        timestamp: "{{ ansible_date_time.iso8601 }}"
+        hostname: "{{ inventory_hostname }}"
+        vm_specs:
+          memory: "{{ ansible_memtotal_mb }}MB"
+          cpus: "{{ ansible_processor_vcpus }}"
+          kernel: "{{ ansible_kernel }}"
+          os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+        version: "1.0.0"
+      execution:
+        duration: null
+        status: "PENDING"
+        exit_code: null
+        command: null
+      metrics:
+        performance: {}
+        resource_usage: {}
+        custom_metrics: {}
+      artifacts:
+        logs: []
+        screenshots: []
+        dumps: []
+      analysis:
+        trends: {}
+        regressions: []
+        recommendations: []
+
+  pre_tasks:
+    - name: Validate test environment
+      block:
+        - name: Check VexFS source mount
+          stat:
+            path: "{{ vexfs_source_path }}"
+          register: vexfs_source_check
+          
+        - name: Fail if VexFS source not mounted
+          fail:
+            msg: "VexFS source not found at {{ vexfs_source_path }}"
+          when: not vexfs_source_check.stat.exists
+          
+        - name: Create test directories
+          file:
+            path: "{{ item }}"
+            state: directory
+            owner: vexfs
+            group: vexfs
+            mode: '0755'
+          loop:
+            - "{{ test_artifacts_path }}"
+            - "{{ result_output_path }}"
+            - "{{ result_output_path }}/{{ ansible_date_time.date }}"
+            
+        - name: Check system resources
+          debug:
+            msg: |
+              System Resources:
+              - Memory: {{ ansible_memtotal_mb }}MB
+              - CPUs: {{ ansible_processor_vcpus }}
+              - Disk: {{ ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute='size_available') | first | filesizeformat }}
+              - Kernel: {{ ansible_kernel }}
+
+  roles:
+    - kernel_dev_setup
+    - vexfs_build
+    - domain_test_runner
+
+  tasks:
+    - name: Execute domain tests
+      include_tasks: tasks/execute_domain_test.yml
+      loop: "{{ test_domains }}"
+      loop_control:
+        loop_var: domain_name
+      when: not parallel_execution
+      
+    - name: Execute domain tests in parallel
+      include_tasks: tasks/execute_domain_test_parallel.yml
+      when: parallel_execution
+
+    - name: Collect and analyze results
+      include_tasks: tasks/collect_results.yml
+
+  post_tasks:
+    - name: Generate test report
+      template:
+        src: test_report.html.j2
+        dest: "{{ result_output_path }}/{{ ansible_date_time.date }}/test_report_{{ ansible_date_time.epoch }}.html"
+        owner: vexfs
+        group: vexfs
+        mode: '0644'
+      vars:
+        test_results: "{{ domain_test_results | default([]) }}"
+        
+    - name: Upload results to central storage
+      include_tasks: tasks/upload_results.yml
+      when: central_storage_enabled | default(false)
+      
+    - name: Send notifications
+      include_tasks: tasks/send_notifications.yml
+      when: notifications_enabled | default(false)
+
+  handlers:
+    - name: restart vexfs service
+      systemd:
+        name: vexfs-test
+        state: restarted
+        
+    - name: cleanup test artifacts
+      file:
+        path: "{{ test_artifacts_path }}/temp"
+        state: absent
+
+---
+# Task: Execute individual domain test
+- name: Execute domain test - {{ domain_name }}
+  block:
+    - name: Initialize test result
+      set_fact:
+        current_test_result: "{{ test_result_schema }}"
+        
+    - name: Update test metadata
+      set_fact:
+        current_test_result: "{{ current_test_result | combine({
+          'metadata': current_test_result.metadata | combine({
+            'domain': domain_name,
+            'test_id': ansible_date_time.epoch + '-' + inventory_hostname + '-' + domain_name
+          })
+        }) }}"
+        
+    - name: Record test start time
+      set_fact:
+        test_start_time: "{{ ansible_date_time.epoch }}"
+        
+    - name: Execute domain-specific test
+      include_tasks: "tasks/domains/{{ domain_name }}.yml"
+      register: domain_test_execution
+      
+    - name: Calculate test duration
+      set_fact:
+        test_duration: "{{ ansible_date_time.epoch | int - test_start_time | int }}"
+        
+    - name: Update test result with execution data
+      set_fact:
+        current_test_result: "{{ current_test_result | combine({
+          'execution': {
+            'duration': test_duration,
+            'status': domain_test_execution.failed | ternary('FAILED', 'PASSED'),
+            'exit_code': domain_test_execution.rc | default(0),
+            'command': domain_test_execution.cmd | default('')
+          }
+        }) }}"
+        
+    - name: Collect system metrics
+      include_tasks: tasks/collect_metrics.yml
+      
+    - name: Store test result
+      set_fact:
+        domain_test_results: "{{ domain_test_results | default([]) + [current_test_result] }}"
+        
+  rescue:
+    - name: Handle test failure
+      set_fact:
+        current_test_result: "{{ current_test_result | combine({
+          'execution': {
+            'duration': ansible_date_time.epoch | int - test_start_time | int,
+            'status': 'ERROR',
+            'exit_code': -1,
+            'command': 'rescue_handler'
+          }
+        }) }}"
+        
+    - name: Log test failure
+      debug:
+        msg: "Test failed for domain {{ domain_name }}: {{ ansible_failed_result.msg | default('Unknown error') }}"
+        
+    - name: Store failed test result
+      set_fact:
+        domain_test_results: "{{ domain_test_results | default([]) + [current_test_result] }}"
+
+  always:
+    - name: Cleanup test environment
+      include_tasks: tasks/cleanup_test_env.yml

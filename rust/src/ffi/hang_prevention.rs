@@ -24,6 +24,8 @@
 //! allowing the kernel module to interact with the Rust hang prevention
 //! implementation safely.
 
+extern crate alloc;
+use alloc::string::ToString;
 use crate::shared::system_hang_prevention::{
     OperationType, init_hang_prevention, shutdown_hang_prevention,
     start_operation_watchdog, cancel_operation_watchdog, check_operation_allowed,

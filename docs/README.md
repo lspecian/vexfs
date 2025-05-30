@@ -35,10 +35,12 @@ Project status reports and current state assessments:
 
 ### 📁 [testing/](testing/)
 Testing strategies, VM setup, and testing documentation:
+- `README.md` - **UPDATED** - Comprehensive testing infrastructure overview with new consolidated structure
 - `QEMU_SETUP_GUIDE.md` - QEMU virtual machine setup guide
-- `README.md` - Testing environment overview
 - `SIMPLIFIED_VM_SETUP.md` - Simplified VM setup instructions
 - `VM_TESTING_STRATEGY.md` - Virtual machine testing strategy
+- `COMPREHENSIVE_TESTING_FRAMEWORK.md` - Framework overview
+- `INFRASTRUCTURE_AS_CODE_MIGRATION.md` - IaC migration documentation
 
 ## Root Level Documentation
 
@@ -59,6 +61,11 @@ Testing strategies, VM setup, and testing documentation:
 - **Documentation Organization**: All .md files moved to structured docs/ directories
 - **Source Code Flattening**: Moved all source code from `fs/src/` to root `src/` for cleaner structure
 - **Build System**: Makefiles and build configuration moved to project root
+- **Testing Infrastructure Consolidation**: Complete migration from scattered `test_env/` to unified `tests/` structure
+  - **Domain-Driven Design**: Tests organized by business domains with intelligent tagging system
+  - **Infrastructure-as-Code**: Terraform + Ansible moved from `infrastructure/` to `tests/infrastructure/`
+  - **Legacy Scripts Preserved**: 35+ shell scripts moved from `test_env/` to `tests/legacy/shell_scripts/`
+  - **Unified Interface**: Single `make` command system for all testing scenarios
 
 ### ⚠️ Current Issues
 - **Compilation Errors**: 506 compilation errors need resolution after structure flattening
@@ -78,9 +85,12 @@ Testing strategies, VM setup, and testing documentation:
 
 - **For Architecture Decisions**: See `architecture/` directory
 - **For Current Development Status**: Check `status/CURRENT_PROJECT_STATUS.md`
-- **For Code Organization**: Review `fs/DDD_REFACTORING_PLAN.md` 
+- **For Code Organization**: Review `fs/DDD_REFACTORING_PLAN.md`
 - **For Build Issues**: Consult `fs/BUILD_SYSTEM.md`
 - **For Testing Setup**: Use guides in `testing/` directory
+- **For Modern Testing**: See `../tests/README.md` for the new consolidated testing infrastructure
+- **For Legacy Testing**: Check `../tests/legacy/QUICK_START.md` for traditional VM-based testing
+- **For Infrastructure-as-Code**: Review `../tests/infrastructure/README.md` for automated provisioning
 
 ## Document Maintenance
 

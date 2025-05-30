@@ -87,7 +87,7 @@ impl VexfsIntegrationTestSuite {
     /// Check if QEMU is available for testing
     fn check_qemu_availability() -> bool {
         // Check if QEMU test environment is available
-        std::path::Path::new("test_env/run_qemu.sh").exists()
+        std::path::Path::new("tests/legacy/shell_scripts/run_qemu.sh").exists()
     }
 
     /// Register all integration tests

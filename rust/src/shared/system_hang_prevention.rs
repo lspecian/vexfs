@@ -32,13 +32,22 @@
 //! This is the final critical component that ensures VexFS never causes system hangs.
 
 use crate::shared::{VexfsError, VexfsResult};
-use crate::{vexfs_error, vexfs_warn, vexfs_info, vexfs_debug, kernel_or_std, printk};
-use alloc::vec::Vec;
-use alloc::string::String;
-use alloc::sync::Arc;
-use core::sync::atomic::{AtomicU64, AtomicU32, AtomicBool, Ordering};
-use core::time::Duration;
 
+// Conditional imports for kernel vs userspace
+#[cfg(feature = "kernel")]
+use crate::{vexfs_error, vexfs_warn, vexfs_info, vexfs_debug, kernel_or_std, printk};
+#[cfg(feature = "kernel")]
+use alloc::{vec::Vec, string::{String, ToString}};
+#[cfg(feature = "kernel")]
+#[cfg(feature = "kernel")]
+use alloc::sync::Arc;
+
+#[cfg(not(feature = "kernel"))]
+use crate::{vexfs_error, vexfs_warn, vexfs_info, vexfs_debug, kernel_or_std};
+#[cfg(not(feature = "kernel"))]
+use std::vec::Vec;
+#[cfg(not(feature = "kernel"))]
+use std::string::String;
 #[cfg(not(feature = "kernel"))]
 use std::sync::{Arc, Mutex, RwLock};
 #[cfg(not(feature = "kernel"))]
@@ -46,7 +55,12 @@ use std::collections::HashMap;
 #[cfg(not(feature = "kernel"))]
 use std::thread;
 #[cfg(not(feature = "kernel"))]
-use std::time::{Instant, SystemTime};
+use std::time::{Instant, SystemTime, Duration};
+
+use core::sync::atomic::{AtomicU64, AtomicU32, AtomicBool, Ordering};
+
+#[cfg(feature = "kernel")]
+use core::time::Duration;
 
 // =============================================================================
 // Constants and Configuration
@@ -581,7 +595,7 @@ impl HangPreventionManager {
                     } else {
                         vexfs_warn!("Task {} attempted to release lock {} not owned by it", 
                                    task_id, lock_id);
-                        return Err(VexfsError::PermissionDenied);
+                        return Err(VexfsError::PermissionDenied("Lock acquisition denied due to deadlock prevention".to_string()));
                     }
                 } else {
                     return Err(VexfsError::NotFound);
@@ -1213,7 +1227,14 @@ pub fn current_timestamp_secs() -> u64 {
 pub fn current_task_id() -> TaskId {
     #[cfg(not(feature = "kernel"))]
     {
-        thread::current().id().as_u64().get()
+        // Use a stable method to get thread ID by converting to string and hashing
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        
+        let thread_id = thread::current().id();
+        let mut hasher = DefaultHasher::new();
+        thread_id.hash(&mut hasher);
+        hasher.finish()
     }
     
     #[cfg(feature = "kernel")]

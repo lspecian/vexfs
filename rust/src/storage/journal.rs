@@ -23,6 +23,8 @@
 //! This module implements crash-consistent journaling for filesystem integrity,
 //! providing atomic operations and recovery mechanisms for VexFS.
 
+extern crate alloc;
+use alloc::string::ToString;
 use crate::shared::errors::{VexfsError, VexfsResult};
 use crate::shared::constants::VEXFS_JOURNAL_BUFFER_SIZE;
 use crate::shared::types::*;
@@ -141,6 +143,19 @@ impl JournalRecordHeader {
     }
 }
 
+impl PartialEq for JournalRecordHeader {
+    fn eq(&self, other: &Self) -> bool {
+        self.magic == other.magic
+            && self.record_type == other.record_type
+            && self.transaction_id == other.transaction_id
+            && self.sequence == other.sequence
+            && self.length == other.length
+            && self.checksum == other.checksum
+            && self.flags == other.flags
+            && self.timestamp == other.timestamp
+    }
+}
+
 /// Journal commit record
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
@@ -175,7 +190,7 @@ impl JournalCommitRecord {
 }
 
 /// Journal operation record
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(C)]
 pub struct JournalOperationRecord {
     /// Standard header
@@ -248,6 +263,7 @@ impl JournalOperationRecord {
 /// Journal superblock
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
+#[derive(PartialEq)]
 pub struct JournalSuperblock {
     /// Magic number
     pub j_magic: u32,
@@ -330,7 +346,7 @@ impl JournalSuperblock {
 }
 
 /// Transaction handle
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct VexfsTransaction {
     /// Transaction ID
     pub tid: u64,
@@ -424,7 +440,7 @@ impl VexfsTransaction {
 }
 
 /// Recovery information
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RecoveryInfo {
     /// Recovery needed flag
     pub recovery_needed: bool,
@@ -487,6 +503,7 @@ pub struct JournalStats {
 }
 
 /// Journal manager
+#[derive(Debug, Clone, PartialEq)]
 pub struct VexfsJournal {
     /// Journal superblock
     pub superblock: JournalSuperblock,

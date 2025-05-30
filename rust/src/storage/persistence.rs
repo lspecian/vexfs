@@ -35,7 +35,7 @@ use core::ptr;
 #[cfg(not(feature = "kernel"))]
 use std::vec::Vec;
 #[cfg(feature = "kernel")]
-use alloc::{vec::Vec, vec};
+use alloc::{string::ToString, vec::Vec, vec};
 
 /// Trait for on-disk serialization of VexFS structures
 pub trait OnDiskSerializable {
@@ -431,6 +431,7 @@ impl DiskGroupDesc {
 }
 
 /// Persistence manager for on-disk operations
+#[derive(Debug, Clone, PartialEq)]
 pub struct PersistenceManager {
     /// Block size for alignment calculations
     block_size: u32,
