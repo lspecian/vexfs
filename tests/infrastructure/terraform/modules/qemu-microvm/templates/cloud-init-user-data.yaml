@@ -1,0 +1,359 @@
+#cloud-config
+# VexFS Test VM Cloud-Init Configuration
+# Automatically configures VMs for VexFS testing
+
+hostname: ${hostname}
+fqdn: ${hostname}.${project_name}.local
+
+# User configuration
+users:
+  - name: vexfs
+    groups: sudo, docker
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+  - name: root
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+
+# Package management
+package_update: true
+package_upgrade: true
+
+packages:
+  # Essential development tools
+  - build-essential
+  - make
+  - gcc
+  - git
+  - curl
+  - wget
+  - vim
+  - htop
+  - tree
+  - jq
+  
+  # Kernel development tools
+  - linux-headers-$(uname -r)
+  - dkms
+  - kmod
+  - module-init-tools
+  
+  # System monitoring and debugging
+  - strace
+  - gdb
+  - valgrind
+  - perf-tools-unstable
+  - sysstat
+  - iotop
+  - nethogs
+  
+  # Network tools
+  - net-tools
+  - iproute2
+  - tcpdump
+  - netcat-openbsd
+  
+  # File system tools
+  - e2fsprogs
+  - xfsprogs
+  - btrfs-progs
+  - dosfstools
+  
+  # Python and testing tools
+  - python3
+  - python3-pip
+  - python3-venv
+  - python3-dev
+  
+  # Container tools (conditional)
+  - docker.io
+  - docker-compose
+
+# Rust installation
+runcmd:
+  # Install Rust toolchain
+  - |
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly
+    echo 'source $HOME/.cargo/env' >> /home/vexfs/.bashrc
+    echo 'source $HOME/.cargo/env' >> /root/.bashrc
+    
+  # Configure Rust for kernel development
+  - |
+    source /home/vexfs/.cargo/env
+    rustup component add rust-src
+    rustup target add x86_64-unknown-linux-gnu
+    cargo install bindgen-cli
+    
+  # Install additional Rust tools for VexFS
+  - |
+    source /home/vexfs/.cargo/env
+    cargo install cargo-watch
+    cargo install cargo-expand
+    cargo install cargo-audit
+    
+  # Create VexFS source mount point
+  - mkdir -p ${vexfs_source_path}
+  - chown vexfs:vexfs ${vexfs_source_path}
+  
+  # Create test artifacts directory
+  - mkdir -p /home/vexfs/test_artifacts
+  - chown vexfs:vexfs /home/vexfs/test_artifacts
+  
+  # Configure kernel module loading
+  - echo 'vexfs' >> /etc/modules-load.d/vexfs.conf
+  
+  # Set up test environment variables
+  - |
+    cat >> /home/vexfs/.bashrc << 'EOF'
+    # VexFS Test Environment
+    export VEXFS_TEST_DOMAIN="${domain_name}"
+    export VEXFS_VM_INDEX="${vm_index}"
+    export VEXFS_PROJECT="${project_name}"
+    export VEXFS_ENV="${environment}"
+    export VEXFS_SOURCE_PATH="${vexfs_source_path}"
+    export VEXFS_TEST_TIMEOUT="${test_timeout}"
+    export VEXFS_TEST_RETRY="${test_retry_count}"
+    
+    # Rust environment
+    source $HOME/.cargo/env
+    
+    # Kernel development aliases
+    alias kbuild='make -C ${vexfs_source_path}'
+    alias kclean='make -C ${vexfs_source_path} clean'
+    alias kload='sudo insmod ${vexfs_source_path}/vexfs.ko'
+    alias kunload='sudo rmmod vexfs'
+    alias ktest='${vexfs_source_path}/tests/legacy/shell_scripts/simple_kernel_test.sh'
+    
+    # VexFS testing aliases
+    alias vtest='cd ${vexfs_source_path} && cargo test'
+    alias vbuild='cd ${vexfs_source_path} && cargo build'
+    alias vcheck='cd ${vexfs_source_path} && cargo check'
+    
+    # System monitoring aliases
+    alias meminfo='cat /proc/meminfo | grep -E "(MemTotal|MemFree|MemAvailable)"'
+    alias cpuinfo='cat /proc/cpuinfo | grep -E "(model name|cpu cores|siblings)"'
+    alias diskinfo='df -h && echo && lsblk'
+    EOF
+    
+  # Copy environment to root as well
+  - cp /home/vexfs/.bashrc /root/.bashrc
+  
+  # Domain-specific configuration
+%{ if enable_kernel_dev == "true" ~}
+  # Kernel module development setup
+  - |
+    # Install additional kernel development tools
+    apt-get install -y linux-source
+    
+    # Configure kernel debugging
+    echo 'kernel.panic_on_oops = 0' >> /etc/sysctl.conf
+    echo 'kernel.panic = 10' >> /etc/sysctl.conf
+    
+    # Set up kernel module testing environment
+    mkdir -p /home/vexfs/kernel_tests
+    chown vexfs:vexfs /home/vexfs/kernel_tests
+%{ endif ~}
+
+%{ if enable_vector_ops == "true" ~}
+  # Vector operations testing setup
+  - |
+    # Install BLAS/LAPACK for vector operations
+    apt-get install -y libblas-dev liblapack-dev
+    
+    # Install Python scientific computing stack
+    pip3 install numpy scipy scikit-learn
+    
+    # Set up vector testing environment
+    mkdir -p /home/vexfs/vector_tests
+    chown vexfs:vexfs /home/vexfs/vector_tests
+%{ endif ~}
+
+%{ if enable_perf_tools == "true" ~}
+  # Performance testing setup
+  - |
+    # Install performance monitoring tools
+    apt-get install -y linux-perf
+    apt-get install -y stress-ng
+    apt-get install -y fio
+    apt-get install -y sysbench
+    
+    # Configure performance monitoring
+    echo 'kernel.perf_event_paranoid = -1' >> /etc/sysctl.conf
+    echo 'kernel.kptr_restrict = 0' >> /etc/sysctl.conf
+    
+    # Set up performance testing environment
+    mkdir -p /home/vexfs/perf_tests
+    chown vexfs:vexfs /home/vexfs/perf_tests
+%{ endif ~}
+
+# File system mounts
+mounts:
+  # Mount VexFS source code (will be mounted via libvirt filesystem)
+  - [ "vexfs_source", "${vexfs_source_path}", "9p", "trans=virtio,version=9p2000.L,rw", "0", "0" ]
+  - [ "test_artifacts", "/home/vexfs/test_artifacts", "9p", "trans=virtio,version=9p2000.L,rw", "0", "0" ]
+
+# System configuration
+write_files:
+  # VexFS test configuration
+  - path: /etc/vexfs/test.conf
+    content: |
+      # VexFS Test Configuration
+      DOMAIN=${domain_name}
+      VM_INDEX=${vm_index}
+      PROJECT=${project_name}
+      ENVIRONMENT=${environment}
+      TEST_TIMEOUT=${test_timeout}
+      TEST_RETRY=${test_retry_count}
+    owner: root:root
+    permissions: '0644'
+    
+  # Test execution script
+  - path: /usr/local/bin/vexfs-test
+    content: |
+      #!/bin/bash
+      # VexFS Test Execution Script
+      set -e
+      
+      source /etc/vexfs/test.conf
+      source /home/vexfs/.bashrc
+      
+      echo "🧪 VexFS Test Execution - Domain: $DOMAIN"
+      echo "VM: $VM_INDEX, Project: $PROJECT, Environment: $ENVIRONMENT"
+      echo "=========================================="
+      
+      cd ${vexfs_source_path}
+      
+      case "$DOMAIN" in
+        "kernel_module")
+          echo "Running kernel module tests..."
+          ./tests/legacy/shell_scripts/simple_kernel_test.sh
+          ;;
+        "filesystem_operations")
+          echo "Running filesystem operation tests..."
+          cargo test --bin filesystem_test
+          ;;
+        "vector_operations")
+          echo "Running vector operation tests..."
+          cargo test --bin vector_test_runner
+          ;;
+        "performance_metrics")
+          echo "Running performance tests..."
+          cargo test --release --bin performance_test
+          ;;
+        "safety_validation")
+          echo "Running safety validation tests..."
+          ./tests/legacy/shell_scripts/validate_memory_management.sh
+          ;;
+        "integration_testing")
+          echo "Running integration tests..."
+          cargo test --test integration_tests
+          ;;
+        *)
+          echo "Unknown test domain: $DOMAIN"
+          exit 1
+          ;;
+      esac
+      
+      echo "✅ Test execution completed successfully"
+    owner: root:root
+    permissions: '0755'
+    
+  # System monitoring script
+  - path: /usr/local/bin/vexfs-monitor
+    content: |
+      #!/bin/bash
+      # VexFS System Monitoring Script
+      
+      echo "📊 VexFS System Status"
+      echo "====================="
+      echo "Hostname: $(hostname)"
+      echo "Uptime: $(uptime)"
+      echo "Load: $(cat /proc/loadavg)"
+      echo "Memory: $(free -h | grep Mem)"
+      echo "Disk: $(df -h / | tail -1)"
+      echo "Network: $(ip addr show | grep 'inet ' | grep -v '127.0.0.1')"
+      
+      if lsmod | grep -q vexfs; then
+        echo "VexFS Module: LOADED"
+      else
+        echo "VexFS Module: NOT LOADED"
+      fi
+      
+      echo "Test Domain: ${domain_name}"
+      echo "VM Index: ${vm_index}"
+    owner: root:root
+    permissions: '0755'
+
+# Service configuration
+systemd:
+  units:
+    # VexFS test service
+    - name: vexfs-test.service
+      enabled: false
+      content: |
+        [Unit]
+        Description=VexFS Test Execution Service
+        After=network.target
+        
+        [Service]
+        Type=oneshot
+        User=vexfs
+        WorkingDirectory=${vexfs_source_path}
+        ExecStart=/usr/local/bin/vexfs-test
+        StandardOutput=journal
+        StandardError=journal
+        
+        [Install]
+        WantedBy=multi-user.target
+        
+    # VexFS monitoring service
+    - name: vexfs-monitor.service
+      enabled: true
+      content: |
+        [Unit]
+        Description=VexFS System Monitoring
+        After=network.target
+        
+        [Service]
+        Type=oneshot
+        ExecStart=/usr/local/bin/vexfs-monitor
+        
+    # VexFS monitoring timer
+    - name: vexfs-monitor.timer
+      enabled: true
+      content: |
+        [Unit]
+        Description=Run VexFS monitoring every 5 minutes
+        Requires=vexfs-monitor.service
+        
+        [Timer]
+        OnCalendar=*:0/5
+        Persistent=true
+        
+        [Install]
+        WantedBy=timers.target
+
+# Final setup commands
+final_message: |
+  VexFS Test VM (${hostname}) is ready!
+  Domain: ${domain_name}
+  VM Index: ${vm_index}
+  
+  Available commands:
+  - vexfs-test: Run domain-specific tests
+  - vexfs-monitor: Show system status
+  - kbuild, kload, kunload: Kernel module operations
+  - vtest, vbuild, vcheck: Rust operations
+  
+  VexFS source mounted at: ${vexfs_source_path}
+  Test artifacts at: /home/vexfs/test_artifacts
+  
+  SSH access: ssh vexfs@$(hostname -I | awk '{print $1}')
+
+# Power management
+power_state:
+  mode: reboot
+  delay: 0
+  condition: true

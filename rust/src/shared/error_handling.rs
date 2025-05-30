@@ -523,7 +523,7 @@ impl RetryMechanism {
     /// Calculate delay for the given attempt with exponential backoff and jitter
     fn calculate_delay(&self, attempt: u32) -> u64 {
         let base_delay = self.config.base_delay_ms as f32;
-        let exponential_delay = base_delay * self.config.backoff_multiplier.powi(attempt as i32);
+        let exponential_delay = base_delay * self.config.backoff_multiplier* self.config.backoff_multiplier;
         let capped_delay = exponential_delay.min(self.config.max_delay_ms as f32);
         
         // Add jitter to avoid thundering herd

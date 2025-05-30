@@ -34,7 +34,7 @@ impl Default for QemuTestConfig {
             vm_cpus: 2,
             vm_disk_size: "20G".to_string(),
             ssh_port: 2222,
-            ssh_key_path: "test_env/vm/keys/vexfs_vm_key".to_string(),
+            ssh_key_path: "tests/legacy/vm_management/vm/keys/vexfs_vm_key".to_string(),
             vm_user: "vexfs".to_string(),
             vm_host: "localhost".to_string(),
             test_timeout: Duration::from_secs(300), // 5 minutes

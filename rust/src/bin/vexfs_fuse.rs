@@ -1,6 +1,7 @@
 use clap::{Arg, Command};
 use fuse::mount;
 use std::path::Path;
+use std::ffi::OsStr;
 
 use vexfs::fuse_impl::VexFSFuse;
 
@@ -69,18 +70,17 @@ fn main() {
 
     // Set up mount options
     let mut options = vec![
-        "-o", "rw",
-        "-o", "fsname=vexfs",
-        "-o", "subtype=vexfs",
-        "-o", "allow_other",
+        OsStr::new("-o"), OsStr::new("rw"),
+        OsStr::new("-o"), OsStr::new("fsname=vexfs"),
+        OsStr::new("-o"), OsStr::new("subtype=vexfs"),
     ];
 
     if foreground {
-        options.push("-f");
+        options.push(OsStr::new("-f"));
     }
 
     if debug {
-        options.push("-d");
+        options.push(OsStr::new("-d"));
     }
 
     // Mount the filesystem

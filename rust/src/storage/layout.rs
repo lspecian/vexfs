@@ -29,13 +29,14 @@ use crate::shared::constants::*;
 use crate::shared::utils::*;
 
 #[cfg(feature = "kernel")]
-use alloc::vec::Vec;
+use alloc::{vec::Vec, string::{String, ToString}};
 
 #[cfg(not(feature = "kernel"))]
 use std::vec::Vec;
 
 /// Filesystem layout calculator and manager
 #[derive(Debug, Clone)]
+#[derive(PartialEq)]
 pub struct VexfsLayout {
     /// Total filesystem size in blocks
     pub total_blocks: u64,

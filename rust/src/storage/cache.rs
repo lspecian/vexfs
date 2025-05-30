@@ -35,7 +35,7 @@ use std::collections::BTreeMap;
 #[cfg(feature = "kernel")]
 use alloc::collections::BTreeMap;
 #[cfg(feature = "kernel")]
-use alloc::vec::Vec;
+use alloc::{vec::Vec, string::{String, ToString}};
 
 /// Cache entry state
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -51,7 +51,7 @@ pub enum CacheState {
 }
 
 /// Block cache entry
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CacheEntry {
     /// Block number
     pub block: BlockNumber,
@@ -120,6 +120,7 @@ impl CacheEntry {
 }
 
 /// LRU (Least Recently Used) cache implementation
+#[derive(Debug)]
 pub struct LruCache {
     /// Cache entries indexed by block number
     entries: BTreeMap<BlockNumber, CacheEntry>,
@@ -295,7 +296,34 @@ impl LruCache {
     }
 }
 
+impl Clone for LruCache {
+    fn clone(&self) -> Self {
+        Self {
+            entries: self.entries.clone(),
+            max_entries: self.max_entries,
+            current_size: self.current_size,
+            max_size: self.max_size,
+            block_size: self.block_size,
+            hit_count: self.hit_count,
+            miss_count: self.miss_count,
+            eviction_cursor: self.eviction_cursor,
+        }
+    }
+}
+
+impl PartialEq for LruCache {
+    fn eq(&self, other: &Self) -> bool {
+        self.entries == other.entries &&
+        self.max_entries == other.max_entries &&
+        self.current_size == other.current_size &&
+        self.max_size == other.max_size &&
+        self.block_size == other.block_size
+        // Note: We don't compare hit/miss counts or eviction_cursor as they're runtime state
+    }
+}
+
 /// LFU (Least Frequently Used) cache implementation
+#[derive(Debug)]
 pub struct LfuCache {
     /// Cache entries indexed by block number
     entries: BTreeMap<BlockNumber, CacheEntry>,
@@ -453,7 +481,33 @@ impl LfuCache {
     }
 }
 
+impl Clone for LfuCache {
+    fn clone(&self) -> Self {
+        Self {
+            entries: self.entries.clone(),
+            max_entries: self.max_entries,
+            current_size: self.current_size,
+            max_size: self.max_size,
+            block_size: self.block_size,
+            hit_count: self.hit_count,
+            miss_count: self.miss_count,
+        }
+    }
+}
+
+impl PartialEq for LfuCache {
+    fn eq(&self, other: &Self) -> bool {
+        self.entries == other.entries &&
+        self.max_entries == other.max_entries &&
+        self.current_size == other.current_size &&
+        self.max_size == other.max_size &&
+        self.block_size == other.block_size
+        // Note: We don't compare hit/miss counts as they're runtime state
+    }
+}
+
 /// Adaptive cache that switches between LRU and LFU based on workload
+#[derive(Debug, Clone, PartialEq)]
 pub struct AdaptiveCache {
     /// LRU cache instance
     lru_cache: LruCache,
@@ -623,6 +677,7 @@ impl CacheStats {
 }
 
 /// Block cache manager with configurable strategy
+#[derive(Debug, Clone, PartialEq)]
 pub struct BlockCacheManager {
     /// Active cache implementation
     cache: AdaptiveCache,

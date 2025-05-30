@@ -27,10 +27,10 @@ use std::sync::Arc;
 use alloc::sync::Arc;
 
 #[cfg(not(feature = "std"))]
-use alloc::{vec::Vec, string::String, format};
+use alloc::{string::ToString, vec::Vec, string::String, format};
 #[cfg(feature = "std")]
 #[cfg(feature = "kernel")]
-use alloc::{vec::Vec, string::String, format};
+use alloc::{string::ToString, vec::Vec, string::String, format};
 #[cfg(not(feature = "kernel"))]
 use std::{vec::Vec, string::String, format};
 

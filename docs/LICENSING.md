@@ -10,7 +10,7 @@ Applies to all userland components and libraries:
 - **Control tool** (`vexctl/` directory)
 - **Documentation** (`docs/` directory)
 - **Build scripts** and configuration files
-- **Test environments** (`test_env/` directory)
+- **Test environments** (`tests/legacy/` directory)
 - **Examples** and sample code
 
 ### GNU General Public License v2
@@ -28,7 +28,7 @@ src/lib.rs                  # Main userland library
 src/bin/                    # Test binaries
 vexctl/                     # Control tool (all files)
 docs/                       # Documentation (all files)
-test_env/                   # Testing environment (all files)
+tests/legacy/                   # Testing environment (all files)
 scripts/                    # Build and utility scripts
 Cargo.toml                  # Main workspace manifest
 README.md                   # Project documentation

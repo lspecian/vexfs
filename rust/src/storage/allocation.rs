@@ -31,7 +31,7 @@ use crate::shared::utils::*;
 #[cfg(not(feature = "kernel"))]
 use std::vec::Vec;
 #[cfg(feature = "kernel")]
-use alloc::{vec::Vec, vec};
+use alloc::{string::ToString, vec::Vec, vec};
 
 /// Block allocation result
 #[derive(Debug, Clone, Copy)]
@@ -85,6 +85,7 @@ pub struct FreeSpaceInfo {
 /// Block group descriptor for group-based allocation
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
+#[derive(PartialEq)]
 pub struct BlockGroup {
     /// Block bitmap location
     pub block_bitmap: BlockNumber,
@@ -175,7 +176,7 @@ pub enum AllocationStrategy {
 }
 
 /// Allocation policy for different scenarios
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AllocationPolicy {
     /// Strategy to use
     pub strategy: AllocationStrategy,
@@ -226,6 +227,7 @@ impl Default for AllocationHint {
 }
 
 /// Free space bitmap for tracking allocated blocks
+#[derive(Debug, Clone, PartialEq)]
 pub struct FreeSpaceBitmap {
     /// Bitmap data
     bitmap: Vec<u64>,
@@ -394,6 +396,7 @@ impl FreeSpaceBitmap {
 }
 
 /// Fragmentation tracker for analyzing allocation patterns
+#[derive(Debug, Clone, PartialEq)]
 pub struct FragmentationTracker {
     /// Total fragments
     fragment_count: u32,
@@ -501,6 +504,7 @@ pub struct FragmentationStats {
 }
 
 /// Space allocator for managing block allocation
+#[derive(Debug, Clone, PartialEq)]
 pub struct SpaceAllocator {
     /// Free space bitmap
     bitmap: FreeSpaceBitmap,

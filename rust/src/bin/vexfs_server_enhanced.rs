@@ -1,8 +1,8 @@
 use axum::{
-    extract::{Path, State},
+    extract::State,
     http::StatusCode,
     response::Json,
-    routing::{delete, get, post},
+    routing::get,
     Router,
 };
 use serde::{Deserialize, Serialize};
@@ -12,8 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
-use tracing::{info, warn, error, debug};
-use uuid::Uuid;
+use tracing::info;
 
 // Health check and metrics structures
 #[derive(Debug, Serialize)]
@@ -244,9 +243,9 @@ async fn get_version() -> Json<ApiResponse<serde_json::Value>> {
         "name": "VexFS",
         "description": "Vector Extended File System - ChromaDB-compatible",
         "api_version": "v1",
-        "build_date": env!("BUILD_DATE", "unknown"),
-        "git_commit": env!("GIT_COMMIT", "unknown"),
-        "rust_version": env!("RUST_VERSION", "unknown"),
+        "build_date": option_env!("BUILD_DATE").unwrap_or("unknown"),
+        "git_commit": option_env!("GIT_COMMIT").unwrap_or("unknown"),
+        "rust_version": option_env!("RUST_VERSION").unwrap_or("unknown"),
         "features": [
             "chromadb-compatible",
             "vector-search",

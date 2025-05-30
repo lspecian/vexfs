@@ -21,7 +21,7 @@ use std::sync::Arc;
 use alloc::sync::Arc;
 
 #[cfg(feature = "kernel")]
-use alloc::{vec::Vec, string::String};
+use alloc::{string::ToString, vec::Vec, string::String};
 #[cfg(not(feature = "kernel"))]
 use std::{vec::Vec, string::String};
 

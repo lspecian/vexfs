@@ -1,0 +1,19 @@
+# VexFS Kernel Build Configuration
+# Copyright (C) 2025 VexFS Contributors
+# Licensed under GPL v2
+
+# Module object files
+obj-m := vexfs.o
+vexfs-objs := src/vexfs_module_entry.o vexfs_rust_combined.o unwind_stub.o rust_eh_personality_stub.o
+
+# Compiler flags for kernel module
+ccflags-y := -I$(src)/include -DVEXFS_RUST_FFI_ENABLED
+ccflags-y += -Wno-unused-function -Wno-unused-variable
+ccflags-y += -fno-pie -fno-stack-protector
+
+# Additional flags for Rust integration
+ccflags-y += -DVEXFS_VERSION_MAJOR=1 -DVEXFS_VERSION_MINOR=0
+ccflags-y += -DVEXFS_MAGIC=0x56454653
+
+# Disable some warnings that may occur with Rust FFI
+ccflags-y += -Wno-missing-prototypes -Wno-strict-prototypes

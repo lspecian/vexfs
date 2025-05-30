@@ -69,6 +69,7 @@ pub enum VexfsError {
     OutOfMemory,
     OutOfSpace,
     ResourceBusy,
+    Busy,
     TooManyOpenFiles,
     
     // Concurrency and Locking Errors
@@ -92,6 +93,7 @@ pub enum VexfsError {
     // Configuration and Validation Errors
     InvalidConfiguration,
     InvalidArgument(String),
+    InvalidParameter(String),
     OutOfRange(String),
     
     // Path and Data Errors
@@ -297,6 +299,7 @@ impl fmt::Display for VexfsError {
             VexfsError::OutOfMemory => write!(f, "Out of memory"),
             VexfsError::OutOfSpace => write!(f, "No space left on device"),
             VexfsError::ResourceBusy => write!(f, "Resource busy"),
+            VexfsError::Busy => write!(f, "Resource busy"),
             VexfsError::TooManyOpenFiles => write!(f, "Too many open files"),
             VexfsError::PermissionDenied(msg) => write!(f, "Permission denied: {}", msg),
             VexfsError::ReadOnlyFilesystem => write!(f, "Read-only filesystem"),
@@ -307,6 +310,7 @@ impl fmt::Display for VexfsError {
             VexfsError::TransactionError(kind) => write!(f, "Transaction error: {}", kind),
             VexfsError::InvalidConfiguration => write!(f, "Invalid configuration"),
             VexfsError::InvalidArgument(msg) => write!(f, "Invalid argument: {}", msg),
+            VexfsError::InvalidParameter(msg) => write!(f, "Invalid parameter: {}", msg),
             VexfsError::OutOfRange(msg) => write!(f, "Value out of range: {}", msg),
             VexfsError::InvalidData(msg) => write!(f, "Invalid data: {}", msg),
             VexfsError::InvalidPath(msg) => write!(f, "Invalid path: {}", msg),
@@ -495,6 +499,7 @@ impl VexfsError {
             VexfsError::OutOfMemory => -12,       // ENOMEM
             VexfsError::OutOfSpace => -28,        // ENOSPC
             VexfsError::InvalidArgument(_) => -22, // EINVAL
+            VexfsError::InvalidParameter(_) => -22, // EINVAL
             VexfsError::FileTooLarge => -27,      // EFBIG
             VexfsError::ReadOnlyFilesystem => -30, // EROFS
             VexfsError::DirectoryNotEmpty => -39, // ENOTEMPTY
@@ -502,6 +507,7 @@ impl VexfsError {
             VexfsError::IsADirectory => -21,      // EISDIR
             VexfsError::TooManyOpenFiles => -24,  // EMFILE
             VexfsError::ResourceBusy => -16,      // EBUSY
+            VexfsError::Busy => -16,              // EBUSY
             VexfsError::InvalidOperation(_) => -95,  // EOPNOTSUPP
             VexfsError::UnsupportedVersion => -95, // EOPNOTSUPP
             // New error variants
@@ -539,6 +545,7 @@ impl VexfsError {
             VexfsError::IoError(IoErrorKind::TimeoutError) => true,
             VexfsError::IoError(IoErrorKind::InterruptedError) => true,
             VexfsError::ResourceBusy => true,
+            VexfsError::Busy => true,
             VexfsError::OutOfMemory => true,
             VexfsError::TransactionError(TransactionErrorKind::TransactionConflict) => true,
             VexfsError::TransactionError(TransactionErrorKind::DeadlockDetected) => true,

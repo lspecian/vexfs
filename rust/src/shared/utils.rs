@@ -27,7 +27,7 @@ use crate::shared::constants::*;
 use crate::shared::types::*;
 
 #[cfg(feature = "kernel")]
-use alloc::{format, vec::Vec, string::String};
+use alloc::{format, vec::Vec, string::{String, ToString}};
 #[cfg(not(feature = "kernel"))]
 use std::{format, vec::Vec, string::String};
 use crate::shared::errors::*;
@@ -323,6 +323,27 @@ pub fn should_update_atime(last_atime: Timestamp, current_time: Timestamp) -> bo
 // Math Utilities
 // =======================
 
+/// No-std compatible square root implementation using Newton's method
+pub fn sqrt_f32(x: f32) -> f32 {
+    if x < 0.0 {
+        return f32::NAN;
+    }
+    if x == 0.0 || x == 1.0 {
+        return x;
+    }
+    
+    // Newton's method for square root
+    let mut guess = x / 2.0;
+    for _ in 0..10 { // 10 iterations should be sufficient for f32 precision
+        let new_guess = 0.5 * (guess + x / guess);
+        if (new_guess - guess).abs() < 1e-7 {
+            break;
+        }
+        guess = new_guess;
+    }
+    guess
+}
+
 /// Calculate minimum of two values
 pub fn min<T: PartialOrd>(a: T, b: T) -> T {
     if a < b { a } else { b }
@@ -378,10 +399,10 @@ pub fn euclidean_distance(a: &[f32], b: &[f32]) -> VexfsResult<f32> {
 
     let sum: f32 = a.iter()
         .zip(b.iter())
-        .map(|(x, y)| (x - y).powi(2))
+        .map(|(x, y)| (x - y) * x)
         .sum();
     
-    Ok(sum.sqrt())
+    Ok(sqrt_f32(sum))
 }
 
 /// Calculate cosine similarity between two vectors
@@ -394,8 +415,10 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> VexfsResult<f32> {
     }
 
     let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-    let magnitude_a: f32 = a.iter().map(|x| x.powi(2)).sum::<f32>().sqrt();
-    let magnitude_b: f32 = b.iter().map(|x| x.powi(2)).sum::<f32>().sqrt();
+    let magnitude_a_squared: f32 = a.iter().map(|x| x * x).sum();
+    let magnitude_b_squared: f32 = b.iter().map(|x| x * x).sum();
+    let magnitude_a = sqrt_f32(magnitude_a_squared);
+    let magnitude_b = sqrt_f32(magnitude_b_squared);
 
     if magnitude_a == 0.0 || magnitude_b == 0.0 {
         return Ok(0.0);
@@ -430,7 +453,8 @@ pub fn manhattan_distance(a: &[f32], b: &[f32]) -> VexfsResult<f32> {
 
 /// Normalize a vector to unit length
 pub fn normalize_vector(vector: &mut [f32]) -> VexfsResult<()> {
-    let magnitude: f32 = vector.iter().map(|x| x.powi(2)).sum::<f32>().sqrt();
+    let magnitude_squared: f32 = vector.iter().map(|x| x * x).sum();
+    let magnitude = sqrt_f32(magnitude_squared);
     
     if magnitude == 0.0 {
         return Err(VexfsError::VectorError(VectorErrorKind::NormalizationError));

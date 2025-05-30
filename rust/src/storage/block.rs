@@ -31,7 +31,7 @@ use crate::shared::utils::*;
 #[cfg(not(feature = "kernel"))]
 use std::{vec::Vec, vec, format, string::String};
 #[cfg(feature = "kernel")]
-use alloc::{vec::Vec, vec, format, string::String};
+use alloc::{string::ToString, vec::Vec, vec, format, string::String};
 
 /// Block type enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,7 +72,7 @@ pub enum BlockState {
 }
 
 /// Block metadata structure
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BlockMetadata {
     /// Block number
     pub block_num: BlockNumber,
@@ -320,6 +320,7 @@ pub trait BlockDeviceOps {
 }
 
 /// Block device abstraction
+#[derive(Debug, Clone, PartialEq)]
 pub struct BlockDevice {
     /// Device size in bytes
     size: u64,
@@ -393,6 +394,7 @@ impl BlockDevice {
 }
 
 /// Block manager for coordinating block operations
+#[derive(Debug, Clone, PartialEq)]
 pub struct BlockManager {
     /// Block device
     device: BlockDevice,

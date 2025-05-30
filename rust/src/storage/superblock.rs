@@ -29,7 +29,7 @@ use crate::shared::constants::*;
 use crate::shared::utils::*;
 
 #[cfg(feature = "kernel")]
-use alloc::{vec::Vec, string::String};
+use alloc::{string::ToString, vec::Vec, string::String};
 
 #[cfg(not(feature = "kernel"))]
 use std::{vec::Vec, string::String};
@@ -41,7 +41,7 @@ use core::slice;
 /// Located at the beginning of the filesystem (block 0)
 /// Size: 1024 bytes (fits in quarter of 4KB block with room for expansion)
 #[repr(C, packed)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct VexfsSuperblock {
     /// Magic number (VEXFS_MAGIC)
     pub s_magic: u64,
@@ -476,6 +476,7 @@ impl VexfsSuperblock {
 }
 
 /// Superblock manager for mount/unmount operations
+#[derive(Debug, Clone, PartialEq)]
 pub struct SuperblockManager {
     /// Persistence manager for I/O
     persistence: PersistenceManager,

@@ -24,6 +24,7 @@
 //! Types are designed to be compatible with both kernel and userspace environments.
 
 use crate::shared::constants::*;
+use crate::shared::utils::sqrt_f32;
 use core::ops;
 
 #[cfg(feature = "kernel")]
@@ -298,7 +299,7 @@ impl Vector {
     }
 
     pub fn magnitude(&self) -> f32 {
-        self.data.iter().map(|x| x * x).sum::<f32>().sqrt()
+        sqrt_f32(self.data.iter().map(|x| x * x).sum::<f32>())
     }
 
     pub fn normalize(&mut self) {

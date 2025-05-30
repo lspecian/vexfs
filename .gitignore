@@ -37,9 +37,9 @@ vector_storage_test
 
 # Python virtual environments
 workbench/workbench_env/
-test_env/bin/
-test_env/lib/
-test_env/pyvenv.cfg
+tests/legacy/bin/
+tests/legacy/lib/
+tests/legacy/pyvenv.cfg
 *.pyc
 __pycache__/
 
@@ -60,8 +60,8 @@ tasks/
 .taskmasterconfig
 scripts/
 # Large VM images
-test_env/vm/images/*.qcow2
-test_env/vm/images/*.img
+tests/legacy/vm_management/vm/images/*.qcow2
+tests/legacy/vm_management/vm/images/*.img
 
 # Docker related
 **/docker-build.log
@@ -90,6 +90,11 @@ libvexfs.a
 vexfs_rust_combined.o
 vexfs_rust_combined_raw.o
 .rust_extract/
+extracted_objects/
+
+# Rust build artifacts (comprehensive)
+rust/target/
+.cargo/
 
 # Kernel module backups
 kernel/vexfs_module_entry.c.backup
@@ -99,4 +104,7 @@ kernel/vexfs_module_entry.c.backup
 /tmp/mkfs_vexfs_*
 *.img
 *.qcow2
-test_env/vm/
+tests/legacy/vm_management/vm/
+
+# Test results (generated artifacts, not source code)
+test_results/
