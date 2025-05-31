@@ -83,9 +83,11 @@ build_rust_library() {
     cargo clean
     
     # Build with kernel-compatible flags using bare-metal target
+    # Only build the library, not binaries (binaries require std and can't compile for kernel target)
     RUSTFLAGS="-C code-model=kernel -C relocation-model=static -C panic=abort" \
     cargo +nightly build \
         --release \
+        --lib \
         --features kernel,c_bindings \
         --target x86_64-unknown-none \
         --no-default-features \
@@ -97,8 +99,19 @@ build_rust_library() {
         exit 1
     fi
     
-    # Copy the static library to kernel directory
-    cp "target/x86_64-unknown-none/release/libvexfs.a" "$KERNEL_DIR/vexfs_rust_combined.o"
+    # Extract and combine Rust object files
+    print_status "Extracting and combining Rust object files..."
+    cd "$KERNEL_DIR"
+    mkdir -p rust_objects
+    cd rust_objects && ar x "$RUST_DIR/target/x86_64-unknown-none/release/libvexfs.a"
+    ld -r -o ../vexfs_rust_combined.o *.o
+    cd ..
+    
+    # Strip LLVM bitcode sections that cause kernel build issues
+    objcopy --remove-section=.llvmbc --remove-section=.llvmcmd vexfs_rust_combined.o vexfs_rust_combined_clean.o
+    mv vexfs_rust_combined_clean.o vexfs_rust_combined.o
+    
+    rm -rf rust_objects
     
     print_status "Rust static library built successfully"
     cd "$KERNEL_DIR"
