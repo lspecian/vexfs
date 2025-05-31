@@ -120,6 +120,11 @@ name = "vector_test_runner"
 path = "src/bin/vector_test_runner.rs"
 required-features = ["std"]
 
+[[bin]]
+name = "anns_benchmark_test"
+path = "src/bin/anns_benchmark_test.rs"
+required-features = ["std"]
+
 # Test configuration
 [package.metadata.test]
 # Test discovery patterns

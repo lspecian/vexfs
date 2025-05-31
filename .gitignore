@@ -40,6 +40,7 @@ workbench/workbench_env/
 tests/legacy/bin/
 tests/legacy/lib/
 tests/legacy/pyvenv.cfg
+benchmarks/venv/
 *.pyc
 __pycache__/
 
@@ -108,6 +109,9 @@ tests/legacy/vm_management/vm/
 
 # Test results (generated artifacts, not source code)
 test_results/
+benchmarks/*results*.json
+benchmarks/competitive_results*.json
+benchmarks/vexfs_fuse
 
 # VM ISO files - download separately
 *.iso

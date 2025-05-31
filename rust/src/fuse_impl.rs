@@ -264,6 +264,162 @@ impl Filesystem for VexFSFuse {
         
         reply.ok();
     }
+    
+    fn setattr(&mut self, _req: &Request, ino: u64, mode: Option<u32>, uid: Option<u32>,
+               gid: Option<u32>, size: Option<u64>, atime: Option<Timespec>,
+               mtime: Option<Timespec>, _fh: Option<u64>, crtime: Option<Timespec>,
+               _chgtime: Option<Timespec>, _bkuptime: Option<Timespec>,
+               flags: Option<u32>, reply: ReplyAttr) {
+        let mut files = self.files.lock().unwrap();
+        
+        if let Some(file) = files.get_mut(&ino) {
+            // Update file attributes
+            if let Some(mode) = mode {
+                file.attr.perm = mode as u16;
+            }
+            if let Some(uid) = uid {
+                file.attr.uid = uid;
+            }
+            if let Some(gid) = gid {
+                file.attr.gid = gid;
+            }
+            if let Some(size) = size {
+                file.attr.size = size;
+                file.content.resize(size as usize, 0);
+            }
+            if let Some(atime) = atime {
+                file.attr.atime = atime;
+            }
+            if let Some(mtime) = mtime {
+                file.attr.mtime = mtime;
+            }
+            if let Some(crtime) = crtime {
+                file.attr.crtime = crtime;
+            }
+            if let Some(flags) = flags {
+                file.attr.flags = flags;
+            }
+            
+            reply.attr(&TTL, &file.attr);
+        } else {
+            reply.error(ENOENT);
+        }
+    }
+    
+    fn mknod(&mut self, _req: &Request, parent: u64, name: &OsStr, mode: u32,
+             _rdev: u32, reply: ReplyEntry) {
+        let name_str = name.to_string_lossy().to_string();
+        let ino = self.get_next_ino();
+        
+        // Determine file type from mode
+        let file_type = if mode & libc::S_IFDIR != 0 {
+            FileType::Directory
+        } else {
+            FileType::RegularFile
+        };
+        
+        let attr = Self::create_file_attr(ino, 0, file_type);
+        
+        let file = VexFSFile {
+            ino,
+            name: name_str.clone(),
+            content: Vec::new(),
+            metadata: HashMap::new(),
+            vector: None,
+            attr,
+        };
+        
+        {
+            let mut files = self.files.lock().unwrap();
+            files.insert(ino, file);
+        }
+        
+        {
+            let mut name_to_ino = self.name_to_ino.lock().unwrap();
+            name_to_ino.insert(name_str, ino);
+        }
+        
+        reply.entry(&TTL, &attr, 0);
+    }
+    
+    fn mkdir(&mut self, _req: &Request, parent: u64, name: &OsStr, mode: u32, reply: ReplyEntry) {
+        let name_str = name.to_string_lossy().to_string();
+        let ino = self.get_next_ino();
+        
+        let attr = Self::create_file_attr(ino, 0, FileType::Directory);
+        
+        let file = VexFSFile {
+            ino,
+            name: name_str.clone(),
+            content: Vec::new(),
+            metadata: HashMap::new(),
+            vector: None,
+            attr,
+        };
+        
+        {
+            let mut files = self.files.lock().unwrap();
+            files.insert(ino, file);
+        }
+        
+        {
+            let mut name_to_ino = self.name_to_ino.lock().unwrap();
+            name_to_ino.insert(name_str, ino);
+        }
+        
+        reply.entry(&TTL, &attr, 0);
+    }
+    
+    fn unlink(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEmpty) {
+        let name_str = name.to_string_lossy().to_string();
+        
+        let ino_to_remove = {
+            let name_to_ino = self.name_to_ino.lock().unwrap();
+            name_to_ino.get(&name_str).copied()
+        };
+        
+        if let Some(ino) = ino_to_remove {
+            {
+                let mut files = self.files.lock().unwrap();
+                files.remove(&ino);
+            }
+            
+            {
+                let mut name_to_ino = self.name_to_ino.lock().unwrap();
+                name_to_ino.remove(&name_str);
+            }
+            
+            reply.ok();
+        } else {
+            reply.error(ENOENT);
+        }
+    }
+    
+    fn rmdir(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEmpty) {
+        // For simplicity, treat rmdir the same as unlink
+        self.unlink(_req, parent, name, reply);
+    }
+    
+    fn open(&mut self, _req: &Request, ino: u64, flags: u32, reply: ReplyOpen) {
+        let files = self.files.lock().unwrap();
+        
+        if files.contains_key(&ino) {
+            reply.opened(0, 0); // fh=0, flags=0
+        } else {
+            reply.error(ENOENT);
+        }
+    }
+    
+    fn flush(&mut self, _req: &Request, ino: u64, _fh: u64, _lock_owner: u64, reply: ReplyEmpty) {
+        // For a simple implementation, just return success
+        reply.ok();
+    }
+    
+    fn release(&mut self, _req: &Request, ino: u64, _fh: u64, _flags: u32, _lock_owner: u64,
+               _flush: bool, reply: ReplyEmpty) {
+        // For a simple implementation, just return success
+        reply.ok();
+    }
 }
 
 impl VexFSFuse {

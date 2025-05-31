@@ -283,11 +283,36 @@ impl AnnsIndex {
                               (ef_search as usize * core::mem::size_of::<u64>()) as u64 +
                               (query.len() * core::mem::size_of::<f32>()) as u64;
         
-        // Simple linear search for now - will be replaced with HNSW traversal
-        let results = Vec::new();
+        // Use the HNSW search algorithm
+        let hnsw_results = if self.graph.is_empty() {
+            Vec::new()
+        } else {
+            // Create a distance function closure that uses the configured metric
+            let distance_metric = self.config.distance_metric;
+            let distance_fn = |a: &[f32], b: &[f32]| -> Result<f32, AnnsError> {
+                calculate_distance(a, b, distance_metric)
+                    .map_err(|_| AnnsError::InvalidOperation)
+            };
+
+            // For now, we'll use the HNSW search with placeholder vector data
+            // In a full implementation, this would integrate with VectorStorageManager
+            // to retrieve actual vector data for each vector_id
+            match self.graph.search(query, k, ef_search, distance_fn) {
+                Ok(results) => results,
+                Err(e) => {
+                    return Err(VexfsError::from(e));
+                }
+            }
+        };
         
-        // For now, return empty results
-        // In a full implementation, this would traverse the HNSW graph
+        // Convert HNSW results to SearchResult format
+        let results: Vec<SearchResult> = hnsw_results
+            .into_iter()
+            .map(|(vector_id, distance)| SearchResult {
+                vector_id,
+                distance,
+            })
+            .collect();
         
         // Log search performance for monitoring
         let search_duration = search_start.elapsed();

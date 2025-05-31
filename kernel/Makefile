@@ -25,8 +25,11 @@ rust_static_lib:
 	@if [ ! -f vexfs_rust_combined.o ]; then \
 		echo "Building Rust static library for kernel integration..."; \
 		cd $(RUST_DIR) && cargo +nightly build --release --no-default-features --features kernel,c_bindings --target x86_64-unknown-none; \
-		echo "Extracting Rust static library..."; \
-		cp $(RUST_DIR)/target/x86_64-unknown-none/release/libvexfs.a vexfs_rust_combined.o; \
+		echo "Extracting and combining Rust object files..."; \
+		mkdir -p rust_objects; \
+		cd rust_objects && ar x ../$(RUST_DIR)/target/x86_64-unknown-none/release/libvexfs.a; \
+		ld -r -o ../vexfs_rust_combined.o *.o; \
+		cd .. && rm -rf rust_objects; \
 		echo "Rust static library ready: vexfs_rust_combined.o"; \
 	else \
 		echo "Rust static library already exists: vexfs_rust_combined.o"; \

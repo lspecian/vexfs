@@ -15,6 +15,7 @@ pub mod wal;
 pub mod persistence;
 pub mod recovery;
 pub mod performance_validation;
+pub mod realistic_benchmark;
 pub mod integration;
 
 // Re-export key types and functions
@@ -29,4 +30,5 @@ pub use wal::*;
 pub use persistence::*;
 pub use recovery::*;
 pub use performance_validation::*;
+pub use realistic_benchmark::*;
 pub use integration::*;

@@ -1,0 +1,53 @@
+FROM rust:1.75-bullseye
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    fuse \
+    libfuse-dev \
+    pkg-config \
+    python3 \
+    python3-pip \
+    python3-venv \
+    curl \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies for benchmarking
+RUN python3 -m pip install --upgrade pip && \
+    python3 -m pip install \
+    numpy \
+    pandas \
+    matplotlib \
+    seaborn \
+    requests \
+    chromadb \
+    qdrant-client \
+    weaviate-client \
+    pymilvus \
+    scikit-learn \
+    datasets \
+    sentence-transformers
+
+# Set up FUSE permissions
+RUN echo 'user_allow_other' >> /etc/fuse.conf
+
+# Create mount point
+RUN mkdir -p /mnt/vexfs
+
+# Set working directory
+WORKDIR /workspace
+
+# Build VexFS FUSE binary
+COPY rust/ /workspace/rust/
+WORKDIR /workspace/rust
+RUN cargo build --release --bin vexfs_fuse
+
+# Copy benchmarking scripts
+COPY benchmarks/ /workspace/benchmarks/
+
+# Set up environment
+ENV RUST_LOG=info
+ENV PYTHONPATH=/workspace/benchmarks
+
+# Default command
+CMD ["/bin/bash"]

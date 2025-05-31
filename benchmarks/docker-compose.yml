@@ -1,0 +1,166 @@
+version: '3.8'
+
+services:
+  # ChromaDB - Python-based vector database (similar use case to VexFS)
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: benchmark_chromadb
+    ports:
+      - "8000:8000"
+    environment:
+      - CHROMA_SERVER_HOST=0.0.0.0
+      - CHROMA_SERVER_HTTP_PORT=8000
+      - CHROMA_SERVER_CORS_ALLOW_ORIGINS=["*"]
+    volumes:
+      - chromadb_data:/chroma/chroma
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - benchmark_network
+
+  # Qdrant - Rust-based high-performance vector database
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: benchmark_qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - benchmark_network
+
+  # Weaviate - Go-based production-ready vector database
+  weaviate:
+    image: semitechnologies/weaviate:latest
+    container_name: benchmark_weaviate
+    ports:
+      - "8080:8080"
+    environment:
+      - QUERY_DEFAULTS_LIMIT=25
+      - AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true
+      - PERSISTENCE_DATA_PATH=/var/lib/weaviate
+      - DEFAULT_VECTORIZER_MODULE=none
+      - ENABLE_MODULES=
+      - CLUSTER_HOSTNAME=node1
+    volumes:
+      - weaviate_data:/var/lib/weaviate
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/.well-known/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - benchmark_network
+
+  # Milvus - High-performance vector database for production
+  milvus-etcd:
+    container_name: benchmark_milvus_etcd
+    image: quay.io/coreos/etcd:v3.5.5
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - milvus_etcd:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - benchmark_network
+
+  milvus-minio:
+    container_name: benchmark_milvus_minio
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    ports:
+      - "9001:9001"
+      - "9000:9000"
+    volumes:
+      - milvus_minio:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - benchmark_network
+
+  milvus-standalone:
+    container_name: benchmark_milvus
+    image: milvusdb/milvus:v2.3.4
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: milvus-etcd:2379
+      MINIO_ADDRESS: milvus-minio:9000
+    volumes:
+      - milvus_data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:19530/healthz"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    depends_on:
+      - "milvus-etcd"
+      - "milvus-minio"
+    networks:
+      - benchmark_network
+
+  # VexFS FUSE for comparison (we'll mount this from host)
+  vexfs-benchmark-runner:
+    build:
+      context: ..
+      dockerfile: benchmarks/Dockerfile.vexfs
+    container_name: benchmark_vexfs_runner
+    volumes:
+      - ../:/workspace
+      - vexfs_mount:/mnt/vexfs
+    working_dir: /workspace
+    privileged: true
+    devices:
+      - /dev/fuse:/dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    environment:
+      - RUST_LOG=debug
+    networks:
+      - benchmark_network
+    depends_on:
+      - chromadb
+      - qdrant
+      - weaviate
+      - milvus-standalone
+
+volumes:
+  chromadb_data:
+  qdrant_data:
+  weaviate_data:
+  milvus_etcd:
+  milvus_minio:
+  milvus_data:
+  vexfs_mount:
+
+networks:
+  benchmark_network:
+    driver: bridge
