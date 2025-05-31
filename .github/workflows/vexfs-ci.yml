@@ -1,0 +1,635 @@
+name: VexFS CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'kernel/**'
+      - 'rust/**'
+      - 'tests/**'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'kernel/**'
+      - 'rust/**'
+      - 'tests/**'
+      - '.github/workflows/**'
+  schedule:
+    # Run nightly tests at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      test_suite:
+        description: 'Test suite to run'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - 'full'
+          - 'quick'
+          - 'performance'
+          - 'stress'
+          - 'fuzzing'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  VEXFS_CI: true
+
+jobs:
+  # Build and basic validation
+  build:
+    name: Build and Basic Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    outputs:
+      kernel-module-built: ${{ steps.build-kernel.outputs.success }}
+      rust-tests-passed: ${{ steps.rust-tests.outputs.success }}
+      
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Setup Rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+        components: rustfmt, clippy
+        
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+          
+    - name: Install kernel build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          linux-headers-$(uname -r) \
+          bc \
+          kmod \
+          cpio \
+          flex \
+          bison \
+          libelf-dev \
+          libssl-dev \
+          dwarves \
+          zstd
+          
+    - name: Build kernel module
+      id: build-kernel
+      run: |
+        cd kernel
+        make clean
+        make
+        if [ -f vexfs.ko ]; then
+          echo "success=true" >> $GITHUB_OUTPUT
+          echo "✅ Kernel module built successfully"
+          modinfo vexfs.ko
+        else
+          echo "success=false" >> $GITHUB_OUTPUT
+          echo "❌ Kernel module build failed"
+          exit 1
+        fi
+        
+    - name: Build Rust components
+      run: |
+        cd rust
+        cargo build --release
+        cargo build --release --features kernel-integration
+        
+    - name: Run Rust tests
+      id: rust-tests
+      run: |
+        cd rust
+        cargo test --release
+        if [ $? -eq 0 ]; then
+          echo "success=true" >> $GITHUB_OUTPUT
+        else
+          echo "success=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+        
+    - name: Run Rust linting
+      run: |
+        cd rust
+        cargo fmt -- --check
+        cargo clippy -- -D warnings
+        
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: vexfs-build-artifacts
+        path: |
+          kernel/vexfs.ko
+          rust/target/release/
+        retention-days: 7
+
+  # VM-based kernel module testing
+  vm-testing:
+    name: VM-Based Kernel Module Testing
+    runs-on: ubuntu-latest
+    needs: build
+    if: needs.build.outputs.kernel-module-built == 'true'
+    timeout-minutes: 60
+    
+    strategy:
+      matrix:
+        test-level: [1, 2, 3]
+        
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download build artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: vexfs-build-artifacts
+        
+    - name: Setup VM testing environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          qemu-system-x86_64 \
+          qemu-utils \
+          bridge-utils \
+          python3 \
+          python3-pip \
+          bc
+          
+    - name: Setup Rust for test runners
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+        
+    - name: Build test runners
+      run: |
+        cd tests/kernel_module
+        cargo build --release
+        
+    - name: Run Level ${{ matrix.test-level }} Tests
+      run: |
+        cd tests/vm_testing
+        export OUTPUT_DIR="../../test-results/level${{ matrix.test-level }}"
+        mkdir -p "$OUTPUT_DIR"
+        
+        case "${{ matrix.test-level }}" in
+          1)
+            echo "Running Level 1: Basic Validation Tests"
+            timeout 20m ./run_complete_test_suite.sh level1 --output-dir "$OUTPUT_DIR"
+            ;;
+          2)
+            echo "Running Level 2: VM Mount Operation Tests"
+            timeout 30m ./run_complete_test_suite.sh level2 --output-dir "$OUTPUT_DIR"
+            ;;
+          3)
+            echo "Running Level 3: Stress Testing"
+            timeout 45m ./run_complete_test_suite.sh level3 --quick --output-dir "$OUTPUT_DIR"
+            ;;
+        esac
+        
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: vm-test-results-level${{ matrix.test-level }}
+        path: test-results/level${{ matrix.test-level }}/
+        retention-days: 30
+
+  # Performance benchmarking
+  performance-testing:
+    name: Performance Benchmarking
+    runs-on: ubuntu-latest
+    needs: build
+    if: needs.build.outputs.kernel-module-built == 'true' && (github.event_name == 'schedule' || github.event.inputs.test_suite == 'performance' || github.event.inputs.test_suite == 'full')
+    timeout-minutes: 45
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download build artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: vexfs-build-artifacts
+        
+    - name: Setup performance testing environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          qemu-system-x86_64 \
+          python3 \
+          python3-pip \
+          bc \
+          time
+          
+    - name: Setup Alpine VM for performance testing
+      run: |
+        cd tests/vm_testing
+        ./manage_alpine_vm.sh setup
+        ./manage_alpine_vm.sh start
+        sleep 30  # Wait for VM to fully boot
+        
+    - name: Run performance benchmarks
+      run: |
+        cd tests/vm_testing
+        export RESULTS_DIR="../../performance-results"
+        mkdir -p "$RESULTS_DIR"
+        timeout 30m ./vexfs_performance_benchmark.sh
+        
+    - name: Upload performance results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: performance-benchmark-results
+        path: performance-results/
+        retention-days: 90
+        
+    - name: Cleanup VM
+      if: always()
+      run: |
+        cd tests/vm_testing
+        ./manage_alpine_vm.sh stop || true
+
+  # xfstests integration
+  xfstests:
+    name: xfstests Integration
+    runs-on: ubuntu-latest
+    needs: build
+    if: needs.build.outputs.kernel-module-built == 'true' && (github.event_name == 'schedule' || github.event.inputs.test_suite == 'full')
+    timeout-minutes: 90
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download build artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: vexfs-build-artifacts
+        
+    - name: Setup xfstests environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          qemu-system-x86_64 \
+          git \
+          build-essential \
+          autoconf \
+          libtool \
+          pkg-config \
+          uuid-dev \
+          xfsprogs \
+          e2fsprogs
+          
+    - name: Setup and run xfstests
+      run: |
+        cd tests/vm_testing
+        export RESULTS_DIR="../../xfstests-results"
+        mkdir -p "$RESULTS_DIR"
+        
+        # Setup xfstests
+        ./setup_xfstests.sh
+        
+        # Run basic xfstests suite
+        timeout 60m ./xfstests_config/run_vexfs_xfstests.sh --quick
+        
+    - name: Upload xfstests results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: xfstests-results
+        path: xfstests-results/
+        retention-days: 30
+
+  # Syzkaller fuzzing
+  syzkaller-fuzzing:
+    name: Syzkaller Fuzzing
+    runs-on: ubuntu-latest
+    needs: build
+    if: needs.build.outputs.kernel-module-built == 'true' && (github.event_name == 'schedule' || github.event.inputs.test_suite == 'fuzzing' || github.event.inputs.test_suite == 'full')
+    timeout-minutes: 120
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download build artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: vexfs-build-artifacts
+        
+    - name: Setup Syzkaller environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          qemu-system-x86_64 \
+          golang-go \
+          git \
+          build-essential
+          
+    - name: Setup and run Syzkaller
+      run: |
+        cd tests/vm_testing
+        export RESULTS_DIR="../../syzkaller-results"
+        mkdir -p "$RESULTS_DIR"
+        
+        # Setup Syzkaller
+        ./setup_syzkaller_auto.sh
+        
+        # Run fuzzing for limited time in CI
+        timeout 90m ./syzkaller_config/run_vexfs_syzkaller.sh --duration=60m || true
+        
+    - name: Upload Syzkaller results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: syzkaller-results
+        path: syzkaller-results/
+        retention-days: 30
+
+  # eBPF tracing
+  ebpf-tracing:
+    name: eBPF Tracing Analysis
+    runs-on: ubuntu-latest
+    needs: build
+    if: needs.build.outputs.kernel-module-built == 'true' && (github.event_name == 'schedule' || github.event.inputs.test_suite == 'full')
+    timeout-minutes: 45
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download build artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: vexfs-build-artifacts
+        
+    - name: Setup eBPF environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          qemu-system-x86_64 \
+          python3 \
+          python3-pip \
+          bpfcc-tools \
+          linux-tools-common \
+          linux-tools-generic
+          
+    - name: Run eBPF tracing
+      run: |
+        cd tests/vm_testing
+        export RESULTS_DIR="../../ebpf-results"
+        mkdir -p "$RESULTS_DIR"
+        
+        # Setup eBPF tracing
+        ./setup_ebpf_tracing.sh
+        
+        # Run tracing analysis
+        timeout 30m ./run_vexfs_tracing.sh --duration=20m
+        
+    - name: Upload eBPF results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: ebpf-tracing-results
+        path: ebpf-results/
+        retention-days: 30
+
+  # Avocado-VT orchestration
+  avocado-orchestration:
+    name: Avocado-VT Test Orchestration
+    runs-on: ubuntu-latest
+    needs: [vm-testing, performance-testing]
+    if: always() && needs.build.outputs.kernel-module-built == 'true' && (github.event_name == 'schedule' || github.event.inputs.test_suite == 'full')
+    timeout-minutes: 60
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download build artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: vexfs-build-artifacts
+        
+    - name: Setup Avocado-VT environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          qemu-system-x86_64 \
+          python3 \
+          python3-pip \
+          python3-venv
+          
+    - name: Setup and run Avocado-VT orchestration
+      run: |
+        cd tests/vm_testing/avocado_vt
+        export RESULTS_DIR="../../../avocado-results"
+        mkdir -p "$RESULTS_DIR"
+        
+        # Setup Avocado-VT
+        ./setup_avocado_vt.sh
+        
+        # Run comprehensive orchestration
+        timeout 45m ./run_vexfs_orchestration.sh comprehensive --output-dir "$RESULTS_DIR"
+        
+    - name: Upload Avocado-VT results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: avocado-orchestration-results
+        path: avocado-results/
+        retention-days: 30
+
+  # Results aggregation and reporting
+  results-aggregation:
+    name: Aggregate Results and Generate Reports
+    runs-on: ubuntu-latest
+    needs: [vm-testing, performance-testing, xfstests, syzkaller-fuzzing, ebpf-tracing, avocado-orchestration]
+    if: always()
+    timeout-minutes: 15
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download all test results
+      uses: actions/download-artifact@v3
+      with:
+        path: all-results/
+        
+    - name: Setup Python for report generation
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install report dependencies
+      run: |
+        pip install jinja2 markdown beautifulsoup4 plotly pandas
+        
+    - name: Generate comprehensive test report
+      run: |
+        python3 << 'EOF'
+        import os
+        import json
+        import glob
+        from datetime import datetime
+        
+        # Collect all test results
+        results = {
+            'timestamp': datetime.now().isoformat(),
+            'commit_sha': os.environ.get('GITHUB_SHA', 'unknown'),
+            'ref': os.environ.get('GITHUB_REF', 'unknown'),
+            'workflow_run_id': os.environ.get('GITHUB_RUN_ID', 'unknown'),
+            'tests': {}
+        }
+        
+        # Process VM test results
+        for level in [1, 2, 3]:
+            level_dir = f"all-results/vm-test-results-level{level}"
+            if os.path.exists(level_dir):
+                results['tests'][f'vm_level_{level}'] = {
+                    'status': 'completed',
+                    'artifacts_found': True
+                }
+        
+        # Process performance results
+        perf_dir = "all-results/performance-benchmark-results"
+        if os.path.exists(perf_dir):
+            results['tests']['performance'] = {
+                'status': 'completed',
+                'artifacts_found': True
+            }
+        
+        # Process other test results
+        test_types = ['xfstests', 'syzkaller', 'ebpf-tracing', 'avocado-orchestration']
+        for test_type in test_types:
+            test_dir = f"all-results/{test_type}-results"
+            if os.path.exists(test_dir):
+                results['tests'][test_type] = {
+                    'status': 'completed',
+                    'artifacts_found': True
+                }
+        
+        # Generate summary report
+        report = f"""
+        # VexFS CI/CD Pipeline Results
+        
+        **Workflow Run:** {results['workflow_run_id']}
+        **Commit:** {results['commit_sha'][:8]}
+        **Branch:** {results['ref']}
+        **Timestamp:** {results['timestamp']}
+        
+        ## Test Results Summary
+        
+        """
+        
+        for test_name, test_data in results['tests'].items():
+            status_emoji = "✅" if test_data['status'] == 'completed' else "❌"
+            report += f"- {status_emoji} **{test_name.replace('_', ' ').title()}**: {test_data['status']}\n"
+        
+        report += f"""
+        
+        ## Artifacts Generated
+        
+        - Build artifacts (kernel module, Rust binaries)
+        - VM test results (Levels 1-3)
+        - Performance benchmark data
+        - xfstests compatibility results
+        - Syzkaller fuzzing reports
+        - eBPF tracing analysis
+        - Avocado-VT orchestration results
+        
+        ## Next Steps
+        
+        1. Review individual test artifacts for detailed results
+        2. Check performance regressions against baseline
+        3. Investigate any failed test cases
+        4. Update documentation based on test findings
+        
+        ---
+        *Generated by VexFS CI/CD Pipeline*
+        """
+        
+        # Save results
+        with open('test-summary.json', 'w') as f:
+            json.dump(results, f, indent=2)
+            
+        with open('test-report.md', 'w') as f:
+            f.write(report)
+            
+        print("📊 Test results aggregated successfully")
+        print(f"📋 Summary: {len(results['tests'])} test suites executed")
+        EOF
+        
+    - name: Upload aggregated results
+      uses: actions/upload-artifact@v3
+      with:
+        name: aggregated-test-results
+        path: |
+          test-summary.json
+          test-report.md
+        retention-days: 90
+        
+    - name: Comment PR with results (if PR)
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const report = fs.readFileSync('test-report.md', 'utf8');
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: report
+          });
+
+  # Notification and cleanup
+  notification:
+    name: Send Notifications
+    runs-on: ubuntu-latest
+    needs: [results-aggregation]
+    if: always() && (github.event_name == 'schedule' || github.ref == 'refs/heads/main')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download aggregated results
+      uses: actions/download-artifact@v3
+      with:
+        name: aggregated-test-results
+        
+    - name: Send notification
+      run: |
+        # Read test summary
+        if [ -f test-summary.json ]; then
+          echo "📊 VexFS CI/CD Pipeline completed"
+          echo "📋 Results summary available in artifacts"
+          
+          # In a real environment, you would send notifications to:
+          # - Slack/Discord webhooks
+          # - Email notifications
+          # - GitHub status checks
+          # - Custom monitoring systems
+          
+          echo "✅ Notification sent (placeholder)"
+        else
+          echo "❌ No test summary found"
+        fi

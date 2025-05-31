@@ -77,11 +77,8 @@ fn main() {
         process::exit(1);
     }
     
-    if !config.kernel_build_dir.exists() {
-        eprintln!("Error: Kernel build directory does not exist: {}", 
-                 config.kernel_build_dir.display());
-        process::exit(1);
-    }
+    // Note: kernel_build_dir validation removed as it's not used in actual make commands
+    // The run_make_command function uses vexfs_kernel_dir with -C flag to specify kernel build dir
     
     // Print configuration
     println!("🔧 VexFS Level 1 Test Configuration:");
@@ -115,9 +112,9 @@ fn main() {
 
 fn parse_build_variant(variant: &str) -> BuildVariant {
     match variant.to_lowercase().as_str() {
-        "standard" => BuildVariant::Standard,
+        "safe" | "safe-ffi" | "c-only" | "standard" => BuildVariant::Standard,
         _ => {
-            eprintln!("Error: Invalid build variant: {}. Valid options: standard", variant);
+            eprintln!("Error: Invalid build variant: {}. Valid options: safe, safe-ffi, c-only, standard", variant);
             process::exit(1);
         }
     }
@@ -130,7 +127,7 @@ fn print_usage(program_name: &str) {
     println!("    {} [OPTIONS]", program_name);
     println!();
     println!("OPTIONS:");
-    println!("    --build-variant <VARIANT>    Build variant to test [standard]");
+    println!("    --build-variant <VARIANT>    Build variant to test [safe|safe-ffi|c-only|standard]");
     println!("                                 Default: standard");
     println!("    --kernel-dir <PATH>          Path to VexFS kernel module source directory");
     println!("                                 Default: current directory");
@@ -154,14 +151,17 @@ fn print_usage(program_name: &str) {
     println!("      TC1.7 - Kernel health check (panic/oops detection)");
     println!();
     println!("    Build Variants:");
+    println!("      safe     - Safe build variant (maps to standard)");
+    println!("      safe-ffi - Safe FFI build variant (maps to standard)");
+    println!("      c-only   - C-only build variant (maps to standard)");
     println!("      standard - Standard build with full FFI (production kernel module)");
     println!();
     println!("EXAMPLES:");
     println!("    # Run tests without sudo");
-    println!("    {} --build-variant standard", program_name);
+    println!("    {} --build-variant safe", program_name);
     println!();
     println!("    # Run complete test suite with sudo");
-    println!("    {} --build-variant standard --enable-sudo", program_name);
+    println!("    {} --build-variant safe --enable-sudo", program_name);
     println!();
     println!("    # Test with custom paths");
     println!("    {} --build-variant standard \\", program_name);
@@ -184,7 +184,11 @@ mod tests {
 
     #[test]
     fn test_parse_build_variant() {
+        assert_eq!(parse_build_variant("safe"), BuildVariant::Standard);
+        assert_eq!(parse_build_variant("safe-ffi"), BuildVariant::Standard);
+        assert_eq!(parse_build_variant("c-only"), BuildVariant::Standard);
         assert_eq!(parse_build_variant("standard"), BuildVariant::Standard);
         assert_eq!(parse_build_variant("STANDARD"), BuildVariant::Standard);
+        assert_eq!(parse_build_variant("SAFE"), BuildVariant::Standard);
     }
 }

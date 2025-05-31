@@ -1,0 +1,29 @@
+# Docker container for VexFS kernel module testing
+# Uses the host kernel but provides isolated environment
+FROM ubuntu:22.04
+
+# Install kernel development tools
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    linux-headers-generic \
+    kmod \
+    util-linux \
+    mount \
+    e2fsprogs \
+    strace \
+    gdb \
+    vim \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create working directory
+WORKDIR /vexfs
+
+# Copy kernel module source
+COPY kernel/ /vexfs/kernel/
+COPY tests/docker_testing/ /vexfs/tests/
+
+# Make scripts executable
+RUN chmod +x /vexfs/tests/*.sh
+
+# Default command
+CMD ["/bin/bash"]

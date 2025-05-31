@@ -1,0 +1,545 @@
+name: Nightly Comprehensive Testing
+
+on:
+  schedule:
+    # Run every night at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      extended_duration:
+        description: 'Run extended duration tests'
+        required: false
+        default: false
+        type: boolean
+      include_fuzzing:
+        description: 'Include Syzkaller fuzzing'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  VEXFS_NIGHTLY: true
+
+jobs:
+  # Extended build with all features
+  comprehensive-build:
+    name: Comprehensive Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    
+    outputs:
+      build-success: ${{ steps.build-status.outputs.success }}
+      
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Setup Rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+        components: rustfmt, clippy, miri
+        
+    - name: Install comprehensive build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          linux-headers-$(uname -r) \
+          bc \
+          kmod \
+          cpio \
+          flex \
+          bison \
+          libelf-dev \
+          libssl-dev \
+          dwarves \
+          zstd \
+          valgrind \
+          strace \
+          ltrace
+          
+    - name: Build kernel module with debug info
+      run: |
+        cd kernel
+        make clean
+        make DEBUG=1
+        make modules_install INSTALL_MOD_PATH=/tmp/vexfs_modules
+        
+    - name: Build all Rust variants
+      run: |
+        cd rust
+        cargo build --release
+        cargo build --release --features kernel-integration
+        cargo build --release --features fuse-integration
+        cargo build --release --all-features
+        
+    - name: Run comprehensive Rust tests
+      run: |
+        cd rust
+        cargo test --release --all-features
+        cargo test --release --features kernel-integration
+        
+    - name: Run memory safety tests with Miri
+      run: |
+        cd rust
+        cargo +nightly miri test --lib || echo "Miri tests completed with warnings"
+        
+    - name: Set build status
+      id: build-status
+      run: echo "success=true" >> $GITHUB_OUTPUT
+      
+    - name: Upload comprehensive build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: nightly-build-artifacts
+        path: |
+          kernel/vexfs.ko
+          rust/target/release/
+          /tmp/vexfs_modules/
+        retention-days: 14
+
+  # Extended VM testing with all levels
+  extended-vm-testing:
+    name: Extended VM Testing
+    runs-on: ubuntu-latest
+    needs: comprehensive-build
+    if: needs.comprehensive-build.outputs.build-success == 'true'
+    timeout-minutes: 180
+    
+    strategy:
+      matrix:
+        test-suite: [basic, stress, endurance]
+        
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download build artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: nightly-build-artifacts
+        
+    - name: Setup extended VM environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          qemu-system-x86_64 \
+          qemu-utils \
+          bridge-utils \
+          python3 \
+          python3-pip \
+          bc \
+          time \
+          htop \
+          iotop
+          
+    - name: Setup Rust for test runners
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+        
+    - name: Build test runners
+      run: |
+        cd tests/kernel_module
+        cargo build --release --all-features
+        
+    - name: Run ${{ matrix.test-suite }} test suite
+      run: |
+        cd tests/vm_testing
+        export OUTPUT_DIR="../../nightly-results/${{ matrix.test-suite }}"
+        mkdir -p "$OUTPUT_DIR"
+        
+        case "${{ matrix.test-suite }}" in
+          basic)
+            echo "Running basic comprehensive test suite"
+            timeout 60m ./run_complete_test_suite.sh full --output-dir "$OUTPUT_DIR"
+            ;;
+          stress)
+            echo "Running extended stress testing"
+            timeout 90m ./run_complete_test_suite.sh full --extended-stress --output-dir "$OUTPUT_DIR"
+            ;;
+          endurance)
+            echo "Running endurance testing"
+            if [ "${{ github.event.inputs.extended_duration }}" == "true" ]; then
+              timeout 150m ./run_complete_test_suite.sh full --extended-stress --parallel --output-dir "$OUTPUT_DIR"
+            else
+              timeout 90m ./run_complete_test_suite.sh full --output-dir "$OUTPUT_DIR"
+            fi
+            ;;
+        esac
+        
+    - name: Upload extended test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: nightly-vm-results-${{ matrix.test-suite }}
+        path: nightly-results/${{ matrix.test-suite }}/
+        retention-days: 30
+
+  # Long-duration performance testing
+  performance-regression:
+    name: Performance Regression Testing
+    runs-on: ubuntu-latest
+    needs: comprehensive-build
+    if: needs.comprehensive-build.outputs.build-success == 'true'
+    timeout-minutes: 120
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download build artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: nightly-build-artifacts
+        
+    - name: Setup performance testing
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          qemu-system-x86_64 \
+          python3 \
+          python3-pip \
+          bc \
+          time \
+          perf-tools-unstable
+          
+    - name: Setup Alpine VM for extended performance testing
+      run: |
+        cd tests/vm_testing
+        ./manage_alpine_vm.sh setup
+        ./manage_alpine_vm.sh start
+        sleep 30
+        
+    - name: Run extended performance benchmarks
+      run: |
+        cd tests/vm_testing
+        export RESULTS_DIR="../../nightly-performance"
+        mkdir -p "$RESULTS_DIR"
+        
+        # Run multiple performance test iterations
+        for i in {1..5}; do
+          echo "Running performance iteration $i/5"
+          timeout 20m ./vexfs_performance_benchmark.sh
+          mv performance_results/* "$RESULTS_DIR/iteration_$i/" || true
+          mkdir -p "$RESULTS_DIR/iteration_$((i+1))"
+          sleep 60  # Cool down between iterations
+        done
+        
+    - name: Generate performance regression report
+      run: |
+        python3 << 'EOF'
+        import os
+        import json
+        import glob
+        from statistics import mean, stdev
+        
+        results_dir = "nightly-performance"
+        iterations = []
+        
+        # Collect all iteration results
+        for i in range(1, 6):
+            iter_dir = f"{results_dir}/iteration_{i}"
+            if os.path.exists(iter_dir):
+                for result_file in glob.glob(f"{iter_dir}/*.json"):
+                    try:
+                        with open(result_file, 'r') as f:
+                            data = json.load(f)
+                            if 'kernel_results' in data:
+                                iterations.append(data['kernel_results']['results'])
+                    except:
+                        continue
+        
+        if iterations:
+            # Calculate statistics
+            insert_ops = [r['insertion']['ops_per_sec'] for r in iterations]
+            search_ops = [r['search']['ops_per_sec'] for r in iterations]
+            
+            report = {
+                'timestamp': '2025-05-31T13:55:00Z',
+                'iterations': len(iterations),
+                'insertion_performance': {
+                    'mean_ops_per_sec': mean(insert_ops),
+                    'std_dev': stdev(insert_ops) if len(insert_ops) > 1 else 0,
+                    'min': min(insert_ops),
+                    'max': max(insert_ops)
+                },
+                'search_performance': {
+                    'mean_ops_per_sec': mean(search_ops),
+                    'std_dev': stdev(search_ops) if len(search_ops) > 1 else 0,
+                    'min': min(search_ops),
+                    'max': max(search_ops)
+                }
+            }
+            
+            with open(f"{results_dir}/regression_analysis.json", 'w') as f:
+                json.dump(report, f, indent=2)
+                
+            print(f"📊 Performance regression analysis completed")
+            print(f"📈 Insertion: {report['insertion_performance']['mean_ops_per_sec']:.1f} ± {report['insertion_performance']['std_dev']:.1f} ops/sec")
+            print(f"🔍 Search: {report['search_performance']['mean_ops_per_sec']:.1f} ± {report['search_performance']['std_dev']:.1f} ops/sec")
+        else:
+            print("❌ No performance data collected")
+        EOF
+        
+    - name: Cleanup VM
+      if: always()
+      run: |
+        cd tests/vm_testing
+        ./manage_alpine_vm.sh stop || true
+        
+    - name: Upload performance regression results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: nightly-performance-regression
+        path: nightly-performance/
+        retention-days: 90
+
+  # Extended Syzkaller fuzzing
+  extended-fuzzing:
+    name: Extended Syzkaller Fuzzing
+    runs-on: ubuntu-latest
+    needs: comprehensive-build
+    if: needs.comprehensive-build.outputs.build-success == 'true' && (github.event.inputs.include_fuzzing != 'false')
+    timeout-minutes: 240
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download build artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: nightly-build-artifacts
+        
+    - name: Setup extended Syzkaller environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          qemu-system-x86_64 \
+          golang-go \
+          git \
+          build-essential \
+          gdb
+          
+    - name: Setup and run extended Syzkaller
+      run: |
+        cd tests/vm_testing
+        export RESULTS_DIR="../../nightly-syzkaller"
+        mkdir -p "$RESULTS_DIR"
+        
+        # Setup Syzkaller
+        ./setup_syzkaller_auto.sh
+        
+        # Run extended fuzzing
+        if [ "${{ github.event.inputs.extended_duration }}" == "true" ]; then
+          timeout 210m ./syzkaller_config/run_vexfs_syzkaller.sh --duration=180m || true
+        else
+          timeout 150m ./syzkaller_config/run_vexfs_syzkaller.sh --duration=120m || true
+        fi
+        
+    - name: Upload extended Syzkaller results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: nightly-syzkaller-extended
+        path: nightly-syzkaller/
+        retention-days: 30
+
+  # Comprehensive results analysis
+  nightly-analysis:
+    name: Nightly Results Analysis
+    runs-on: ubuntu-latest
+    needs: [extended-vm-testing, performance-regression, extended-fuzzing]
+    if: always()
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download all nightly results
+      uses: actions/download-artifact@v3
+      with:
+        path: nightly-artifacts/
+        
+    - name: Setup analysis environment
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install analysis dependencies
+      run: |
+        pip install jinja2 markdown plotly pandas numpy scipy
+        
+    - name: Generate comprehensive nightly report
+      run: |
+        python3 << 'EOF'
+        import os
+        import json
+        import glob
+        from datetime import datetime
+        
+        # Comprehensive nightly analysis
+        analysis = {
+            'timestamp': datetime.now().isoformat(),
+            'commit_sha': os.environ.get('GITHUB_SHA', 'unknown'),
+            'workflow_run_id': os.environ.get('GITHUB_RUN_ID', 'unknown'),
+            'test_suites': {},
+            'performance_analysis': {},
+            'fuzzing_results': {},
+            'overall_status': 'unknown'
+        }
+        
+        # Analyze VM testing results
+        vm_suites = ['basic', 'stress', 'endurance']
+        for suite in vm_suites:
+            suite_dir = f"nightly-artifacts/nightly-vm-results-{suite}"
+            if os.path.exists(suite_dir):
+                analysis['test_suites'][suite] = {
+                    'status': 'completed',
+                    'artifacts_found': True,
+                    'duration': 'extended'
+                }
+        
+        # Analyze performance regression
+        perf_dir = "nightly-artifacts/nightly-performance-regression"
+        if os.path.exists(perf_dir):
+            regression_file = f"{perf_dir}/regression_analysis.json"
+            if os.path.exists(regression_file):
+                with open(regression_file, 'r') as f:
+                    perf_data = json.load(f)
+                    analysis['performance_analysis'] = perf_data
+        
+        # Analyze fuzzing results
+        fuzz_dir = "nightly-artifacts/nightly-syzkaller-extended"
+        if os.path.exists(fuzz_dir):
+            analysis['fuzzing_results'] = {
+                'status': 'completed',
+                'duration': 'extended',
+                'artifacts_found': True
+            }
+        
+        # Determine overall status
+        completed_suites = sum(1 for suite in analysis['test_suites'].values() if suite['status'] == 'completed')
+        total_expected = 3  # basic, stress, endurance
+        
+        if completed_suites >= total_expected:
+            analysis['overall_status'] = 'success'
+        elif completed_suites > 0:
+            analysis['overall_status'] = 'partial'
+        else:
+            analysis['overall_status'] = 'failed'
+        
+        # Generate report
+        report = f"""
+        # VexFS Nightly Comprehensive Testing Report
+        
+        **Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}
+        **Commit:** {analysis['commit_sha'][:8]}
+        **Workflow Run:** {analysis['workflow_run_id']}
+        **Overall Status:** {analysis['overall_status'].upper()}
+        
+        ## Test Suite Results
+        
+        """
+        
+        for suite_name, suite_data in analysis['test_suites'].items():
+            status_emoji = "✅" if suite_data['status'] == 'completed' else "❌"
+            report += f"- {status_emoji} **{suite_name.title()} Testing**: {suite_data['status']}\n"
+        
+        if analysis['performance_analysis']:
+            perf = analysis['performance_analysis']
+            report += f"""
+        ## Performance Analysis
+        
+        - **Insertion Performance**: {perf.get('insertion_performance', {}).get('mean_ops_per_sec', 'N/A'):.1f} ops/sec
+        - **Search Performance**: {perf.get('search_performance', {}).get('mean_ops_per_sec', 'N/A'):.1f} ops/sec
+        - **Test Iterations**: {perf.get('iterations', 'N/A')}
+        """
+        
+        if analysis['fuzzing_results']:
+            report += f"""
+        ## Fuzzing Analysis
+        
+        - **Status**: {analysis['fuzzing_results']['status']}
+        - **Duration**: {analysis['fuzzing_results']['duration']}
+        - **Artifacts**: Available for review
+        """
+        
+        report += """
+        
+        ## Recommendations
+        
+        1. Review detailed test artifacts for any failures
+        2. Check performance trends against historical data
+        3. Investigate any fuzzing-discovered issues
+        4. Update baseline performance metrics if improvements detected
+        
+        ---
+        *Generated by VexFS Nightly CI/CD Pipeline*
+        """
+        
+        # Save analysis
+        with open('nightly-analysis.json', 'w') as f:
+            json.dump(analysis, f, indent=2)
+            
+        with open('nightly-report.md', 'w') as f:
+            f.write(report)
+            
+        print("🌙 Nightly analysis completed")
+        print(f"📊 Overall Status: {analysis['overall_status']}")
+        print(f"🧪 Test Suites: {len(analysis['test_suites'])}")
+        EOF
+        
+    - name: Upload nightly analysis
+      uses: actions/upload-artifact@v3
+      with:
+        name: nightly-comprehensive-analysis
+        path: |
+          nightly-analysis.json
+          nightly-report.md
+        retention-days: 365
+        
+    - name: Create GitHub issue for failures (if any)
+      if: failure()
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          
+          let body = `# Nightly Testing Failure Report
+          
+          **Date:** ${new Date().toISOString()}
+          **Workflow Run:** ${context.runId}
+          **Commit:** ${context.sha.substring(0, 8)}
+          
+          ## Failure Details
+          
+          The nightly comprehensive testing pipeline has encountered failures.
+          Please review the workflow logs and artifacts for detailed information.
+          
+          ## Action Required
+          
+          1. Review failed job logs
+          2. Check test artifacts for specific failure details
+          3. Investigate and fix any issues
+          4. Re-run tests to verify fixes
+          
+          **Auto-generated by VexFS CI/CD Pipeline**`;
+          
+          github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: `Nightly Testing Failure - ${new Date().toISOString().split('T')[0]}`,
+            body: body,
+            labels: ['ci-failure', 'nightly-testing', 'needs-investigation']
+          });

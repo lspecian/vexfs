@@ -1,0 +1,92 @@
+name: Quick Validation
+
+on:
+  push:
+    branches: [ main, develop, feature/* ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  quick-validation:
+    name: Quick Build and Test Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+        components: rustfmt, clippy
+        
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-quick-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-quick-
+          ${{ runner.os }}-cargo-
+          
+    - name: Install minimal kernel headers
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          linux-headers-$(uname -r) \
+          bc
+          
+    - name: Quick kernel module build check
+      run: |
+        cd kernel
+        make clean
+        make
+        if [ -f vexfs.ko ]; then
+          echo "✅ Kernel module builds successfully"
+          modinfo vexfs.ko | head -10
+        else
+          echo "❌ Kernel module build failed"
+          exit 1
+        fi
+        
+    - name: Quick Rust build and test
+      run: |
+        cd rust
+        cargo build --release
+        cargo test --release --lib
+        
+    - name: Rust formatting check
+      run: |
+        cd rust
+        cargo fmt -- --check
+        
+    - name: Rust linting (warnings only)
+      run: |
+        cd rust
+        cargo clippy -- -W clippy::all
+        
+    - name: Quick integration test
+      run: |
+        cd tests/kernel_module
+        cargo build --release --bin kselftest_runner
+        echo "✅ Test runners build successfully"
+        
+    - name: Validation summary
+      run: |
+        echo "🎉 Quick validation completed successfully!"
+        echo "✅ Kernel module builds"
+        echo "✅ Rust components build and test"
+        echo "✅ Code formatting is correct"
+        echo "✅ No critical linting issues"
+        echo "✅ Test runners build"

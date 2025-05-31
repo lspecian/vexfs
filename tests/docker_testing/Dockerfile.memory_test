@@ -1,0 +1,18 @@
+FROM ubuntu:22.04
+
+# Install kernel development tools
+RUN apt-get update && apt-get install -y \
+    kmod \
+    util-linux \
+    e2fsprogs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create working directory
+WORKDIR /vexfs
+
+# Copy only necessary files for testing
+COPY kernel/ /vexfs/kernel/
+COPY tests/docker_testing/ /vexfs/tests/docker_testing/
+
+# Make test scripts executable
+RUN chmod +x /vexfs/tests/docker_testing/*.sh
