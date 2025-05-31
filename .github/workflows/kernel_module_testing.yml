@@ -1,0 +1,689 @@
+name: VexFS Kernel Module Testing
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'kernel/**'
+      - 'tests/kernel_module/**'
+      - 'tests/vm_testing/**'
+      - '.github/workflows/kernel_module_testing.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'kernel/**'
+      - 'tests/kernel_module/**'
+      - 'tests/vm_testing/**'
+  schedule:
+    # Run nightly at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      test_level:
+        description: 'Test level to run'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - level1
+          - level2
+          - level3
+          - quick
+          - benchmark
+      extended_stress:
+        description: 'Run extended stress testing (24 hours)'
+        required: false
+        default: false
+        type: boolean
+      kernel_version:
+        description: 'Kernel version to test against'
+        required: false
+        default: 'latest'
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUST_LOG: info
+
+jobs:
+  # Job 1: Build and Basic Validation
+  build-and-validate:
+    name: Build and Basic Validation
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    
+    strategy:
+      matrix:
+        kernel_version: ['5.15', '6.1', '6.5']
+        rust_version: ['1.70', 'stable']
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Install Rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: ${{ matrix.rust_version }}
+        profile: minimal
+        override: true
+        components: rustfmt, clippy
+    
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target/
+          tests/kernel_module/target/
+        key: ${{ runner.os }}-cargo-${{ matrix.rust_version }}-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ matrix.rust_version }}-
+          ${{ runner.os }}-cargo-
+    
+    - name: Install kernel development packages
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          linux-headers-$(uname -r) \
+          build-essential \
+          qemu-system-x86_64 \
+          qemu-utils \
+          jq \
+          bc
+    
+    - name: Install additional kernel headers
+      if: matrix.kernel_version != 'current'
+      run: |
+        # Install specific kernel version headers if available
+        sudo apt-get install -y linux-headers-${{ matrix.kernel_version }}-generic || true
+    
+    - name: Build kernel module
+      run: |
+        cd kernel
+        make clean
+        make
+        ls -la vexfs.ko
+    
+    - name: Build test binaries
+      run: |
+        cd tests/kernel_module
+        cargo build --release --all-bins
+        cargo test --release --no-run
+    
+    - name: Run code quality checks
+      run: |
+        cd tests/kernel_module
+        cargo fmt --all -- --check
+        cargo clippy --all-targets --all-features -- -D warnings
+    
+    - name: Upload kernel module artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: vexfs-kernel-module-${{ matrix.kernel_version }}-${{ matrix.rust_version }}
+        path: |
+          kernel/vexfs.ko
+          tests/kernel_module/target/release/
+        retention-days: 7
+    
+    - name: Run Level 1 tests (Basic Validation)
+      run: |
+        cd tests/kernel_module
+        timeout 300 cargo run --release --bin kselftest_runner -- \
+          --output level1_results_${{ matrix.kernel_version }}_${{ matrix.rust_version }}.json \
+          --verbose
+    
+    - name: Upload Level 1 results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: level1-results-${{ matrix.kernel_version }}-${{ matrix.rust_version }}
+        path: tests/kernel_module/level1_results_*.json
+        retention-days: 30
+
+  # Job 2: VM-based Mount Testing
+  vm-mount-testing:
+    name: VM Mount Operations Testing
+    runs-on: ubuntu-22.04
+    needs: build-and-validate
+    timeout-minutes: 60
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'test:vm')
+    
+    strategy:
+      matrix:
+        kernel_version: ['5.15', '6.1']
+        vm_config: ['standard', 'minimal']
+      fail-fast: false
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Install Rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+        override: true
+    
+    - name: Restore Rust cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target/
+          tests/kernel_module/target/
+        key: ${{ runner.os }}-cargo-stable-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-stable-
+          ${{ runner.os }}-cargo-
+    
+    - name: Download kernel module artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: vexfs-kernel-module-${{ matrix.kernel_version }}-stable
+        path: .
+    
+    - name: Install VM testing dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          qemu-system-x86_64 \
+          qemu-utils \
+          cloud-image-utils \
+          jq \
+          wget
+    
+    - name: Setup VM testing environment
+      run: |
+        # Enable KVM if available
+        if [ -e /dev/kvm ]; then
+          sudo chmod 666 /dev/kvm
+          echo "KVM acceleration enabled"
+        else
+          echo "KVM not available, using software emulation"
+        fi
+        
+        # Create VM configuration
+        mkdir -p vm_config
+        cat > vm_config/${{ matrix.vm_config }}.json << EOF
+        {
+          "memory": "${{ matrix.vm_config == 'minimal' && '1024' || '2048' }}",
+          "cpus": "${{ matrix.vm_config == 'minimal' && '1' || '2' }}",
+          "disk_size": "4G",
+          "enable_kvm": true
+        }
+        EOF
+    
+    - name: Run Level 2 tests (VM Mount Operations)
+      run: |
+        cd tests/kernel_module
+        timeout 3600 cargo run --release --bin mount_level_runner -- \
+          --config ../../vm_config/${{ matrix.vm_config }}.json \
+          --output level2_results_${{ matrix.kernel_version }}_${{ matrix.vm_config }}.json \
+          --verbose
+      env:
+        VM_CONFIG: ${{ matrix.vm_config }}
+        KERNEL_VERSION: ${{ matrix.kernel_version }}
+    
+    - name: Upload Level 2 results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: level2-results-${{ matrix.kernel_version }}-${{ matrix.vm_config }}
+        path: |
+          tests/kernel_module/level2_results_*.json
+          tests/vm_testing/*.log
+        retention-days: 30
+    
+    - name: Upload VM logs on failure
+      uses: actions/upload-artifact@v3
+      if: failure()
+      with:
+        name: vm-logs-${{ matrix.kernel_version }}-${{ matrix.vm_config }}
+        path: |
+          tests/vm_testing/vm_*.log
+          tests/vm_testing/qemu_*.log
+        retention-days: 7
+
+  # Job 3: Stress Testing
+  stress-testing:
+    name: Stress Testing
+    runs-on: ubuntu-22.04
+    needs: [build-and-validate, vm-mount-testing]
+    timeout-minutes: 120
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'test:stress')
+    
+    strategy:
+      matrix:
+        stress_level: ['quick', 'standard']
+        include:
+          - stress_level: 'extended'
+            timeout_minutes: 1440  # 24 hours
+            if_condition: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.extended_stress == 'true')
+      fail-fast: false
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Install Rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+        override: true
+    
+    - name: Restore Rust cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target/
+          tests/kernel_module/target/
+        key: ${{ runner.os }}-cargo-stable-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Download kernel module artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: vexfs-kernel-module-6.1-stable
+        path: .
+    
+    - name: Install stress testing dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          qemu-system-x86_64 \
+          stress-ng \
+          htop \
+          iotop \
+          jq
+    
+    - name: Configure stress testing environment
+      run: |
+        # Increase VM resources for stress testing
+        cat > stress_config.json << EOF
+        {
+          "memory": "4096",
+          "cpus": "4",
+          "disk_size": "8G",
+          "enable_kvm": true,
+          "stress_level": "${{ matrix.stress_level }}"
+        }
+        EOF
+    
+    - name: Run Level 3 tests (Stress Testing)
+      timeout-minutes: ${{ matrix.timeout_minutes || 120 }}
+      run: |
+        cd tests/kernel_module
+        
+        case "${{ matrix.stress_level }}" in
+          "quick")
+            timeout 900 cargo run --release --bin stress_test_runner -- quick \
+              --output level3_results_quick.json \
+              --verbose
+            ;;
+          "standard")
+            timeout 7200 cargo run --release --bin stress_test_runner -- \
+              --duration 2.0 \
+              --frequency 120 \
+              --concurrency 25 \
+              --kernel-instrumentation \
+              --resource-monitoring \
+              --crash-detection \
+              --output level3_results_standard.json \
+              --verbose
+            ;;
+          "extended")
+            timeout 86400 cargo run --release --bin stress_test_runner -- extended \
+              --full-instrumentation \
+              --output level3_results_extended.json \
+              --verbose
+            ;;
+        esac
+      env:
+        STRESS_LEVEL: ${{ matrix.stress_level }}
+    
+    - name: Upload Level 3 results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: level3-results-${{ matrix.stress_level }}
+        path: |
+          tests/kernel_module/level3_results_*.json
+          tests/kernel_module/stress_*.log
+        retention-days: 30
+
+  # Job 4: Unified Test Suite
+  unified-testing:
+    name: Unified Test Suite
+    runs-on: ubuntu-22.04
+    needs: build-and-validate
+    timeout-minutes: 90
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Install Rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+        override: true
+    
+    - name: Restore Rust cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target/
+          tests/kernel_module/target/
+        key: ${{ runner.os }}-cargo-stable-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Download kernel module artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: vexfs-kernel-module-6.1-stable
+        path: .
+    
+    - name: Install testing dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          qemu-system-x86_64 \
+          qemu-utils \
+          jq \
+          bc
+    
+    - name: Run unified test suite
+      run: |
+        # Determine test configuration based on trigger
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          TEST_LEVEL="${{ github.event.inputs.test_level }}"
+        else
+          TEST_LEVEL="quick"
+        fi
+        
+        case "$TEST_LEVEL" in
+          "all")
+            ./tests/vm_testing/run_complete_test_suite.sh full \
+              --output-dir unified_results \
+              --verbose
+            ;;
+          "quick")
+            ./tests/vm_testing/run_complete_test_suite.sh quick \
+              --output-dir unified_results \
+              --verbose
+            ;;
+          "benchmark")
+            ./tests/vm_testing/run_complete_test_suite.sh benchmark \
+              --baseline \
+              --output-dir unified_results \
+              --verbose
+            ;;
+          "level1"|"level2"|"level3")
+            ./tests/vm_testing/run_complete_test_suite.sh $TEST_LEVEL \
+              --output-dir unified_results \
+              --verbose
+            ;;
+          *)
+            ./tests/vm_testing/run_complete_test_suite.sh \
+              --output-dir unified_results \
+              --verbose
+            ;;
+        esac
+      env:
+        RUST_LOG: info
+    
+    - name: Generate test report
+      if: always()
+      run: |
+        # Generate comprehensive test report
+        if [ -f unified_results/unified_test_results.json ]; then
+          echo "## VexFS Unified Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Extract key metrics
+          OVERALL_STATUS=$(jq -r '.overall_status' unified_results/unified_test_results.json)
+          DURATION=$(jq -r '.total_duration_seconds' unified_results/unified_test_results.json)
+          SESSION_ID=$(jq -r '.session_id' unified_results/unified_test_results.json)
+          
+          echo "- **Overall Status**: $OVERALL_STATUS" >> $GITHUB_STEP_SUMMARY
+          echo "- **Duration**: ${DURATION}s" >> $GITHUB_STEP_SUMMARY
+          echo "- **Session ID**: $SESSION_ID" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Level results
+          echo "### Test Level Results" >> $GITHUB_STEP_SUMMARY
+          jq -r '.level_results[] | "- **\(.level)**: \(.status) (\(.duration_seconds)s, \(.passed_count)/\(.test_count) tests passed)"' \
+            unified_results/unified_test_results.json >> $GITHUB_STEP_SUMMARY
+          
+          # Crash summary
+          TOTAL_CRASHES=$(jq -r '.crash_classification.total_crashes' unified_results/unified_test_results.json)
+          if [ "$TOTAL_CRASHES" != "0" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Crash Summary" >> $GITHUB_STEP_SUMMARY
+            echo "- **Total Crashes**: $TOTAL_CRASHES" >> $GITHUB_STEP_SUMMARY
+            RECOVERY_RATE=$(jq -r '.crash_classification.recovery_success_rate' unified_results/unified_test_results.json)
+            echo "- **Recovery Rate**: $(echo "$RECOVERY_RATE * 100" | bc -l | cut -d. -f1)%" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Recommendations
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Recommendations" >> $GITHUB_STEP_SUMMARY
+          jq -r '.recommendations[] | "- \(.)"' unified_results/unified_test_results.json >> $GITHUB_STEP_SUMMARY
+        fi
+    
+    - name: Upload unified test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: unified-test-results
+        path: |
+          unified_results/
+          tests/vm_testing/*.log
+        retention-days: 30
+    
+    - name: Upload HTML report
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: html-test-report
+        path: unified_results/reports/comprehensive_report.html
+        retention-days: 30
+
+  # Job 5: Performance Regression Analysis
+  performance-analysis:
+    name: Performance Regression Analysis
+    runs-on: ubuntu-22.04
+    needs: unified-testing
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Download unified test results
+      uses: actions/download-artifact@v3
+      with:
+        name: unified-test-results
+        path: current_results/
+    
+    - name: Download baseline results
+      uses: actions/download-artifact@v3
+      with:
+        name: performance-baseline
+        path: baseline_results/
+      continue-on-error: true
+    
+    - name: Install analysis tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y jq bc python3-pip
+        pip3 install matplotlib pandas numpy
+    
+    - name: Perform regression analysis
+      run: |
+        # Create performance analysis script
+        cat > analyze_performance.py << 'EOF'
+        import json
+        import sys
+        import os
+        
+        def load_results(file_path):
+            if not os.path.exists(file_path):
+                return None
+            with open(file_path, 'r') as f:
+                return json.load(f)
+        
+        def analyze_performance(current, baseline):
+            if not baseline:
+                print("No baseline available, saving current as baseline")
+                return {"status": "baseline_created", "regressions": []}
+            
+            regressions = []
+            current_perf = current.get('performance_analysis', {}).get('current_metrics', {})
+            baseline_perf = baseline.get('performance_analysis', {}).get('current_metrics', {})
+            
+            for metric, current_value in current_perf.items():
+                if metric in baseline_perf:
+                    baseline_value = baseline_perf[metric]
+                    if baseline_value > 0:
+                        change_percent = ((current_value - baseline_value) / baseline_value) * 100
+                        if change_percent > 10:  # 10% regression threshold
+                            regressions.append({
+                                "metric": metric,
+                                "current": current_value,
+                                "baseline": baseline_value,
+                                "change_percent": change_percent
+                            })
+            
+            return {"status": "analyzed", "regressions": regressions}
+        
+        current = load_results('current_results/unified_test_results.json')
+        baseline = load_results('baseline_results/unified_test_results.json')
+        
+        if current:
+            result = analyze_performance(current, baseline)
+            print(json.dumps(result, indent=2))
+            
+            if result["regressions"]:
+                print(f"Found {len(result['regressions'])} performance regressions!")
+                sys.exit(1)
+        else:
+            print("No current results found")
+            sys.exit(1)
+        EOF
+        
+        python3 analyze_performance.py > regression_analysis.json
+    
+    - name: Update performance baseline
+      if: success()
+      uses: actions/upload-artifact@v3
+      with:
+        name: performance-baseline
+        path: current_results/unified_test_results.json
+        retention-days: 90
+    
+    - name: Comment on PR with performance results
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          if (fs.existsSync('regression_analysis.json')) {
+            const analysis = JSON.parse(fs.readFileSync('regression_analysis.json', 'utf8'));
+            
+            let comment = '## Performance Analysis Results\n\n';
+            
+            if (analysis.regressions.length === 0) {
+              comment += '✅ No performance regressions detected!\n';
+            } else {
+              comment += `⚠️ Found ${analysis.regressions.length} performance regression(s):\n\n`;
+              for (const regression of analysis.regressions) {
+                comment += `- **${regression.metric}**: ${regression.change_percent.toFixed(1)}% slower\n`;
+                comment += `  - Current: ${regression.current}\n`;
+                comment += `  - Baseline: ${regression.baseline}\n\n`;
+              }
+            }
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+          }
+
+  # Job 6: Cleanup and Notification
+  cleanup-and-notify:
+    name: Cleanup and Notification
+    runs-on: ubuntu-22.04
+    needs: [build-and-validate, vm-mount-testing, stress-testing, unified-testing, performance-analysis]
+    if: always()
+    
+    steps:
+    - name: Determine overall status
+      id: status
+      run: |
+        # Determine overall workflow status
+        if [ "${{ needs.build-and-validate.result }}" = "failure" ]; then
+          echo "status=failure" >> $GITHUB_OUTPUT
+          echo "message=Build and validation failed" >> $GITHUB_OUTPUT
+        elif [ "${{ needs.vm-mount-testing.result }}" = "failure" ]; then
+          echo "status=failure" >> $GITHUB_OUTPUT
+          echo "message=VM mount testing failed" >> $GITHUB_OUTPUT
+        elif [ "${{ needs.stress-testing.result }}" = "failure" ]; then
+          echo "status=failure" >> $GITHUB_OUTPUT
+          echo "message=Stress testing failed" >> $GITHUB_OUTPUT
+        elif [ "${{ needs.unified-testing.result }}" = "failure" ]; then
+          echo "status=failure" >> $GITHUB_OUTPUT
+          echo "message=Unified testing failed" >> $GITHUB_OUTPUT
+        elif [ "${{ needs.performance-analysis.result }}" = "failure" ]; then
+          echo "status=warning" >> $GITHUB_OUTPUT
+          echo "message=Performance regression detected" >> $GITHUB_OUTPUT
+        else
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "message=All tests passed successfully" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Notify on failure
+      if: steps.status.outputs.status == 'failure' && github.event_name != 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: `Kernel Module Testing Failed - ${context.sha.substring(0, 7)}`,
+            body: `
+            ## Test Failure Report
+            
+            **Commit**: ${context.sha}
+            **Branch**: ${context.ref}
+            **Workflow**: ${context.workflow}
+            **Status**: ${{ steps.status.outputs.message }}
+            
+            **Failed Jobs**:
+            - Build and Validate: ${{ needs.build-and-validate.result }}
+            - VM Mount Testing: ${{ needs.vm-mount-testing.result }}
+            - Stress Testing: ${{ needs.stress-testing.result }}
+            - Unified Testing: ${{ needs.unified-testing.result }}
+            - Performance Analysis: ${{ needs.performance-analysis.result }}
+            
+            Please check the [workflow run](${context.payload.repository.html_url}/actions/runs/${context.runId}) for details.
+            `,
+            labels: ['bug', 'testing', 'kernel-module']
+          });

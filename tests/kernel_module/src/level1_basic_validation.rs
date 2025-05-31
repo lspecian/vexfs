@@ -41,7 +41,7 @@ pub enum BuildVariant {
 impl BuildVariant {
     fn make_target(&self) -> &'static str {
         match self {
-            BuildVariant::Standard => "vm-build",
+            BuildVariant::Standard => "all",
         }
     }
 
@@ -158,7 +158,6 @@ impl Level1TestRunner {
         if build_result.success {
             // Verify module file exists
             let module_path = self.config.vexfs_kernel_dir
-                .join("kernel/build")
                 .join(self.config.build_variant.module_name());
                 
             if module_path.exists() {
@@ -196,7 +195,6 @@ impl Level1TestRunner {
         println!("\n📋 Test 2: Module Information Validation");
         
         let module_path = self.config.vexfs_kernel_dir
-            .join("kernel/build")
             .join(self.config.build_variant.module_name());
             
         if !module_path.exists() {
@@ -256,7 +254,6 @@ impl Level1TestRunner {
         println!("\n🔄 Test 3: Module Loading (requires sudo)");
         
         let module_path = self.config.vexfs_kernel_dir
-            .join("kernel/build")
             .join(self.config.build_variant.module_name());
             
         let start_time = Instant::now();
@@ -591,13 +588,14 @@ impl Level1TestRunner {
         Ok(())
     }
 
-    /// Helper: Run make command in kernel build directory
+    /// Helper: Run make command in VexFS kernel directory
     fn run_make_command(&self, target: &str) -> Result<ModuleTestResult, Box<dyn std::error::Error>> {
         let start_time = Instant::now();
         
+        // Run make from within the VexFS kernel directory (not using -C)
+        // This ensures $(PWD) in the Makefile resolves correctly
         let output = Command::new("make")
-            .arg("-C")
-            .arg(&self.config.vexfs_kernel_dir.join("kernel/build"))
+            .current_dir(&self.config.vexfs_kernel_dir)
             .arg(target)
             .output()?;
             
@@ -764,7 +762,7 @@ mod tests {
 
     #[test]
     fn test_build_variant_properties() {
-        assert_eq!(BuildVariant::Standard.make_target(), "vm-build");
+        assert_eq!(BuildVariant::Standard.make_target(), "all");
         assert_eq!(BuildVariant::Standard.module_name(), "vexfs.ko");
     }
 

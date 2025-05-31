@@ -299,15 +299,14 @@ run_level1_tests() {
     fi
     
     # Copy binary to results directory
-    cp "$KERNEL_MODULE_DIR/target/x86_64-unknown-linux-gnu/release/level1_runner" "$test_binary"
+    cp "$KERNEL_MODULE_DIR/target/release/level1_runner" "$test_binary"
     
     progress "Executing Level 1 test suite"
     
     # Prepare test configuration
     local config_args=(
         "--build-variant" "$build_variant"
-        "--timeout" "$DEFAULT_TIMEOUT"
-        "--kernel-dir" "$PROJECT_ROOT"
+        "--kernel-dir" "$PROJECT_ROOT/kernel"
     )
     
     if [[ "$ENABLE_SUDO_TESTS" == "true" ]]; then

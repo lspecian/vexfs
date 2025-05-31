@@ -1,0 +1,472 @@
+name: VexFS Comprehensive Testing and Reporting
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run comprehensive tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      test_level:
+        description: 'Test level to run'
+        required: true
+        default: 'comprehensive'
+        type: choice
+        options:
+        - basic
+        - comprehensive
+        - stress
+      enable_fuzzing:
+        description: 'Enable Syzkaller fuzzing'
+        required: false
+        default: true
+        type: boolean
+      enable_advanced_detection:
+        description: 'Enable advanced crash detection'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # Basic compilation and unit tests
+  basic-tests:
+    name: Basic Tests
+    runs-on: ubuntu-latest
+    outputs:
+      basic-results: ${{ steps.basic-test.outputs.results }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+        components: rustfmt, clippy
+    
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          linux-headers-$(uname -r) \
+          pkg-config \
+          libfuse3-dev \
+          python3-dev \
+          python3-pip
+    
+    - name: Run basic tests
+      id: basic-test
+      run: |
+        echo "🧪 Running basic compilation and unit tests..."
+        
+        # Compile kernel module
+        make clean
+        make
+        
+        # Run Rust tests
+        cargo test --verbose
+        
+        # Run clippy
+        cargo clippy -- -D warnings
+        
+        # Check formatting
+        cargo fmt -- --check
+        
+        echo "results=success" >> $GITHUB_OUTPUT
+
+  # VM-based comprehensive testing
+  vm-testing:
+    name: VM-Based Testing
+    runs-on: ubuntu-latest
+    needs: basic-tests
+    if: always() && (needs.basic-tests.result == 'success' || github.event_name == 'workflow_dispatch')
+    
+    strategy:
+      matrix:
+        test-suite: [mount-level, stress, enhanced]
+        vm-config: [alpine, ubuntu]
+      fail-fast: false
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup VM testing environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          qemu-kvm \
+          qemu-utils \
+          libvirt-daemon-system \
+          libvirt-clients \
+          bridge-utils \
+          python3-pip \
+          python3-venv
+        
+        # Install Python dependencies
+        python3 -m pip install --upgrade pip
+        pip3 install -r tests/vm_testing/requirements.txt
+    
+    - name: Setup VM images
+      run: |
+        cd tests/vm_testing
+        ./setup_vm_images.sh ${{ matrix.vm-config }}
+    
+    - name: Run VM tests
+      id: vm-tests
+      run: |
+        cd tests/vm_testing
+        
+        case "${{ matrix.test-suite }}" in
+          "mount-level")
+            ./run_mount_level_tests.sh --vm-config=${{ matrix.vm-config }} --json-output
+            ;;
+          "stress")
+            ./run_stress_tests.sh --vm-config=${{ matrix.vm-config }} --json-output
+            ;;
+          "enhanced")
+            ./run_enhanced_vm_tests.sh --vm-config=${{ matrix.vm-config }} --json-output
+            ;;
+        esac
+    
+    - name: Upload VM test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: vm-test-results-${{ matrix.test-suite }}-${{ matrix.vm-config }}
+        path: |
+          tests/vm_testing/logs/
+          tests/vm_testing/results/
+        retention-days: 30
+
+  # Syzkaller fuzzing (if enabled)
+  syzkaller-fuzzing:
+    name: Syzkaller Fuzzing
+    runs-on: ubuntu-latest
+    needs: basic-tests
+    if: always() && (needs.basic-tests.result == 'success' || github.event_name == 'workflow_dispatch') && (github.event.inputs.enable_fuzzing == 'true' || github.event.inputs.enable_fuzzing == '')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Syzkaller environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          qemu-kvm \
+          qemu-utils \
+          build-essential \
+          linux-headers-$(uname -r) \
+          golang-go
+        
+        # Install Syzkaller
+        cd tests/vm_testing
+        ./setup_syzkaller.sh
+    
+    - name: Run Syzkaller fuzzing
+      id: syzkaller
+      timeout-minutes: 60
+      run: |
+        cd tests/vm_testing/syzkaller
+        
+        # Run fuzzing for limited time in CI
+        timeout 3600 ./bin/syz-manager -config=vexfs.cfg || true
+        
+        # Collect results
+        if [ -d workdir ]; then
+          echo "📊 Syzkaller completed, collecting results..."
+          ls -la workdir/
+        fi
+    
+    - name: Upload Syzkaller results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: syzkaller-results
+        path: |
+          tests/vm_testing/syzkaller/workdir/
+        retention-days: 30
+
+  # Advanced crash detection
+  advanced-detection:
+    name: Advanced Crash Detection
+    runs-on: ubuntu-latest
+    needs: [vm-testing]
+    if: always() && (github.event.inputs.enable_advanced_detection == 'true' || github.event.inputs.enable_advanced_detection == '')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup advanced detection environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          python3-pip \
+          python3-venv \
+          bpftrace \
+          linux-tools-$(uname -r) \
+          linux-tools-generic
+        
+        pip3 install -r tests/vm_testing/advanced_detection/requirements.txt
+    
+    - name: Download VM test artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: vm-test-artifacts/
+    
+    - name: Run advanced crash detection
+      id: advanced-detection
+      run: |
+        cd tests/vm_testing/advanced_detection
+        
+        # Run advanced detection on collected VM test data
+        python3 advanced_crash_detection.py \
+          --input-dir=../../../vm-test-artifacts/ \
+          --output-dir=../logs/ \
+          --enable-race-detection \
+          --enable-memory-leak-detection \
+          --generate-report
+    
+    - name: Upload advanced detection results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: advanced-detection-results
+        path: |
+          tests/vm_testing/logs/*advanced_detection*
+        retention-days: 30
+
+  # Comprehensive analysis and reporting
+  comprehensive-analysis:
+    name: Comprehensive Analysis and Reporting
+    runs-on: ubuntu-latest
+    needs: [basic-tests, vm-testing, syzkaller-fuzzing, advanced-detection]
+    if: always()
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup analysis environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          python3-pip \
+          python3-venv \
+          pandoc \
+          wkhtmltopdf
+        
+        pip3 install -r tests/vm_testing/reporting/requirements.txt
+    
+    - name: Download all test artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: test-artifacts/
+    
+    - name: Run comprehensive analysis
+      id: analysis
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      run: |
+        cd tests/vm_testing/reporting
+        
+        # Copy artifacts to expected locations
+        mkdir -p ../logs ../results
+        find ../../../test-artifacts/ -name "*.json" -exec cp {} ../results/ \;
+        find ../../../test-artifacts/ -name "*.log" -exec cp {} ../logs/ \;
+        
+        # Run comprehensive analysis
+        python3 ci_integration.py --run-analysis
+    
+    - name: Upload comprehensive reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: comprehensive-reports
+        path: |
+          tests/vm_testing/reports/
+          test-results/
+        retention-days: 30
+    
+    - name: Upload test results summary
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results-summary
+        path: |
+          tests/vm_testing/reports/*ci_summary*
+        retention-days: 7
+    
+    - name: Comment PR with results
+      uses: actions/github-script@v6
+      if: github.event_name == 'pull_request'
+      with:
+        script: |
+          const fs = require('fs');
+          const path = require('path');
+          
+          // Find the CI summary file
+          const summaryPath = 'tests/vm_testing/reports/';
+          const summaryFiles = fs.readdirSync(summaryPath).filter(f => f.includes('ci_summary'));
+          
+          if (summaryFiles.length > 0) {
+            const summaryFile = path.join(summaryPath, summaryFiles[0]);
+            const summary = fs.readFileSync(summaryFile, 'utf8');
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: summary
+            });
+          }
+
+  # Performance benchmarking (scheduled runs only)
+  performance-benchmarks:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    needs: basic-tests
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.test_level == 'stress')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup benchmark environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          fio \
+          iozone3 \
+          sysbench \
+          python3-pip
+        
+        pip3 install -r tests/vm_testing/requirements.txt
+    
+    - name: Run performance benchmarks
+      id: benchmarks
+      run: |
+        cd tests/vm_testing
+        
+        # Run comprehensive performance benchmarks
+        ./run_performance_benchmarks.sh --comprehensive --json-output
+    
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: performance-benchmarks
+        path: |
+          tests/vm_testing/benchmarks/
+        retention-days: 90
+    
+    - name: Update performance baseline
+      if: github.ref == 'refs/heads/main' && github.event_name == 'schedule'
+      run: |
+        cd tests/vm_testing
+        
+        # Update performance baseline for main branch
+        ./update_performance_baseline.sh
+
+  # Security analysis
+  security-analysis:
+    name: Security Analysis
+    runs-on: ubuntu-latest
+    needs: basic-tests
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Run Rust security audit
+      run: |
+        cargo install cargo-audit
+        cargo audit
+    
+    - name: Run static analysis
+      run: |
+        # Install additional security tools
+        cargo install cargo-geiger
+        
+        # Run security analysis
+        cargo geiger --format json > security-analysis.json
+    
+    - name: Upload security analysis
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-analysis
+        path: |
+          security-analysis.json
+        retention-days: 30
+
+  # Cleanup and notification
+  cleanup-and-notify:
+    name: Cleanup and Notification
+    runs-on: ubuntu-latest
+    needs: [comprehensive-analysis, performance-benchmarks, security-analysis]
+    if: always()
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Download comprehensive reports
+      uses: actions/download-artifact@v3
+      with:
+        name: comprehensive-reports
+        path: reports/
+    
+    - name: Send success notification
+      if: needs.comprehensive-analysis.result == 'success'
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      run: |
+        if [ -n "$SLACK_WEBHOOK_URL" ]; then
+          curl -X POST -H 'Content-type: application/json' \
+            --data '{"text":"✅ VexFS comprehensive testing completed successfully for commit ${{ github.sha }}"}' \
+            $SLACK_WEBHOOK_URL
+        fi
+    
+    - name: Send failure notification
+      if: needs.comprehensive-analysis.result == 'failure'
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      run: |
+        if [ -n "$SLACK_WEBHOOK_URL" ]; then
+          curl -X POST -H 'Content-type: application/json' \
+            --data '{"text":"❌ VexFS comprehensive testing failed for commit ${{ github.sha }}. Check the workflow for details."}' \
+            $SLACK_WEBHOOK_URL
+        fi
+    
+    - name: Cleanup old artifacts
+      run: |
+        echo "🧹 Cleaning up old artifacts..."
+        # This would typically be handled by GitHub's retention policies
+        # but we can add custom cleanup logic here if needed

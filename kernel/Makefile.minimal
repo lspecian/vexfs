@@ -1,0 +1,47 @@
+# VexFS Minimal C Stub Makefile
+# This builds a pure C kernel module without Rust dependencies
+
+obj-m := vexfs_minimal.o
+vexfs_minimal-objs := src/vexfs_minimal_stub.o
+
+# Kernel build directory
+KDIR := /lib/modules/$(shell uname -r)/build
+
+# Default target
+all:
+	@echo "Building VexFS minimal C stub kernel module..."
+	$(MAKE) -C $(KDIR) M=$(PWD) modules
+	@echo "VexFS minimal C stub built successfully: vexfs_minimal.ko"
+
+clean:
+	@echo "Cleaning VexFS minimal C stub build..."
+	$(MAKE) -C $(KDIR) M=$(PWD) clean
+	rm -f vexfs_minimal.ko
+
+install: all
+	@echo "Installing VexFS minimal C stub module..."
+	sudo insmod vexfs_minimal.ko
+
+uninstall:
+	@echo "Uninstalling VexFS minimal C stub module..."
+	sudo rmmod vexfs_minimal || true
+
+test: install
+	@echo "Testing VexFS minimal C stub..."
+	@echo "Creating test directory..."
+	sudo mkdir -p /mnt/vexfs_test
+	@echo "Creating test block device (1GB)..."
+	sudo dd if=/dev/zero of=/tmp/vexfs_test.img bs=1M count=1024 2>/dev/null
+	sudo losetup /dev/loop0 /tmp/vexfs_test.img || true
+	@echo "Mounting VexFS..."
+	sudo mount -t vexfs /dev/loop0 /mnt/vexfs_test || echo "Mount failed - this is expected for minimal stub"
+	@echo "Test completed. Check dmesg for VexFS messages."
+
+cleanup:
+	@echo "Cleaning up test environment..."
+	sudo umount /mnt/vexfs_test 2>/dev/null || true
+	sudo losetup -d /dev/loop0 2>/dev/null || true
+	sudo rm -f /tmp/vexfs_test.img
+	sudo rmdir /mnt/vexfs_test 2>/dev/null || true
+
+.PHONY: all clean install uninstall test cleanup

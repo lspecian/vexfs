@@ -307,13 +307,13 @@ impl KselftestRunner {
         // Check if module compilation succeeds
         let output = Command::new("make")
             .arg("-C")
-            .arg("kernel/build")
-            .arg("vm-build")
+            .arg("kernel")
+            .arg("all")
             .output()?;
 
         if output.status.success() {
             // Check if module file exists
-            let module_path = PathBuf::from("kernel/build/vexfs.ko");
+            let module_path = PathBuf::from("kernel/vexfs.ko");
             if module_path.exists() {
                 Ok(KselftestResult::Pass)
             } else {
@@ -325,7 +325,7 @@ impl KselftestRunner {
     }
 
     fn test_module_info_validation(&self) -> Result<KselftestResult, Box<dyn std::error::Error>> {
-        let module_path = PathBuf::from("kernel/build/vexfs.ko");
+        let module_path = PathBuf::from("kernel/vexfs.ko");
         if !module_path.exists() {
             return Ok(KselftestResult::Skip);
         }
@@ -347,7 +347,7 @@ impl KselftestRunner {
     }
 
     fn test_module_loading(&self) -> Result<KselftestResult, Box<dyn std::error::Error>> {
-        let module_path = PathBuf::from("kernel/build/vexfs.ko");
+        let module_path = PathBuf::from("kernel/vexfs.ko");
         if !module_path.exists() {
             return Ok(KselftestResult::Skip);
         }
@@ -427,7 +427,7 @@ pub fn create_vexfs_kselftest_suite() -> KselftestRunner {
         description: "Verify VexFS kernel module compiles successfully".to_string(),
         requires_sudo: false,
         timeout: Duration::from_secs(300), // 5 minutes for compilation
-        setup_commands: vec!["make -C kernel/build clean".to_string()],
+        setup_commands: vec!["make -C kernel clean".to_string()],
         cleanup_commands: vec![],
     });
 

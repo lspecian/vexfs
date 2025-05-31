@@ -1,0 +1,36 @@
+#!/bin/bash
+
+# Simple mkfs.vexfs utility for VexFS kernel module testing
+# Usage: mkfs.vexfs <device>
+
+if [ $# -ne 1 ]; then
+    echo "Usage: mkfs.vexfs <device>"
+    echo "Example: mkfs.vexfs /dev/sda1"
+    exit 1
+fi
+
+DEVICE=$1
+
+# Check if device exists
+if [ ! -b "$DEVICE" ]; then
+    echo "Error: $DEVICE is not a block device"
+    exit 1
+fi
+
+# Check if device is mounted
+if mount | grep -q "$DEVICE"; then
+    echo "Error: $DEVICE is currently mounted. Please unmount first."
+    exit 1
+fi
+
+echo "Formatting $DEVICE with VexFS..."
+
+# Create a simple VexFS superblock
+# For now, just write a basic signature and metadata
+dd if=/dev/zero of="$DEVICE" bs=4096 count=1024 2>/dev/null
+
+# Write VexFS magic signature at the beginning
+echo -n "VEXFS1.0" | dd of="$DEVICE" bs=8 count=1 conv=notrunc 2>/dev/null
+
+echo "VexFS filesystem created on $DEVICE"
+echo "You can now mount it with: mount -t vexfs_fixed $DEVICE /mount/point"

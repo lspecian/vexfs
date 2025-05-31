@@ -1,13 +1,20 @@
-//! Level 2 Testing: VM-Isolated Mount Operations
-//! 
-//! This module provides VM-isolated testing for VexFS kernel module mount operations.
-//! Level 2 testing validates that the kernel module can be loaded, mounted, and perform
-//! basic filesystem operations within a controlled VM environment.
+//! Level 2 Testing: Enhanced VM-Isolated Mount Operations with Crash Detection & Performance Monitoring
+//!
+//! This module provides VM-isolated testing for VexFS kernel module mount operations with:
+//! - Crash detection and recovery
+//! - Performance monitoring and metrics collection
+//! - Stability validation under stress
+//! - Enhanced VM management with health monitoring
 
-use std::process::{Command, Stdio};
+use std::process::{Command, Stdio, Child};
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::sync::{Arc, Mutex, mpsc};
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::io::{BufRead, BufReader};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Level2TestResult {
@@ -18,6 +25,9 @@ pub struct Level2TestResult {
     pub module_loading: ModuleLoadResult,
     pub mount_operations: MountOperationResult,
     pub basic_operations: BasicOperationResult,
+    pub performance_metrics: PerformanceMetrics,
+    pub crash_detection: CrashDetectionResult,
+    pub stability_validation: StabilityValidationResult,
     pub cleanup: CleanupResult,
     pub error_details: Option<String>,
 }
@@ -28,6 +38,8 @@ pub enum TestStatus {
     Failed,
     Skipped,
     Timeout,
+    Crashed,
+    Recovered,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -64,19 +76,69 @@ pub struct BasicOperationResult {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct PerformanceMetrics {
+    pub mount_time_ms: u64,
+    pub unmount_time_ms: u64,
+    pub file_creation_time_ms: u64,
+    pub file_write_time_ms: u64,
+    pub file_read_time_ms: u64,
+    pub memory_usage_kb: u64,
+    pub cpu_usage_percent: f64,
+    pub io_operations_per_second: f64,
+    pub kernel_memory_usage_kb: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CrashDetectionResult {
+    pub kernel_panics_detected: u32,
+    pub hangs_detected: u32,
+    pub oops_detected: u32,
+    pub recovery_attempts: u32,
+    pub successful_recoveries: u32,
+    pub watchdog_triggers: u32,
+    pub dmesg_errors: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StabilityValidationResult {
+    pub stress_test_cycles: u32,
+    pub parallel_operations_tested: u32,
+    pub race_conditions_detected: u32,
+    pub resource_leaks_detected: u32,
+    pub max_concurrent_mounts: u32,
+    pub stability_score: f64, // 0.0 to 100.0
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CleanupResult {
     pub filesystem_unmounted: bool,
     pub module_unloaded: bool,
     pub vm_shutdown: bool,
     pub cleanup_duration_ms: u64,
+    pub vm_recovered_from_crash: bool,
+    pub snapshot_restored: bool,
 }
 
 pub struct Level2TestRunner {
-    vm_config: VmConfig,
-    _test_timeout: Duration,
+    pub vm_config: VmConfig,
+    test_timeout: Duration,
+    vm_process: Option<Child>,
+    pub watchdog_enabled: bool,
+    performance_monitoring: bool,
+    crash_detection: bool,
+    vm_health_monitor: Option<VmHealthMonitor>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
+pub struct VmHealthMonitor {
+    pub vm_pid: Option<u32>,
+    pub last_heartbeat: SystemTime,
+    pub crash_count: u32,
+    pub hang_count: u32,
+    pub recovery_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VmConfig {
     pub vm_image_path: String,
     pub vm_memory_mb: u32,
@@ -84,17 +146,29 @@ pub struct VmConfig {
     pub ssh_port: u16,
     pub ssh_key_path: String,
     pub vm_user: String,
+    pub snapshot_path: String,
+    pub watchdog_timeout_seconds: u64,
+    pub performance_monitoring_interval_ms: u64,
+    pub max_recovery_attempts: u32,
+    pub enable_kvm: bool,
+    pub vm_console_log: String,
 }
 
 impl Default for VmConfig {
     fn default() -> Self {
         Self {
             vm_image_path: "tests/vm_images/vexfs-test.qcow2".to_string(),
-            vm_memory_mb: 2048,
-            vm_cpus: 2,
+            vm_memory_mb: 4096, // Increased for performance monitoring
+            vm_cpus: 4, // Increased for stability testing
             ssh_port: 2222,
             ssh_key_path: "tests/vm_keys/vexfs_test_key".to_string(),
             vm_user: "vexfs".to_string(),
+            snapshot_path: "tests/vm_images/vexfs-test-snapshot.qcow2".to_string(),
+            watchdog_timeout_seconds: 300, // 5 minutes
+            performance_monitoring_interval_ms: 1000, // 1 second
+            max_recovery_attempts: 3,
+            enable_kvm: true,
+            vm_console_log: "tests/vm_testing/logs/vm_console.log".to_string(),
         }
     }
 }
@@ -103,14 +177,34 @@ impl Level2TestRunner {
     pub fn new(vm_config: VmConfig) -> Self {
         Self {
             vm_config,
-            _test_timeout: Duration::from_secs(600), // 10 minutes
+            test_timeout: Duration::from_secs(1800), // 30 minutes for enhanced testing
+            vm_process: None,
+            watchdog_enabled: true,
+            performance_monitoring: true,
+            crash_detection: true,
+            vm_health_monitor: None,
         }
+    }
+
+    pub fn with_crash_detection(mut self, enabled: bool) -> Self {
+        self.crash_detection = enabled;
+        self
+    }
+
+    pub fn with_performance_monitoring(mut self, enabled: bool) -> Self {
+        self.performance_monitoring = enabled;
+        self
+    }
+
+    pub fn with_watchdog(mut self, enabled: bool) -> Self {
+        self.watchdog_enabled = enabled;
+        self
     }
 
     pub fn run_level2_tests(&self) -> Result<Level2TestResult, Box<dyn std::error::Error>> {
         let start_time = Instant::now();
         let mut result = Level2TestResult {
-            test_name: "Level2_VM_Mount_Operations".to_string(),
+            test_name: "Enhanced_Level2_VM_Mount_Operations".to_string(),
             status: TestStatus::Failed,
             duration_ms: 0,
             vm_setup: VmSetupResult {
@@ -138,73 +232,127 @@ impl Level2TestRunner {
                 directory_creation: false,
                 file_deletion: false,
             },
+            performance_metrics: PerformanceMetrics {
+                mount_time_ms: 0,
+                unmount_time_ms: 0,
+                file_creation_time_ms: 0,
+                file_write_time_ms: 0,
+                file_read_time_ms: 0,
+                memory_usage_kb: 0,
+                cpu_usage_percent: 0.0,
+                io_operations_per_second: 0.0,
+                kernel_memory_usage_kb: 0,
+            },
+            crash_detection: CrashDetectionResult {
+                kernel_panics_detected: 0,
+                hangs_detected: 0,
+                oops_detected: 0,
+                recovery_attempts: 0,
+                successful_recoveries: 0,
+                watchdog_triggers: 0,
+                dmesg_errors: Vec::new(),
+            },
+            stability_validation: StabilityValidationResult {
+                stress_test_cycles: 0,
+                parallel_operations_tested: 0,
+                race_conditions_detected: 0,
+                resource_leaks_detected: 0,
+                max_concurrent_mounts: 0,
+                stability_score: 0.0,
+            },
             cleanup: CleanupResult {
                 filesystem_unmounted: false,
                 module_unloaded: false,
                 vm_shutdown: false,
                 cleanup_duration_ms: 0,
+                vm_recovered_from_crash: false,
+                snapshot_restored: false,
             },
             error_details: None,
         };
 
-        // Step 1: VM Setup
-        println!("🚀 Starting Level 2 Testing: VM-Isolated Mount Operations");
+        // Step 1: VM Setup with Enhanced Monitoring
+        println!("🚀 Starting Enhanced Level 2 Testing: VM-Isolated Mount Operations with Crash Detection & Performance Monitoring");
         let vm_setup_start = Instant::now();
         
-        match self.setup_vm() {
+        // Initialize crash detection and watchdog
+        if self.crash_detection {
+            println!("  🛡️  Initializing crash detection and watchdog systems...");
+        }
+        
+        match self.setup_enhanced_vm() {
             Ok(setup_result) => {
                 result.vm_setup = setup_result;
                 result.vm_setup.setup_duration_ms = vm_setup_start.elapsed().as_millis() as u64;
             }
             Err(e) => {
-                result.error_details = Some(format!("VM setup failed: {}", e));
+                result.error_details = Some(format!("Enhanced VM setup failed: {}", e));
                 result.duration_ms = start_time.elapsed().as_millis() as u64;
                 return Ok(result);
             }
         }
 
-        // Step 2: Module Loading
+        // Step 2: Module Loading with Crash Detection
         if result.vm_setup.vm_started && result.vm_setup.ssh_accessible {
-            match self.test_module_loading() {
+            match self.test_module_loading_with_monitoring() {
                 Ok(module_result) => result.module_loading = module_result,
                 Err(e) => {
-                    result.error_details = Some(format!("Module loading failed: {}", e));
-                    self.cleanup_vm();
+                    result.error_details = Some(format!("Module loading with monitoring failed: {}", e));
+                    result.crash_detection = self.collect_crash_detection_results();
+                    self.cleanup_enhanced_vm();
                     result.duration_ms = start_time.elapsed().as_millis() as u64;
                     return Ok(result);
                 }
             }
         }
 
-        // Step 3: Mount Operations
+        // Step 3: Mount Operations with Performance Monitoring
         if result.module_loading.module_loaded {
-            match self.test_mount_operations() {
-                Ok(mount_result) => result.mount_operations = mount_result,
+            match self.test_mount_operations_with_performance() {
+                Ok((mount_result, perf_metrics)) => {
+                    result.mount_operations = mount_result;
+                    result.performance_metrics = perf_metrics;
+                }
                 Err(e) => {
-                    result.error_details = Some(format!("Mount operations failed: {}", e));
-                    self.cleanup_vm();
+                    result.error_details = Some(format!("Mount operations with performance monitoring failed: {}", e));
+                    result.crash_detection = self.collect_crash_detection_results();
+                    self.cleanup_enhanced_vm();
                     result.duration_ms = start_time.elapsed().as_millis() as u64;
                     return Ok(result);
                 }
             }
         }
 
-        // Step 4: Basic Operations
+        // Step 4: Basic Operations with Enhanced Monitoring
         if result.mount_operations.mount_successful {
-            match self.test_basic_operations() {
+            match self.test_basic_operations_enhanced() {
                 Ok(basic_result) => result.basic_operations = basic_result,
                 Err(e) => {
-                    result.error_details = Some(format!("Basic operations failed: {}", e));
-                    self.cleanup_vm();
+                    result.error_details = Some(format!("Enhanced basic operations failed: {}", e));
+                    result.crash_detection = self.collect_crash_detection_results();
+                    self.cleanup_enhanced_vm();
                     result.duration_ms = start_time.elapsed().as_millis() as u64;
                     return Ok(result);
                 }
             }
         }
 
-        // Step 5: Cleanup
+        // Step 5: Stability Validation
+        if result.basic_operations.file_creation && result.basic_operations.file_write {
+            println!("  🔄 Running stability validation tests...");
+            match self.run_stability_validation() {
+                Ok(stability_result) => result.stability_validation = stability_result,
+                Err(e) => {
+                    result.error_details = Some(format!("Stability validation failed: {}", e));
+                    result.crash_detection = self.collect_crash_detection_results();
+                }
+            }
+        }
+
+        // Step 6: Collect Final Metrics and Cleanup
+        result.crash_detection = self.collect_crash_detection_results();
         let cleanup_start = Instant::now();
-        result.cleanup = self.cleanup_vm();
+        result.cleanup = self.cleanup_enhanced_vm();
         result.cleanup.cleanup_duration_ms = cleanup_start.elapsed().as_millis() as u64;
 
         // Determine overall status
@@ -355,7 +503,7 @@ impl Level2TestRunner {
                     "-o", "StrictHostKeyChecking=no",
                     &format!("{}@localhost", self.vm_config.vm_user),
                     "-p", &self.vm_config.ssh_port.to_string(),
-                    "cd /tmp/kernel/build && sudo insmod vexfs.ko"
+                    "cd /tmp/kernel && sudo insmod vexfs.ko"
                 ])
                 .output()?;
 
@@ -578,6 +726,8 @@ impl Level2TestRunner {
             module_unloaded: false,
             vm_shutdown: false,
             cleanup_duration_ms: 0,
+            snapshot_restored: false,
+            vm_recovered_from_crash: false,
         };
 
         println!("  🧹 Cleaning up VM environment...");
@@ -644,6 +794,6 @@ mod tests {
     fn test_level2_runner_creation() {
         let config = VmConfig::default();
         let runner = Level2TestRunner::new(config);
-        assert_eq!(runner._test_timeout, Duration::from_secs(600));
+        assert_eq!(runner.test_timeout, Duration::from_secs(600));
     }
 }

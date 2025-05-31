@@ -17,9 +17,30 @@ path = "src/bin/level2_runner.rs"
 name = "kselftest_runner"
 path = "src/bin/kselftest_runner.rs"
 
+[[bin]]
+name = "enhanced_level2_runner"
+path = "src/bin/enhanced_level2_runner.rs"
+
+[[bin]]
+name = "mount_level_runner"
+path = "src/bin/mount_level_runner.rs"
+
+[[bin]]
+name = "stress_test_runner"
+path = "src/bin/stress_test_runner.rs"
+
+[[bin]]
+name = "unified_test_runner"
+path = "src/bin/unified_test_runner.rs"
+
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+rand = "0.8"
+clap = { version = "4.0", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+env_logger = "0.10"
+log = "0.4"
 
 [dev-dependencies]
 # Add test dependencies here if needed
