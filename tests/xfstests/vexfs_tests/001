@@ -1,0 +1,253 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2024 VexFS Development Team.  All Rights Reserved.
+#
+# FS QA Test No. vexfs/001
+#
+# VexFS Basic Vector Operations Test
+#
+# This test validates basic vector operations on VexFS v2.0:
+# - Vector metadata setting and retrieval
+# - Basic vector insertion
+# - Vector file creation and management
+#
+
+. ./common/preamble
+_begin_fstest auto quick vector
+
+# Import common functions
+. ./common/filter
+. ./common/attr
+
+# Real QA test starts here
+_supported_fs vexfs
+_require_test
+_require_scratch
+
+# VexFS-specific requirements
+_require_vexfs_vector_support() {
+    # Check if VexFS module is loaded
+    if ! lsmod | grep -q vexfs_v2; then
+        _notrun "VexFS v2.0 kernel module not loaded"
+    fi
+    
+    # Check if UAPI header is available
+    if [ ! -f "$VEXFS_UAPI_HEADER" ]; then
+        _notrun "VexFS UAPI header not found"
+    fi
+}
+
+# Test vector metadata operations
+test_vector_metadata() {
+    echo "Testing vector metadata operations..."
+    
+    # Create a test vector file
+    local vector_file="$TEST_DIR/test_vectors.vex"
+    touch "$vector_file"
+    
+    # Test setting vector metadata using our test program
+    cat > "$tmp.vector_meta_test.c" << 'EOF'
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <stdint.h>
+
+// Include VexFS UAPI definitions
+#include "vexfs_v2_uapi.h"
+
+int main(int argc, char *argv[]) {
+    if (argc != 2) {
+        fprintf(stderr, "Usage: %s <vector_file>\n", argv[0]);
+        return 1;
+    }
+    
+    int fd = open(argv[1], O_RDWR);
+    if (fd < 0) {
+        perror("Failed to open vector file");
+        return 1;
+    }
+    
+    // Set vector metadata
+    struct vexfs_vector_file_info meta = {
+        .dimensions = 128,
+        .element_type = VEXFS_VECTOR_FLOAT32,
+        .vector_count = 0,
+        .storage_format = VEXFS_STORAGE_DENSE,
+        .data_offset = 0,
+        .index_offset = 0,
+        .compression_type = VEXFS_COMPRESS_NONE,
+        .alignment_bytes = 32
+    };
+    
+    if (ioctl(fd, VEXFS_IOC_SET_VECTOR_META, &meta) < 0) {
+        perror("Failed to set vector metadata");
+        close(fd);
+        return 1;
+    }
+    
+    // Get vector metadata to verify
+    struct vexfs_vector_file_info retrieved_meta;
+    if (ioctl(fd, VEXFS_IOC_GET_VECTOR_META, &retrieved_meta) < 0) {
+        perror("Failed to get vector metadata");
+        close(fd);
+        return 1;
+    }
+    
+    // Verify metadata
+    if (retrieved_meta.dimensions != 128 ||
+        retrieved_meta.element_type != VEXFS_VECTOR_FLOAT32 ||
+        retrieved_meta.storage_format != VEXFS_STORAGE_DENSE) {
+        fprintf(stderr, "Metadata verification failed\n");
+        close(fd);
+        return 1;
+    }
+    
+    printf("Vector metadata test passed\n");
+    close(fd);
+    return 0;
+}
+EOF
+
+    # Compile the test program
+    gcc -I"$(dirname "$VEXFS_UAPI_HEADER")" -o "$tmp.vector_meta_test" "$tmp.vector_meta_test.c"
+    
+    # Run the test
+    "$tmp.vector_meta_test" "$vector_file" || _fail "Vector metadata test failed"
+    
+    echo "Vector metadata test completed successfully"
+}
+
+# Test basic vector insertion
+test_vector_insertion() {
+    echo "Testing vector insertion operations..."
+    
+    local vector_file="$TEST_DIR/test_insertion.vex"
+    touch "$vector_file"
+    
+    cat > "$tmp.vector_insert_test.c" << 'EOF'
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <stdint.h>
+
+#include "vexfs_v2_uapi.h"
+
+int main(int argc, char *argv[]) {
+    if (argc != 2) {
+        fprintf(stderr, "Usage: %s <vector_file>\n", argv[0]);
+        return 1;
+    }
+    
+    int fd = open(argv[1], O_RDWR);
+    if (fd < 0) {
+        perror("Failed to open vector file");
+        return 1;
+    }
+    
+    // Set vector metadata first
+    struct vexfs_vector_file_info meta = {
+        .dimensions = 4,
+        .element_type = VEXFS_VECTOR_FLOAT32,
+        .vector_count = 0,
+        .storage_format = VEXFS_STORAGE_DENSE,
+        .data_offset = 0,
+        .index_offset = 0,
+        .compression_type = VEXFS_COMPRESS_NONE,
+        .alignment_bytes = 32
+    };
+    
+    if (ioctl(fd, VEXFS_IOC_SET_VECTOR_META, &meta) < 0) {
+        perror("Failed to set vector metadata");
+        close(fd);
+        return 1;
+    }
+    
+    // Prepare test vectors
+    float vectors[] = {
+        1.0f, 2.0f, 3.0f, 4.0f,  // Vector 1
+        5.0f, 6.0f, 7.0f, 8.0f   // Vector 2
+    };
+    uint64_t vector_ids[] = {1, 2};
+    
+    // Insert vectors
+    struct vexfs_batch_insert_request req = {
+        .vectors = vectors,
+        .vector_count = 2,
+        .dimensions = 4,
+        .vector_ids = vector_ids,
+        .flags = VEXFS_INSERT_APPEND
+    };
+    
+    if (ioctl(fd, VEXFS_IOC_BATCH_INSERT, &req) < 0) {
+        perror("Failed to insert vectors");
+        close(fd);
+        return 1;
+    }
+    
+    printf("Vector insertion test passed\n");
+    close(fd);
+    return 0;
+}
+EOF
+
+    # Compile and run the test
+    gcc -I"$(dirname "$VEXFS_UAPI_HEADER")" -o "$tmp.vector_insert_test" "$tmp.vector_insert_test.c"
+    "$tmp.vector_insert_test" "$vector_file" || _fail "Vector insertion test failed"
+    
+    echo "Vector insertion test completed successfully"
+}
+
+# Test POSIX file operations on vector files
+test_posix_operations() {
+    echo "Testing POSIX operations on vector files..."
+    
+    local vector_file="$TEST_DIR/posix_test.vex"
+    
+    # Test file creation
+    touch "$vector_file" || _fail "Failed to create vector file"
+    
+    # Test file permissions
+    chmod 644 "$vector_file" || _fail "Failed to set file permissions"
+    [ "$(stat -c %a "$vector_file")" = "644" ] || _fail "File permissions not set correctly"
+    
+    # Test file ownership (if running as root)
+    if [ "$(id -u)" = "0" ]; then
+        chown nobody:nogroup "$vector_file" 2>/dev/null || true
+    fi
+    
+    # Test file attributes
+    ls -la "$vector_file" > /dev/null || _fail "Failed to list vector file"
+    
+    # Test file removal
+    rm "$vector_file" || _fail "Failed to remove vector file"
+    
+    echo "POSIX operations test completed successfully"
+}
+
+# Main test execution
+echo "Starting VexFS basic vector operations test..."
+
+# Check requirements
+_require_vexfs_vector_support
+
+# Create temporary directory for test programs
+tmp="$TEST_DIR/tmp_$$"
+mkdir -p "$tmp"
+
+# Run tests
+test_vector_metadata
+test_vector_insertion
+test_posix_operations
+
+# Cleanup
+rm -rf "$tmp"
+
+echo "VexFS basic vector operations test completed successfully"
+
+# Success, all done
+status=0
+exit
