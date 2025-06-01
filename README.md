@@ -13,7 +13,7 @@
 
 ## 🎯 What is VexFS v2.0?
 
-VexFS v2.0 is a **production-ready kernel module** that implements the world's first native vector database filesystem. Unlike traditional vector databases that sit on top of filesystems, VexFS integrates vector operations directly into the Linux kernel, delivering unprecedented performance for AI/ML workloads.
+VexFS v2.0 is an **experimental kernel module** that implements the world's first native vector database filesystem. Unlike traditional vector databases that sit on top of filesystems, VexFS integrates vector operations directly into the Linux kernel, delivering unprecedented performance for AI/ML workloads.
 
 ### ⚡ **Real Performance Numbers**
 - **3.2M+ vector insertions/second** (proven with real embeddings)
@@ -87,9 +87,9 @@ Unlike ChromaDB, Pinecone, or Weaviate that run in userspace, VexFS operates at 
 | **Integration** | Native filesystem | External service |
 | **Overhead** | Minimal | High (network, serialization) |
 
-### **🎯 Real-World Proven**
+### **🎯 Development Progress**
 - ✅ **Real embeddings** from Ollama integration
-- ✅ **Production workloads** tested with 200GB+ datasets
+- ✅ **Large datasets** tested with 200GB+ data
 - ✅ **Cross-storage validation** (Memory, NVMe, HDD, Block devices)
 - ✅ **Stress testing** with concurrent operations
 - ✅ **Zero compilation errors** and clean kernel integration
@@ -118,7 +118,7 @@ VexFS v2.0 provides two implementations for different use cases:
 │  ├─ Raw partition formatting      │  ├─ Cross-platform      │
 │  ├─ True block-level filesystem   │  ├─ No kernel install   │
 │  ├─ Maximum performance           │  ├─ Easy testing        │
-│  └─ Production workloads          │  └─ Development mode    │
+│  └─ Research & development        │  └─ Development mode    │
 ├─────────────────────────────────────────────────────────────┤
 │              Phase 1: Vector Storage (✅ Complete)          │
 │              ├─ 3.2M+ insertions/second                    │
@@ -377,4 +377,4 @@ make && sudo insmod vexfs_v2_b62.ko
 
 ---
 
-*Built with ❤️ for the AI/ML community. Performance tested, production ready, future proof.*
+*Built with ❤️ for the AI/ML community. Performance tested, actively developed, future focused.*
