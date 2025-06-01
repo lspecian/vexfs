@@ -1,0 +1,3 @@
+# VexFS v2.0 Kernel Build Configuration - Build b62 (with monitoring)
+obj-m := vexfs_v2_b62.o
+vexfs_v2_b62-objs := vexfs_v2.o vexfs_v2_monitoring.o

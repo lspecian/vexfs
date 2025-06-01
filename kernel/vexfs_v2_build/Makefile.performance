@@ -1,0 +1,143 @@
+# VexFS v2.0 Performance Validation Framework Makefile
+# 
+# This Makefile builds the comprehensive performance testing suite
+# for VexFS v2.0 vector operations.
+
+CC = gcc
+CFLAGS = -Wall -Wextra -O2 -std=c99 -D_GNU_SOURCE
+LDFLAGS = -lm -lrt
+
+# Source files
+PERFORMANCE_SRC = vexfs_v2_performance_validator.c
+UAPI_HEADER = vexfs_v2_uapi.h
+
+# Target binaries
+PERFORMANCE_BIN = vexfs_v2_performance_validator
+EXISTING_TESTS = final_corrected_vector_test test_with_uapi_header
+
+# Default target
+all: $(PERFORMANCE_BIN) $(EXISTING_TESTS)
+
+# Performance validation framework
+$(PERFORMANCE_BIN): $(PERFORMANCE_SRC) $(UAPI_HEADER)
+	@echo "🔧 Building VexFS v2.0 Performance Validation Framework..."
+	$(CC) $(CFLAGS) -o $@ $(PERFORMANCE_SRC) $(LDFLAGS)
+	@echo "✅ Performance validator built successfully: $@"
+
+# Existing test programs
+final_corrected_vector_test: final_corrected_vector_test.c $(UAPI_HEADER)
+	@echo "🔧 Building final corrected vector test..."
+	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+	@echo "✅ Final corrected test built: $@"
+
+test_with_uapi_header: test_with_uapi_header.c $(UAPI_HEADER)
+	@echo "🔧 Building UAPI header test..."
+	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
+	@echo "✅ UAPI header test built: $@"
+
+# Quick performance test (subset of full validation)
+quick-test: $(PERFORMANCE_BIN)
+	@echo "🚀 Running quick performance validation..."
+	@echo "⚠️  Make sure VexFS v2.0 is mounted at /tmp/vexfs_test/"
+	@echo "⚠️  Make sure /tmp/vexfs_test/vector_test_file exists"
+	@echo ""
+	sudo ./$(PERFORMANCE_BIN) || echo "❌ Quick test failed - check VexFS mount status"
+
+# Full performance validation
+full-test: $(PERFORMANCE_BIN)
+	@echo "🚀 Running comprehensive performance validation..."
+	@echo "⚠️  This test will take several minutes to complete"
+	@echo "⚠️  Make sure VexFS v2.0 is mounted at /tmp/vexfs_test/"
+	@echo "⚠️  Make sure /tmp/vexfs_test/vector_test_file exists"
+	@echo ""
+	sudo ./$(PERFORMANCE_BIN) 2>&1 | tee performance_results_$(shell date +%Y%m%d_%H%M%S).log
+
+# Test existing corrected programs
+test-existing: $(EXISTING_TESTS)
+	@echo "🧪 Testing existing corrected vector programs..."
+	@echo ""
+	@echo "🔍 Running final corrected vector test..."
+	sudo ./final_corrected_vector_test || echo "❌ Final corrected test failed"
+	@echo ""
+	@echo "🔍 Running UAPI header test..."
+	sudo ./test_with_uapi_header || echo "❌ UAPI header test failed"
+
+# Setup test environment
+setup-test-env:
+	@echo "🔧 Setting up VexFS v2.0 test environment..."
+	@echo "📁 Creating test directories..."
+	sudo mkdir -p /tmp/vexfs_test
+	@echo "📄 Creating test file..."
+	sudo touch /tmp/vexfs_test/vector_test_file
+	sudo chmod 666 /tmp/vexfs_test/vector_test_file
+	@echo "✅ Test environment setup complete"
+	@echo ""
+	@echo "💡 Next steps:"
+	@echo "   1. Make sure VexFS v2.0 kernel module is loaded"
+	@echo "   2. Mount VexFS at /tmp/vexfs_test/"
+	@echo "   3. Run 'make test-existing' to verify basic functionality"
+	@echo "   4. Run 'make quick-test' for basic performance validation"
+	@echo "   5. Run 'make full-test' for comprehensive performance analysis"
+
+# Check kernel module status
+check-module:
+	@echo "🔍 Checking VexFS v2.0 kernel module status..."
+	@lsmod | grep vexfs || echo "❌ VexFS module not loaded"
+	@echo ""
+	@echo "📊 Checking mount status..."
+	@mount | grep vexfs || echo "❌ VexFS not mounted"
+	@echo ""
+	@echo "📁 Checking test file..."
+	@ls -la /tmp/vexfs_test/vector_test_file 2>/dev/null || echo "❌ Test file not found"
+
+# Clean build artifacts
+clean:
+	@echo "🧹 Cleaning build artifacts..."
+	rm -f $(PERFORMANCE_BIN) $(EXISTING_TESTS)
+	rm -f *.o *.log
+	@echo "✅ Clean complete"
+
+# Install performance tools (optional)
+install: $(PERFORMANCE_BIN)
+	@echo "📦 Installing VexFS v2.0 performance tools..."
+	sudo cp $(PERFORMANCE_BIN) /usr/local/bin/
+	sudo cp $(UAPI_HEADER) /usr/local/include/
+	@echo "✅ Installation complete"
+	@echo "💡 You can now run 'vexfs_v2_performance_validator' from anywhere"
+
+# Uninstall performance tools
+uninstall:
+	@echo "🗑️  Uninstalling VexFS v2.0 performance tools..."
+	sudo rm -f /usr/local/bin/$(PERFORMANCE_BIN)
+	sudo rm -f /usr/local/include/$(UAPI_HEADER)
+	@echo "✅ Uninstallation complete"
+
+# Help target
+help:
+	@echo "VexFS v2.0 Performance Validation Framework"
+	@echo "==========================================="
+	@echo ""
+	@echo "Available targets:"
+	@echo "  all              - Build all test programs"
+	@echo "  setup-test-env   - Setup test environment"
+	@echo "  check-module     - Check kernel module and mount status"
+	@echo "  test-existing    - Run existing corrected test programs"
+	@echo "  quick-test       - Run quick performance validation"
+	@echo "  full-test        - Run comprehensive performance analysis"
+	@echo "  clean            - Clean build artifacts"
+	@echo "  install          - Install tools system-wide"
+	@echo "  uninstall        - Remove installed tools"
+	@echo "  help             - Show this help message"
+	@echo ""
+	@echo "Prerequisites:"
+	@echo "  - VexFS v2.0 kernel module loaded"
+	@echo "  - VexFS mounted at /tmp/vexfs_test/"
+	@echo "  - Test file at /tmp/vexfs_test/vector_test_file"
+	@echo ""
+	@echo "Quick start:"
+	@echo "  make setup-test-env"
+	@echo "  make check-module"
+	@echo "  make test-existing"
+	@echo "  make quick-test"
+
+.PHONY: all quick-test full-test test-existing setup-test-env check-module clean install uninstall help
