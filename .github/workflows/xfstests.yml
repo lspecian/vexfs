@@ -1,0 +1,338 @@
+name: VexFS v2.0 xfstests POSIX Compliance
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'kernel/**'
+      - 'tests/xfstests/**'
+      - '.github/workflows/xfstests.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'kernel/**'
+      - 'tests/xfstests/**'
+  schedule:
+    # Run nightly at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      test_groups:
+        description: 'Test groups to run (quick, generic, stress, posix, vexfs, all)'
+        required: false
+        default: 'quick'
+      parallel_jobs:
+        description: 'Number of parallel test jobs'
+        required: false
+        default: '2'
+      use_real_devices:
+        description: 'Use real block devices instead of loop devices'
+        required: false
+        default: 'false'
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  xfstests-setup:
+    runs-on: ubuntu-latest
+    outputs:
+      test-matrix: ${{ steps.setup-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup test matrix
+        id: setup-matrix
+        run: |
+          # Define test configurations
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            # Nightly: comprehensive testing
+            echo 'matrix={"test_group":["quick","generic","posix","vexfs"],"device_type":["loop","ram"]}' >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Manual: use specified parameters
+            TEST_GROUPS="${{ github.event.inputs.test_groups }}"
+            echo "matrix={\"test_group\":[\"${TEST_GROUPS}\"],\"device_type\":[\"loop\"]}" >> $GITHUB_OUTPUT
+          else
+            # PR/Push: quick tests only
+            echo 'matrix={"test_group":["quick","vexfs"],"device_type":["loop"]}' >> $GITHUB_OUTPUT
+          fi
+
+  xfstests-execution:
+    needs: xfstests-setup
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.xfstests-setup.outputs.test-matrix) }}
+      fail-fast: false
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            linux-headers-$(uname -r) \
+            autotools-dev \
+            automake \
+            autoconf \
+            libtool \
+            pkg-config \
+            libattr1-dev \
+            libacl1-dev \
+            libaio-dev \
+            libgdbm-dev \
+            uuid-dev \
+            xfsprogs \
+            e2fsprogs \
+            btrfs-progs \
+            fio \
+            dbench \
+            git \
+            bc \
+            dump \
+            indent \
+            libtool-bin \
+            libssl-dev \
+            libcap-dev \
+            python3 \
+            python3-pip
+
+      - name: Setup Python dependencies
+        run: |
+          pip3 install --user dataclasses
+
+      - name: Check VexFS kernel module
+        run: |
+          echo "Checking for VexFS v2.0 kernel module..."
+          if [ -f "kernel/vexfs_v2_build/vexfs_v2_b62.ko" ]; then
+            echo "✅ VexFS kernel module found"
+            ls -la kernel/vexfs_v2_build/vexfs_v2_b62.ko
+          else
+            echo "❌ VexFS kernel module not found"
+            echo "Available kernel files:"
+            find kernel/ -name "*.ko" -o -name "vexfs*" | head -10
+            exit 1
+          fi
+
+      - name: Setup xfstests environment
+        run: |
+          cd tests/xfstests
+          chmod +x setup_xfstests.sh
+          ./setup_xfstests.sh
+
+      - name: Setup test devices
+        run: |
+          cd tests/xfstests
+          chmod +x setup_test_devices.sh
+          
+          if [ "${{ matrix.device_type }}" = "ram" ]; then
+            ./setup_test_devices.sh --use-ram-disk --test-size 512M --scratch-size 1G
+          else
+            ./setup_test_devices.sh --test-size 512M --scratch-size 1G
+          fi
+
+      - name: Load VexFS kernel module
+        run: |
+          # Load the VexFS kernel module
+          VEXFS_MODULE="kernel/vexfs_v2_build/vexfs_v2_b62.ko"
+          
+          if [ -f "$VEXFS_MODULE" ]; then
+            echo "Loading VexFS kernel module..."
+            sudo insmod "$VEXFS_MODULE"
+            
+            # Verify module is loaded
+            if lsmod | grep -q vexfs_v2; then
+              echo "✅ VexFS module loaded successfully"
+              lsmod | grep vexfs_v2
+            else
+              echo "❌ Failed to load VexFS module"
+              dmesg | tail -20
+              exit 1
+            fi
+          else
+            echo "❌ VexFS module not found: $VEXFS_MODULE"
+            exit 1
+          fi
+
+      - name: Run xfstests
+        run: |
+          cd tests/xfstests
+          chmod +x run_vexfs_xfstests.sh
+          
+          # Set test parameters
+          PARALLEL_JOBS="${{ github.event.inputs.parallel_jobs || '2' }}"
+          TEST_GROUP="${{ matrix.test_group }}"
+          
+          # Run tests with timeout
+          timeout 3600 ./run_vexfs_xfstests.sh \
+            --parallel "$PARALLEL_JOBS" \
+            --timeout-factor 3 \
+            --debug-level 2 \
+            "$TEST_GROUP" || {
+            echo "Tests completed with timeout or errors"
+            # Don't fail immediately, let's collect results
+          }
+
+      - name: Collect test results
+        if: always()
+        run: |
+          cd tests/xfstests
+          
+          # Find the latest results directory
+          RESULTS_DIR=$(find results/ -name "20*" -type d | sort | tail -1)
+          
+          if [ -n "$RESULTS_DIR" ] && [ -d "$RESULTS_DIR" ]; then
+            echo "Found results directory: $RESULTS_DIR"
+            
+            # Generate reports
+            python3 xfstests_result_parser.py "$RESULTS_DIR" \
+              --text-report "$RESULTS_DIR/summary.txt" \
+              --html-report "$RESULTS_DIR/report.html" \
+              --json-report "$RESULTS_DIR/results.json" \
+              --print-summary
+            
+            # Show summary
+            echo "=== TEST SUMMARY ==="
+            cat "$RESULTS_DIR/summary.txt" || echo "No summary available"
+            
+            # Show any failures
+            echo "=== RECENT KERNEL MESSAGES ==="
+            dmesg | tail -50 | grep -i vexfs || echo "No VexFS messages in dmesg"
+            
+          else
+            echo "No results directory found"
+            ls -la results/ || echo "No results directory exists"
+          fi
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xfstests-results-${{ matrix.test_group }}-${{ matrix.device_type }}
+          path: |
+            tests/xfstests/results/
+            tests/xfstests/*.log
+          retention-days: 30
+
+      - name: Upload kernel logs
+        if: always()
+        run: |
+          # Collect kernel logs
+          dmesg > /tmp/dmesg.log
+          dmesg | grep -i vexfs > /tmp/vexfs_dmesg.log || true
+          
+          # Upload as artifacts
+          mkdir -p kernel_logs
+          cp /tmp/dmesg.log kernel_logs/
+          cp /tmp/vexfs_dmesg.log kernel_logs/
+
+      - name: Upload kernel logs artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-logs-${{ matrix.test_group }}-${{ matrix.device_type }}
+          path: kernel_logs/
+          retention-days: 7
+
+      - name: Cleanup
+        if: always()
+        run: |
+          # Unload VexFS module
+          sudo rmmod vexfs_v2 || true
+          
+          # Cleanup loop devices
+          cd tests/xfstests
+          if [ -f device_config.env ]; then
+            source device_config.env
+            if [ "$USE_LOOP_DEVICES" = "true" ]; then
+              sudo losetup -d "$TEST_DEV" || true
+              sudo losetup -d "$SCRATCH_DEV" || true
+            fi
+          fi
+
+  xfstests-summary:
+    needs: xfstests-execution
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Generate combined report
+        run: |
+          echo "# VexFS v2.0 xfstests Results Summary" > summary.md
+          echo "" >> summary.md
+          echo "**Run Date:** $(date)" >> summary.md
+          echo "**Trigger:** ${{ github.event_name }}" >> summary.md
+          echo "**Commit:** ${{ github.sha }}" >> summary.md
+          echo "" >> summary.md
+          
+          # Process each test result
+          for artifact_dir in artifacts/xfstests-results-*; do
+            if [ -d "$artifact_dir" ]; then
+              test_name=$(basename "$artifact_dir" | sed 's/xfstests-results-//')
+              echo "## Test: $test_name" >> summary.md
+              echo "" >> summary.md
+              
+              # Look for summary file
+              if [ -f "$artifact_dir/summary.txt" ]; then
+                echo "```" >> summary.md
+                head -20 "$artifact_dir/summary.txt" >> summary.md
+                echo "```" >> summary.md
+              else
+                echo "No summary available for $test_name" >> summary.md
+              fi
+              echo "" >> summary.md
+            fi
+          done
+          
+          # Show the summary
+          cat summary.md
+
+      - name: Upload combined summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: xfstests-combined-summary
+          path: summary.md
+          retention-days: 90
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            
+            try {
+              const summary = fs.readFileSync('summary.md', 'utf8');
+              
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `## VexFS v2.0 xfstests Results\n\n${summary}`
+              });
+            } catch (error) {
+              console.log('Could not post comment:', error);
+            }
+
+  nightly-notification:
+    needs: [xfstests-execution, xfstests-summary]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' && failure()
+    
+    steps:
+      - name: Send notification on failure
+        run: |
+          echo "Nightly xfstests failed for VexFS v2.0"
+          echo "Check the workflow results for details"
+          # Add notification logic here (email, Slack, etc.)

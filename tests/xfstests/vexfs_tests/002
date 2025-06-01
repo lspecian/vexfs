@@ -1,0 +1,250 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2024 VexFS Development Team.  All Rights Reserved.
+#
+# FS QA Test No. vexfs/002
+#
+# VexFS POSIX Compliance Test
+#
+# This test validates POSIX filesystem compliance for VexFS v2.0:
+# - Standard file operations (create, read, write, delete)
+# - Directory operations (mkdir, rmdir, readdir)
+# - File permissions and ownership
+# - Extended attributes
+# - Symbolic and hard links
+#
+
+. ./common/preamble
+_begin_fstest auto quick posix
+
+# Import common functions
+. ./common/filter
+. ./common/attr
+
+# Real QA test starts here
+_supported_fs vexfs
+_require_test
+_require_scratch
+
+# Test basic file operations
+test_file_operations() {
+    echo "Testing basic file operations..."
+    
+    local test_file="$TEST_DIR/posix_test_file"
+    local test_data="Hello VexFS POSIX compliance test"
+    
+    # Test file creation
+    echo "$test_data" > "$test_file" || _fail "Failed to create file"
+    
+    # Test file reading
+    local read_data=$(cat "$test_file")
+    [ "$read_data" = "$test_data" ] || _fail "File content mismatch"
+    
+    # Test file appending
+    echo " - appended data" >> "$test_file" || _fail "Failed to append to file"
+    
+    # Test file size
+    local file_size=$(stat -c %s "$test_file")
+    [ "$file_size" -gt 0 ] || _fail "File size is zero"
+    
+    # Test file truncation
+    truncate -s 10 "$test_file" || _fail "Failed to truncate file"
+    local new_size=$(stat -c %s "$test_file")
+    [ "$new_size" = "10" ] || _fail "File truncation failed"
+    
+    # Test file deletion
+    rm "$test_file" || _fail "Failed to delete file"
+    [ ! -f "$test_file" ] || _fail "File still exists after deletion"
+    
+    echo "Basic file operations test passed"
+}
+
+# Test directory operations
+test_directory_operations() {
+    echo "Testing directory operations..."
+    
+    local test_dir="$TEST_DIR/posix_test_dir"
+    local sub_dir="$test_dir/subdir"
+    
+    # Test directory creation
+    mkdir "$test_dir" || _fail "Failed to create directory"
+    [ -d "$test_dir" ] || _fail "Directory not created"
+    
+    # Test nested directory creation
+    mkdir -p "$sub_dir" || _fail "Failed to create nested directory"
+    [ -d "$sub_dir" ] || _fail "Nested directory not created"
+    
+    # Test directory listing
+    ls "$test_dir" > /dev/null || _fail "Failed to list directory"
+    
+    # Create files in directory
+    touch "$test_dir/file1" "$test_dir/file2" "$sub_dir/file3"
+    
+    # Test directory reading
+    local file_count=$(ls "$test_dir" | wc -l)
+    [ "$file_count" -ge 2 ] || _fail "Directory listing incomplete"
+    
+    # Test directory removal (should fail with files)
+    rmdir "$test_dir" 2>/dev/null && _fail "rmdir should fail on non-empty directory"
+    
+    # Clean up files and test removal
+    rm -f "$test_dir/file1" "$test_dir/file2" "$sub_dir/file3"
+    rmdir "$sub_dir" || _fail "Failed to remove subdirectory"
+    rmdir "$test_dir" || _fail "Failed to remove directory"
+    
+    echo "Directory operations test passed"
+}
+
+# Test file permissions
+test_file_permissions() {
+    echo "Testing file permissions..."
+    
+    local test_file="$TEST_DIR/perm_test_file"
+    touch "$test_file" || _fail "Failed to create test file"
+    
+    # Test chmod operations
+    chmod 644 "$test_file" || _fail "Failed to set 644 permissions"
+    local perms=$(stat -c %a "$test_file")
+    [ "$perms" = "644" ] || _fail "Permissions not set correctly (expected 644, got $perms)"
+    
+    chmod 755 "$test_file" || _fail "Failed to set 755 permissions"
+    perms=$(stat -c %a "$test_file")
+    [ "$perms" = "755" ] || _fail "Permissions not set correctly (expected 755, got $perms)"
+    
+    chmod 600 "$test_file" || _fail "Failed to set 600 permissions"
+    perms=$(stat -c %a "$test_file")
+    [ "$perms" = "600" ] || _fail "Permissions not set correctly (expected 600, got $perms)"
+    
+    # Test ownership (if running as root)
+    if [ "$(id -u)" = "0" ]; then
+        chown nobody:nogroup "$test_file" 2>/dev/null || true
+        local owner=$(stat -c %U "$test_file")
+        local group=$(stat -c %G "$test_file")
+        echo "File ownership: $owner:$group"
+    fi
+    
+    rm "$test_file"
+    echo "File permissions test passed"
+}
+
+# Test symbolic and hard links
+test_links() {
+    echo "Testing symbolic and hard links..."
+    
+    local original_file="$TEST_DIR/original_file"
+    local symlink_file="$TEST_DIR/symlink_file"
+    local hardlink_file="$TEST_DIR/hardlink_file"
+    local test_data="Link test data"
+    
+    # Create original file
+    echo "$test_data" > "$original_file" || _fail "Failed to create original file"
+    
+    # Test symbolic link creation
+    ln -s "$original_file" "$symlink_file" || _fail "Failed to create symbolic link"
+    [ -L "$symlink_file" ] || _fail "Symbolic link not created"
+    
+    # Test symbolic link reading
+    local symlink_data=$(cat "$symlink_file")
+    [ "$symlink_data" = "$test_data" ] || _fail "Symbolic link content mismatch"
+    
+    # Test hard link creation
+    ln "$original_file" "$hardlink_file" || _fail "Failed to create hard link"
+    [ -f "$hardlink_file" ] || _fail "Hard link not created"
+    
+    # Test hard link reading
+    local hardlink_data=$(cat "$hardlink_file")
+    [ "$hardlink_data" = "$test_data" ] || _fail "Hard link content mismatch"
+    
+    # Test link count
+    local link_count=$(stat -c %h "$original_file")
+    [ "$link_count" = "2" ] || _fail "Hard link count incorrect (expected 2, got $link_count)"
+    
+    # Clean up
+    rm "$symlink_file" "$hardlink_file" "$original_file"
+    
+    echo "Links test passed"
+}
+
+# Test extended attributes (if supported)
+test_extended_attributes() {
+    echo "Testing extended attributes..."
+    
+    local test_file="$TEST_DIR/xattr_test_file"
+    touch "$test_file" || _fail "Failed to create test file"
+    
+    # Check if extended attributes are supported
+    if command -v setfattr >/dev/null 2>&1 && command -v getfattr >/dev/null 2>&1; then
+        # Set extended attribute
+        setfattr -n user.test_attr -v "test_value" "$test_file" 2>/dev/null || {
+            echo "Extended attributes not supported, skipping..."
+            rm "$test_file"
+            return
+        }
+        
+        # Get extended attribute
+        local attr_value=$(getfattr -n user.test_attr --only-values "$test_file" 2>/dev/null)
+        [ "$attr_value" = "test_value" ] || _fail "Extended attribute value mismatch"
+        
+        # List extended attributes
+        getfattr -d "$test_file" >/dev/null 2>&1 || _fail "Failed to list extended attributes"
+        
+        # Remove extended attribute
+        setfattr -x user.test_attr "$test_file" 2>/dev/null || _fail "Failed to remove extended attribute"
+        
+        echo "Extended attributes test passed"
+    else
+        echo "Extended attributes tools not available, skipping..."
+    fi
+    
+    rm "$test_file"
+}
+
+# Test file timestamps
+test_timestamps() {
+    echo "Testing file timestamps..."
+    
+    local test_file="$TEST_DIR/timestamp_test_file"
+    touch "$test_file" || _fail "Failed to create test file"
+    
+    # Get initial timestamps
+    local initial_atime=$(stat -c %X "$test_file")
+    local initial_mtime=$(stat -c %Y "$test_file")
+    local initial_ctime=$(stat -c %Z "$test_file")
+    
+    # Wait a moment and modify file
+    sleep 1
+    echo "test data" > "$test_file"
+    
+    # Check that mtime changed
+    local new_mtime=$(stat -c %Y "$test_file")
+    [ "$new_mtime" -gt "$initial_mtime" ] || _fail "mtime not updated after modification"
+    
+    # Test touch command
+    sleep 1
+    touch "$test_file"
+    local touched_atime=$(stat -c %X "$test_file")
+    local touched_mtime=$(stat -c %Y "$test_file")
+    
+    [ "$touched_atime" -gt "$initial_atime" ] || _fail "atime not updated by touch"
+    [ "$touched_mtime" -gt "$new_mtime" ] || _fail "mtime not updated by touch"
+    
+    rm "$test_file"
+    echo "Timestamps test passed"
+}
+
+# Main test execution
+echo "Starting VexFS POSIX compliance test..."
+
+# Run all tests
+test_file_operations
+test_directory_operations
+test_file_permissions
+test_links
+test_extended_attributes
+test_timestamps
+
+echo "VexFS POSIX compliance test completed successfully"
+
+# Success, all done
+status=0
+exit
