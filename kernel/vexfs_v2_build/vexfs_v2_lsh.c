@@ -22,6 +22,7 @@
 #include <linux/mutex.h>
 #include <linux/atomic.h>
 #include <linux/list.h>
+#include <linux/delay.h>
 
 #ifdef __KERNEL__
 #include "vexfs_v2_phase3.h"
@@ -48,9 +49,9 @@ enum lsh_hash_type {
 
 /* Random projection hash function */
 struct lsh_random_projection {
-    float *projection_vector;   /* Random projection direction */
-    float bias;                /* Random bias term */
-    float bucket_width;        /* Quantization width */
+    int32_t *projection_vector; /* Random projection direction (scaled by 1000) */
+    int32_t bias;              /* Random bias term (scaled by 1000) */
+    int32_t bucket_width;      /* Quantization width (scaled by 1000) */
 };
 
 /* MinHash function */
@@ -74,7 +75,7 @@ struct lsh_hash_function {
 /* Hash bucket entry */
 struct lsh_bucket_entry {
     uint64_t vector_id;
-    struct list_head bucket_list;
+    struct hlist_node bucket_list;
     uint32_t hash_signature[LSH_MAX_HASH_FUNCTIONS];
     uint32_t reserved[2];
 };
@@ -97,7 +98,7 @@ struct lsh_index {
     uint32_t distance_metric;
     uint32_t hash_table_count;
     uint32_t hash_functions_per_table;
-    float bucket_width;
+    uint32_t bucket_width; /* Changed from float to avoid floating-point operations */
     enum lsh_hash_type hash_type;
     
     /* Hash tables */
@@ -139,13 +140,13 @@ static struct lsh_index *global_lsh_index = NULL;
 static DEFINE_MUTEX(lsh_global_mutex);
 
 /* Forward declarations */
-static uint32_t lsh_compute_hash(struct lsh_hash_function *func, const float *vector);
+static uint32_t lsh_compute_hash(struct lsh_hash_function *func, const uint32_t *vector);
 static int lsh_random_projection_hash(struct lsh_random_projection *rp, 
-                                     const float *vector, uint32_t dimensions);
+                                     const uint32_t *vector, uint32_t dimensions);
 static uint32_t lsh_bucket_hash(uint32_t *signature, uint32_t sig_length);
 static int lsh_insert_to_table(struct lsh_hash_table *table, uint64_t vector_id, 
-                              const float *vector);
-static int lsh_search_table(struct lsh_hash_table *table, const float *query,
+                              const uint32_t *vector);
+static int lsh_search_table(struct lsh_hash_table *table, const uint32_t *query,
                            struct lsh_candidate *candidates, uint32_t *candidate_count,
                            uint32_t max_candidates);
 
@@ -153,11 +154,11 @@ static int lsh_search_table(struct lsh_hash_table *table, const float *query,
  * Initialize random projection hash function
  */
 static int lsh_init_random_projection(struct lsh_random_projection *rp, 
-                                     uint32_t dimensions, float bucket_width)
+                                     uint32_t dimensions, uint32_t bucket_width_bits)
 {
     uint32_t i;
     
-    rp->projection_vector = vmalloc(dimensions * sizeof(float));
+    rp->projection_vector = vmalloc(dimensions * sizeof(uint32_t));
     if (!rp->projection_vector) {
         return -ENOMEM;
     }
@@ -168,13 +169,17 @@ static int lsh_init_random_projection(struct lsh_random_projection *rp,
         get_random_bytes(&random_val, sizeof(random_val));
         
         /* Simple approximation of Gaussian using uniform random */
-        rp->projection_vector[i] = ((float)(random_val % 2000) - 1000.0f) / 1000.0f;
+        /* Store as scaled integer (multiply by 1000) */
+        rp->projection_vector[i] = (int32_t)(random_val % 2000) - 1000;
     }
     
     /* Random bias term */
     get_random_bytes(&i, sizeof(i));
-    rp->bias = ((float)(i % 1000)) / 1000.0f * bucket_width;
-    rp->bucket_width = bucket_width;
+    /* Store bias as scaled integer */
+    rp->bias = (int32_t)(i % 1000);
+    /* Store bucket_width as scaled integer */
+    /* Use integer bits directly to avoid floating-point operations */
+    rp->bucket_width = (int32_t)(bucket_width_bits >> 16); /* Rough scaling */
     
     return 0;
 }
@@ -182,22 +187,32 @@ static int lsh_init_random_projection(struct lsh_random_projection *rp,
 /*
  * Compute random projection hash
  */
-static int lsh_random_projection_hash(struct lsh_random_projection *rp, 
-                                     const float *vector, uint32_t dimensions)
+static int lsh_random_projection_hash(struct lsh_random_projection *rp,
+                                     const uint32_t *vector, uint32_t dimensions)
 {
-    float dot_product = 0.0f;
+    int64_t dot_product_scaled = 0;
     uint32_t i;
     
-    /* Compute dot product with projection vector */
+    /* Compute dot product with projection vector using integer arithmetic */
+    /* Use union to avoid floating-point arithmetic */
     for (i = 0; i < dimensions; i++) {
-        dot_product += vector[i] * rp->projection_vector[i];
+        /* Use pointer casting to avoid floating-point operations */
+        uint32_t vec_bits = *(const uint32_t*)&vector[i];
+        /* Simple approximation: use the raw bits shifted for scaling */
+        int32_t vec_scaled = (int32_t)(vec_bits >> 16); /* Rough scaling */
+        
+        /* rp->projection_vector is already scaled */
+        dot_product_scaled += (int64_t)vec_scaled * rp->projection_vector[i] / 1000;
     }
     
-    /* Add bias and quantize */
-    dot_product += rp->bias;
+    /* Add bias (already scaled) and quantize */
+    dot_product_scaled += rp->bias;
     
-    /* Convert to integer hash using bucket width */
-    return (int)(dot_product / rp->bucket_width);
+    /* Convert to integer hash using bucket width (already scaled) */
+    if (rp->bucket_width != 0) {
+        return (int)(dot_product_scaled / rp->bucket_width);
+    }
+    return (int)dot_product_scaled;
 }
 
 /*
@@ -235,7 +250,7 @@ static int lsh_init_minhash(struct lsh_minhash *mh, uint32_t hash_count)
 /*
  * Compute hash using specified hash function
  */
-static uint32_t lsh_compute_hash(struct lsh_hash_function *func, const float *vector)
+static uint32_t lsh_compute_hash(struct lsh_hash_function *func, const uint32_t *vector)
 {
     switch (func->type) {
     case LSH_RANDOM_PROJECTION:
@@ -243,12 +258,20 @@ static uint32_t lsh_compute_hash(struct lsh_hash_function *func, const float *ve
         
     case LSH_MINHASH:
         /* MinHash implementation would go here */
-        /* For now, return simple hash */
-        return hash_32((uint32_t)(vector[0] * 1000), 32);
+        /* For now, return simple hash using union to avoid floating-point */
+        {
+            /* Use pointer casting to avoid floating-point operations */
+            uint32_t vec_bits = *(const uint32_t*)&vector[0];
+            return hash_32(vec_bits, 32);
+        }
         
     case LSH_P_STABLE:
         /* P-stable hash implementation would go here */
-        return hash_32((uint32_t)(vector[0] * 1000), 32);
+        {
+            /* Use pointer casting to avoid floating-point operations */
+            uint32_t vec_bits = *(const uint32_t*)&vector[0];
+            return hash_32(vec_bits, 32);
+        }
         
     default:
         return 0;
@@ -298,7 +321,8 @@ int vexfs_lsh_init(uint32_t dimensions, uint32_t distance_metric,
     index->distance_metric = distance_metric;
     index->hash_table_count = min(hash_tables, LSH_MAX_HASH_TABLES);
     index->hash_functions_per_table = min(hash_functions_per_table, LSH_MAX_HASH_FUNCTIONS);
-    index->bucket_width = 1.0f; /* Default bucket width */
+    /* Use pre-computed integer representation to avoid floating-point operations */
+    index->bucket_width = 0x3f800000; /* IEEE 754 representation of 1.0f */
     
     /* Select hash type based on distance metric */
     switch (distance_metric) {
@@ -308,7 +332,8 @@ int vexfs_lsh_init(uint32_t dimensions, uint32_t distance_metric,
         break;
     case VEXFS_DISTANCE_COSINE:
         index->hash_type = LSH_RANDOM_PROJECTION;
-        index->bucket_width = 0.1f; /* Smaller buckets for cosine */
+        /* Use pre-computed integer representation to avoid floating-point operations */
+        index->bucket_width = 0x3dcccccd; /* IEEE 754 representation of 0.1f */
         break;
     default:
         index->hash_type = LSH_RANDOM_PROJECTION;
@@ -434,7 +459,7 @@ cleanup:
  * Insert vector into hash table
  */
 static int lsh_insert_to_table(struct lsh_hash_table *table, uint64_t vector_id, 
-                              const float *vector)
+                              const uint32_t *vector)
 {
     struct lsh_bucket_entry *entry;
     uint32_t signature[LSH_MAX_HASH_FUNCTIONS];
@@ -457,8 +482,8 @@ static int lsh_insert_to_table(struct lsh_hash_table *table, uint64_t vector_id,
     }
     
     entry->vector_id = vector_id;
-    INIT_LIST_HEAD(&entry->bucket_list);
-    memcpy(entry->hash_signature, signature, 
+    INIT_HLIST_NODE(&entry->bucket_list);
+    memcpy(entry->hash_signature, signature,
            table->hash_function_count * sizeof(uint32_t));
     
     /* Insert into bucket */
@@ -473,7 +498,7 @@ static int lsh_insert_to_table(struct lsh_hash_table *table, uint64_t vector_id,
 /*
  * Insert vector into LSH index
  */
-int vexfs_lsh_insert(uint64_t vector_id, const float *vector)
+int vexfs_lsh_insert(uint64_t vector_id, const uint32_t *vector)
 {
     struct lsh_index *index = global_lsh_index;
     uint64_t start_time;
@@ -516,7 +541,7 @@ int vexfs_lsh_insert(uint64_t vector_id, const float *vector)
 /*
  * Search single hash table
  */
-static int lsh_search_table(struct lsh_hash_table *table, const float *query,
+static int lsh_search_table(struct lsh_hash_table *table, const uint32_t *query,
                            struct lsh_candidate *candidates, uint32_t *candidate_count,
                            uint32_t max_candidates)
 {
@@ -539,7 +564,7 @@ static int lsh_search_table(struct lsh_hash_table *table, const float *query,
     /* Search bucket */
     mutex_lock(&table->table_mutex);
     
-    hlist_for_each_entry(entry, node, &table->buckets[bucket_index], bucket_list) {
+    hlist_for_each_entry(entry, &table->buckets[bucket_index], bucket_list) {
         if (found >= max_candidates) {
             break;
         }
@@ -572,7 +597,7 @@ static int lsh_search_table(struct lsh_hash_table *table, const float *query,
 /*
  * Search LSH index for approximate nearest neighbors
  */
-int vexfs_lsh_search(const float *query_vector, uint32_t k, 
+int vexfs_lsh_search(const uint32_t *query_vector, uint32_t k, 
                     struct vexfs_search_result *results, uint32_t *result_count)
 {
     struct lsh_index *index = global_lsh_index;
@@ -740,7 +765,7 @@ void vexfs_lsh_cleanup(void)
                 struct lsh_bucket_entry *entry;
                 struct hlist_node *node, *tmp;
                 
-                hlist_for_each_entry_safe(entry, node, tmp, &table->buckets[j], bucket_list) {
+                hlist_for_each_entry_safe(entry, tmp, &table->buckets[j], bucket_list) {
                     hlist_del(&entry->bucket_list);
                     kfree(entry);
                 }

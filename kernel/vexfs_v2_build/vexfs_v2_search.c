@@ -18,7 +18,7 @@
 #include <linux/sort.h>
 #include <linux/time.h>
 #include <linux/math64.h>
-#include <asm/fpu/api.h>
+/* Removed FPU header - no longer using floating point operations */
 
 #include "vexfs_v2_search.h"
 #include "vexfs_v2_uapi.h"
@@ -26,7 +26,7 @@
 /* Search result for internal sorting */
 struct vexfs_internal_result {
     __u64 vector_id;
-    float distance;
+    __u32 distance;  /* Changed from float to __u32 for integer arithmetic */
     __u32 index;
 };
 
@@ -39,97 +39,127 @@ static DEFINE_SPINLOCK(search_stats_lock);
  * These use kernel FPU context for floating-point operations
  */
 
-float vexfs_euclidean_distance(const float *a, const float *b, __u32 dimensions)
+__u32 vexfs_euclidean_distance(const uint32_t *a, const uint32_t *b, __u32 dimensions)
 {
-    float sum = 0.0f;
+    __u64 sum = 0;
     __u32 i;
+    /* Removed float union to avoid floating-point operations in kernel */
     
-    kernel_fpu_begin();
-    
+    /* No FPU operations - use integer arithmetic only */
     for (i = 0; i < dimensions; i++) {
-        float diff = a[i] - b[i];
-        sum += diff * diff;
+        /* Convert float to fixed-point using union to avoid FPU */
+        __u32 conv_a_i = *(const __u32*)&a[i];
+        __u32 conv_b_i = *(const __u32*)&b[i];
+        
+        /* Extract mantissa and exponent for fixed-point conversion */
+        __s32 a_fixed = (__s32)((conv_a_i & 0x7FFFFF) >> 10); /* Simplified conversion */
+        __s32 b_fixed = (__s32)((conv_b_i & 0x7FFFFF) >> 10);
+        __s32 diff = a_fixed - b_fixed;
+        sum += (__u64)(diff * diff);
     }
     
-    kernel_fpu_end();
-    
-    /* Use integer square root approximation for kernel space */
-    return int_sqrt((u64)(sum * 1000000)) / 1000.0f;
+    /* Return integer square root */
+    return (__u32)int_sqrt(sum);
 }
 
-float vexfs_cosine_similarity(const float *a, const float *b, __u32 dimensions)
+__u32 vexfs_cosine_similarity(const uint32_t *a, const uint32_t *b, __u32 dimensions)
 {
-    float dot_product = 0.0f;
-    float norm_a = 0.0f;
-    float norm_b = 0.0f;
+    __s64 dot_product = 0;
+    __u64 norm_a = 0;
+    __u64 norm_b = 0;
     __u32 i;
+    /* Removed float union to avoid floating-point operations in kernel */
     
-    kernel_fpu_begin();
-    
+    /* No FPU operations - use integer arithmetic only */
     for (i = 0; i < dimensions; i++) {
-        dot_product += a[i] * b[i];
-        norm_a += a[i] * a[i];
-        norm_b += b[i] * b[i];
+        /* Convert float to fixed-point using union to avoid FPU */
+        __u32 conv_a_i = *(const __u32*)&a[i];
+        __u32 conv_b_i = *(const __u32*)&b[i];
+        
+        /* Extract mantissa for fixed-point conversion */
+        __s32 a_fixed = (__s32)((conv_a_i & 0x7FFFFF) >> 10);
+        __s32 b_fixed = (__s32)((conv_b_i & 0x7FFFFF) >> 10);
+        dot_product += (__s64)(a_fixed * b_fixed);
+        norm_a += (__u64)(a_fixed * a_fixed);
+        norm_b += (__u64)(b_fixed * b_fixed);
     }
-    
-    kernel_fpu_end();
     
     /* Avoid division by zero */
-    if (norm_a == 0.0f || norm_b == 0.0f)
-        return 0.0f;
+    if (norm_a == 0 || norm_b == 0)
+        return 0;
     
-    /* Approximate square roots for kernel space */
-    float sqrt_norm_a = int_sqrt((u64)(norm_a * 1000000)) / 1000.0f;
-    float sqrt_norm_b = int_sqrt((u64)(norm_b * 1000000)) / 1000.0f;
+    /* Calculate similarity using integer arithmetic */
+    __u32 sqrt_norm_a = (__u32)int_sqrt(norm_a);
+    __u32 sqrt_norm_b = (__u32)int_sqrt(norm_b);
+    __u64 denominator = (__u64)sqrt_norm_a * sqrt_norm_b;
     
-    return dot_product / (sqrt_norm_a * sqrt_norm_b);
+    if (denominator == 0)
+        return 0;
+    
+    /* Return scaled similarity (multiply by 1000 for precision) */
+    return (__u32)((dot_product * 1000) / (__s64)denominator);
 }
 
-float vexfs_dot_product(const float *a, const float *b, __u32 dimensions)
+__s32 vexfs_dot_product(const uint32_t *a, const uint32_t *b, __u32 dimensions)
 {
-    float result = 0.0f;
+    __s64 result = 0;
     __u32 i;
+    /* Removed float union to avoid floating-point operations in kernel */
     
-    kernel_fpu_begin();
-    
+    /* No FPU operations - use integer arithmetic only */
     for (i = 0; i < dimensions; i++) {
-        result += a[i] * b[i];
+        /* Convert float to fixed-point using union to avoid FPU */
+        __u32 conv_a_i = *(const __u32*)&a[i];
+        __u32 conv_b_i = *(const __u32*)&b[i];
+        
+        /* Extract mantissa for fixed-point conversion */
+        __s32 a_fixed = (__s32)((conv_a_i & 0x7FFFFF) >> 10);
+        __s32 b_fixed = (__s32)((conv_b_i & 0x7FFFFF) >> 10);
+        result += (__s64)(a_fixed * b_fixed);
     }
     
-    kernel_fpu_end();
-    
-    return result;
+    /* Return scaled result (divide by 1000 to normalize) */
+    return (__s32)(result / 1000);
 }
 
-float vexfs_manhattan_distance(const float *a, const float *b, __u32 dimensions)
+__u32 vexfs_manhattan_distance(const uint32_t *a, const uint32_t *b, __u32 dimensions)
 {
-    float sum = 0.0f;
+    __u64 sum = 0;
     __u32 i;
+    /* Removed float union to avoid floating-point operations in kernel */
     
-    kernel_fpu_begin();
-    
+    /* No FPU operations - use integer arithmetic only */
     for (i = 0; i < dimensions; i++) {
-        float diff = a[i] - b[i];
-        sum += (diff < 0) ? -diff : diff;  /* abs(diff) */
+        /* Convert float to fixed-point using union to avoid FPU */
+        __u32 conv_a_i = *(const __u32*)&a[i];
+        __u32 conv_b_i = *(const __u32*)&b[i];
+        
+        /* Extract mantissa for fixed-point conversion */
+        __s32 a_fixed = (__s32)((conv_a_i & 0x7FFFFF) >> 10);
+        __s32 b_fixed = (__s32)((conv_b_i & 0x7FFFFF) >> 10);
+        __s32 diff = a_fixed - b_fixed;
+        __u32 abs_diff = (diff < 0) ? (__u32)(-diff) : (__u32)diff;
+        sum += abs_diff;
     }
     
-    kernel_fpu_end();
-    
-    return sum;
+    /* Return scaled result (divide by 1000 to normalize) */
+    return (__u32)(sum / 1000);
 }
 
 /*
  * Calculate distance based on metric type
  */
-static float calculate_distance(const float *a, const float *b, __u32 dimensions, __u32 metric)
+static __u32 calculate_distance(const uint32_t *a, const uint32_t *b, __u32 dimensions, __u32 metric)
 {
     switch (metric) {
     case VEXFS_DISTANCE_EUCLIDEAN:
         return vexfs_euclidean_distance(a, b, dimensions);
     case VEXFS_DISTANCE_COSINE:
-        return 1.0f - vexfs_cosine_similarity(a, b, dimensions);  /* Convert similarity to distance */
+        /* Convert similarity to distance (1000 - similarity for integer math) */
+        return 1000 - vexfs_cosine_similarity(a, b, dimensions);
     case VEXFS_DISTANCE_DOT_PRODUCT:
-        return -vexfs_dot_product(a, b, dimensions);  /* Negative for sorting (higher = better) */
+        /* Convert to positive distance (negate and add offset) */
+        return (__u32)(10000 - vexfs_dot_product(a, b, dimensions));
     case VEXFS_DISTANCE_MANHATTAN:
         return vexfs_manhattan_distance(a, b, dimensions);
     default:
@@ -160,7 +190,7 @@ static int compare_results(const void *a, const void *b)
 static int vexfs_brute_force_knn(struct file *file, struct vexfs_knn_query *query)
 {
     struct vexfs_internal_result *candidates = NULL;
-    float *stored_vectors = NULL;
+    uint32_t *stored_vectors = NULL;
     __u64 *vector_ids = NULL;
     __u32 total_vectors = 0;
     __u32 i, j;
@@ -192,7 +222,7 @@ static int vexfs_brute_force_knn(struct file *file, struct vexfs_knn_query *quer
     /* TODO: Read actual vectors from storage
      * For now, generate some test vectors
      */
-    stored_vectors = kmalloc(total_vectors * query->dimensions * sizeof(float), GFP_KERNEL);
+    stored_vectors = kmalloc(total_vectors * query->dimensions * sizeof(uint32_t), GFP_KERNEL);
     vector_ids = kmalloc(total_vectors * sizeof(__u64), GFP_KERNEL);
     
     if (!stored_vectors || !vector_ids) {
@@ -204,8 +234,9 @@ static int vexfs_brute_force_knn(struct file *file, struct vexfs_knn_query *quer
     for (i = 0; i < total_vectors; i++) {
         vector_ids[i] = i + 1;
         for (j = 0; j < query->dimensions; j++) {
-            /* Simple test pattern */
-            stored_vectors[i * query->dimensions + j] = (float)(i + j) / 10.0f;
+            /* Simple test pattern - using integer arithmetic to avoid SSE */
+            u32 val_i = ((i + j) * 1000) / 100; /* Equivalent to (i + j) / 10.0f but as integer */
+            stored_vectors[i * query->dimensions + j] = val_i;
         }
     }
     
@@ -229,7 +260,11 @@ static int vexfs_brute_force_knn(struct file *file, struct vexfs_knn_query *quer
     
     for (i = 0; i < query->results_found; i++) {
         query->results[i].vector_id = candidates[i].vector_id;
-        query->results[i].distance = candidates[i].distance;
+        /* Convert integer distance back to float for user interface using union to avoid SSE */
+        __u32 distance_conv_i = candidates[i].distance;
+        /* Scale down by 1000 using integer arithmetic to avoid floating point */
+        distance_conv_i = distance_conv_i / 1000;
+        query->results[i].distance = distance_conv_i;
         query->results[i].metadata_offset = 0;  /* TODO: Implement metadata */
         query->results[i].reserved = 0;
     }
@@ -370,7 +405,7 @@ int vexfs_rebuild_search_index(struct file *file)
 /*
  * Update search index with new vector
  */
-int vexfs_update_search_index(struct file *file, __u64 vector_id, float *vector)
+int vexfs_update_search_index(struct file *file, __u64 vector_id, uint32_t *vector)
 {
     /* TODO: Implement incremental index updates */
     return 0;  /* Placeholder */

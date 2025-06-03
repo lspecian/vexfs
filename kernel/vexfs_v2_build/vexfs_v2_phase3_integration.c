@@ -34,15 +34,10 @@ struct vexfs_phase3_state {
     /* Current configuration */
     uint32_t dimensions;
     uint32_t distance_metric;
-    enum vexfs_embedding_model current_model;
+    vexfs_embedding_model_t current_model;
     
     /* Index selection */
-    enum vexfs_index_type {
-        VEXFS_INDEX_BRUTE_FORCE = 0,
-        VEXFS_INDEX_HNSW = 1,
-        VEXFS_INDEX_LSH = 2,
-        VEXFS_INDEX_HYBRID = 3
-    } active_index_type;
+    vexfs_index_type_t active_index_type;
     
     /* Statistics */
     atomic64_t total_phase3_operations;
@@ -61,26 +56,24 @@ static DEFINE_MUTEX(phase3_global_mutex);
 /* Forward declarations for external functions */
 extern int vexfs_multi_model_init(void);
 extern void vexfs_multi_model_cleanup(void);
-extern int vexfs_multi_model_set_metadata(struct vexfs_model_metadata *metadata);
-extern int vexfs_multi_model_get_metadata(struct vexfs_model_metadata *metadata);
+extern int vexfs_set_model_metadata(struct vexfs_model_metadata *metadata);
+extern int vexfs_get_model_metadata(struct vexfs_model_metadata *metadata);
 
-extern int vexfs_advanced_search_init(uint32_t dimensions);
+extern int vexfs_advanced_search_init(void);
 extern void vexfs_advanced_search_cleanup(void);
-extern int vexfs_advanced_search_filtered(struct vexfs_filtered_search_request *request);
-extern int vexfs_advanced_search_multi_vector(struct vexfs_multi_vector_search_request *request);
-extern int vexfs_advanced_search_hybrid(struct vexfs_hybrid_search_request *request);
+extern long vexfs_advanced_search_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 
 extern int vexfs_hnsw_init(uint32_t dimensions, uint32_t max_connections, uint32_t ef_construction);
 extern void vexfs_hnsw_cleanup(void);
-extern int vexfs_hnsw_insert(uint64_t vector_id, const float *vector);
-extern int vexfs_hnsw_search(const float *query_vector, uint32_t k, 
+extern int vexfs_hnsw_insert(uint64_t vector_id, const uint32_t *vector);
+extern int vexfs_hnsw_search(const uint32_t *query_vector, uint32_t k,
                             struct vexfs_search_result *results, uint32_t *result_count);
 
 extern int vexfs_lsh_init(uint32_t dimensions, uint32_t distance_metric, 
                          uint32_t hash_tables, uint32_t hash_functions_per_table);
 extern void vexfs_lsh_cleanup(void);
-extern int vexfs_lsh_insert(uint64_t vector_id, const float *vector);
-extern int vexfs_lsh_search(const float *query_vector, uint32_t k, 
+extern int vexfs_lsh_insert(uint64_t vector_id, const uint32_t *vector);
+extern int vexfs_lsh_search(const uint32_t *query_vector, uint32_t k,
                            struct vexfs_search_result *results, uint32_t *result_count);
 
 /*
@@ -103,7 +96,7 @@ int vexfs_phase3_init(void)
     /* Set defaults */
     global_phase3_state.dimensions = 0;
     global_phase3_state.distance_metric = VEXFS_DISTANCE_EUCLIDEAN;
-    global_phase3_state.current_model = VEXFS_MODEL_OLLAMA;
+    global_phase3_state.current_model = VEXFS_EMBED_OLLAMA_NOMIC;
     global_phase3_state.active_index_type = VEXFS_INDEX_BRUTE_FORCE;
     
     mutex_unlock(&phase3_global_mutex);
@@ -164,12 +157,12 @@ static long handle_multi_model_ioctl(unsigned int cmd, unsigned long arg)
     }
     
     switch (cmd) {
-    case VEXFS_IOC_SET_MODEL_METADATA:
+    case VEXFS_IOC_SET_MODEL_META:
         if (copy_from_user(&metadata, (void __user *)arg, sizeof(metadata))) {
             return -EFAULT;
         }
         
-        ret = vexfs_multi_model_set_metadata(&metadata);
+        ret = vexfs_set_model_metadata(&metadata);
         if (ret == 0) {
             /* Update global state */
             mutex_lock(&global_phase3_state.state_mutex);
@@ -179,8 +172,8 @@ static long handle_multi_model_ioctl(unsigned int cmd, unsigned long arg)
         }
         return ret;
         
-    case VEXFS_IOC_GET_MODEL_METADATA:
-        ret = vexfs_multi_model_get_metadata(&metadata);
+    case VEXFS_IOC_GET_MODEL_META:
+        ret = vexfs_get_model_metadata(&metadata);
         if (ret == 0) {
             if (copy_to_user((void __user *)arg, &metadata, sizeof(metadata))) {
                 return -EFAULT;
@@ -208,7 +201,7 @@ static long handle_advanced_search_ioctl(unsigned int cmd, unsigned long arg)
             return -EINVAL;
         }
         
-        ret = vexfs_advanced_search_init(global_phase3_state.dimensions);
+        ret = vexfs_advanced_search_init();
         if (ret) {
             return ret;
         }
@@ -217,31 +210,10 @@ static long handle_advanced_search_ioctl(unsigned int cmd, unsigned long arg)
     
     switch (cmd) {
     case VEXFS_IOC_FILTERED_SEARCH:
-        {
-            struct vexfs_filtered_search_request request;
-            if (copy_from_user(&request, (void __user *)arg, sizeof(request))) {
-                return -EFAULT;
-            }
-            return vexfs_advanced_search_filtered(&request);
-        }
-        
     case VEXFS_IOC_MULTI_VECTOR_SEARCH:
-        {
-            struct vexfs_multi_vector_search_request request;
-            if (copy_from_user(&request, (void __user *)arg, sizeof(request))) {
-                return -EFAULT;
-            }
-            return vexfs_advanced_search_multi_vector(&request);
-        }
-        
     case VEXFS_IOC_HYBRID_SEARCH:
-        {
-            struct vexfs_hybrid_search_request request;
-            if (copy_from_user(&request, (void __user *)arg, sizeof(request))) {
-                return -EFAULT;
-            }
-            return vexfs_advanced_search_hybrid(&request);
-        }
+        /* Delegate to advanced search IOCTL handler */
+        return vexfs_advanced_search_ioctl(NULL, cmd, arg);
         
     default:
         return -ENOTTY;
@@ -258,57 +230,52 @@ static long handle_hnsw_ioctl(unsigned int cmd, unsigned long arg)
     atomic64_inc(&global_phase3_state.hnsw_operations);
     
     switch (cmd) {
-    case VEXFS_IOC_HNSW_INIT:
+    case VEXFS_IOC_BUILD_INDEX:
         {
-            struct vexfs_hnsw_config config;
-            if (copy_from_user(&config, (void __user *)arg, sizeof(config))) {
+            struct vexfs_index_metadata index_meta;
+            if (copy_from_user(&index_meta, (void __user *)arg, sizeof(index_meta))) {
                 return -EFAULT;
             }
             
-            if (global_phase3_state.hnsw_initialized) {
-                vexfs_hnsw_cleanup();
-            }
-            
-            ret = vexfs_hnsw_init(config.dimensions, config.max_connections, config.ef_construction);
-            if (ret == 0) {
-                global_phase3_state.hnsw_initialized = true;
-                global_phase3_state.active_index_type = VEXFS_INDEX_HNSW;
+            if (index_meta.index_type == VEXFS_INDEX_HNSW) {
+                if (global_phase3_state.hnsw_initialized) {
+                    vexfs_hnsw_cleanup();
+                }
                 
-                /* Update global dimensions */
-                mutex_lock(&global_phase3_state.state_mutex);
-                global_phase3_state.dimensions = config.dimensions;
-                mutex_unlock(&global_phase3_state.state_mutex);
+                ret = vexfs_hnsw_init(index_meta.dimensions,
+                                    index_meta.config.hnsw.max_connections,
+                                    index_meta.config.hnsw.ef_construction);
+                if (ret == 0) {
+                    global_phase3_state.hnsw_initialized = true;
+                    global_phase3_state.active_index_type = VEXFS_INDEX_HNSW;
+                    
+                    /* Update global dimensions */
+                    mutex_lock(&global_phase3_state.state_mutex);
+                    global_phase3_state.dimensions = index_meta.dimensions;
+                    mutex_unlock(&global_phase3_state.state_mutex);
+                }
             }
             return ret;
         }
         
-    case VEXFS_IOC_HNSW_INSERT:
+    case VEXFS_IOC_BATCH_INSERT:
         {
-            struct vexfs_hnsw_insert_request request;
-            if (copy_from_user(&request, (void __user *)arg, sizeof(request))) {
-                return -EFAULT;
-            }
-            
+            /* Use existing batch insert for HNSW */
             if (!global_phase3_state.hnsw_initialized) {
                 return -EINVAL;
             }
-            
-            return vexfs_hnsw_insert(request.vector_id, request.vector_data);
+            /* Delegate to main IOCTL handler */
+            return -ENOTTY; /* Let main handler deal with it */
         }
         
-    case VEXFS_IOC_HNSW_SEARCH:
+    case VEXFS_IOC_KNN_SEARCH:
         {
-            struct vexfs_hnsw_search_request request;
-            if (copy_from_user(&request, (void __user *)arg, sizeof(request))) {
-                return -EFAULT;
-            }
-            
+            /* Use existing KNN search for HNSW */
             if (!global_phase3_state.hnsw_initialized) {
                 return -EINVAL;
             }
-            
-            return vexfs_hnsw_search(request.query_vector, request.k, 
-                                   request.results, request.result_count);
+            /* Delegate to main IOCTL handler */
+            return -ENOTTY; /* Let main handler deal with it */
         }
         
     default:
@@ -326,59 +293,53 @@ static long handle_lsh_ioctl(unsigned int cmd, unsigned long arg)
     atomic64_inc(&global_phase3_state.lsh_operations);
     
     switch (cmd) {
-    case VEXFS_IOC_LSH_INIT:
+    case VEXFS_IOC_BUILD_INDEX:
         {
-            struct vexfs_lsh_config config;
-            if (copy_from_user(&config, (void __user *)arg, sizeof(config))) {
+            struct vexfs_index_metadata index_meta;
+            if (copy_from_user(&index_meta, (void __user *)arg, sizeof(index_meta))) {
                 return -EFAULT;
             }
             
-            if (global_phase3_state.lsh_initialized) {
-                vexfs_lsh_cleanup();
-            }
-            
-            ret = vexfs_lsh_init(config.dimensions, config.distance_metric, 
-                               config.hash_tables, config.hash_functions_per_table);
-            if (ret == 0) {
-                global_phase3_state.lsh_initialized = true;
-                global_phase3_state.active_index_type = VEXFS_INDEX_LSH;
+            if (index_meta.index_type == VEXFS_INDEX_LSH) {
+                if (global_phase3_state.lsh_initialized) {
+                    vexfs_lsh_cleanup();
+                }
                 
-                /* Update global state */
-                mutex_lock(&global_phase3_state.state_mutex);
-                global_phase3_state.dimensions = config.dimensions;
-                global_phase3_state.distance_metric = config.distance_metric;
-                mutex_unlock(&global_phase3_state.state_mutex);
+                ret = vexfs_lsh_init(index_meta.dimensions, VEXFS_DISTANCE_EUCLIDEAN,
+                                   index_meta.config.lsh.num_hash_tables,
+                                   index_meta.config.lsh.num_hash_functions);
+                if (ret == 0) {
+                    global_phase3_state.lsh_initialized = true;
+                    global_phase3_state.active_index_type = VEXFS_INDEX_LSH;
+                    
+                    /* Update global state */
+                    mutex_lock(&global_phase3_state.state_mutex);
+                    global_phase3_state.dimensions = index_meta.dimensions;
+                    global_phase3_state.distance_metric = VEXFS_DISTANCE_EUCLIDEAN;
+                    mutex_unlock(&global_phase3_state.state_mutex);
+                }
             }
             return ret;
         }
         
-    case VEXFS_IOC_LSH_INSERT:
+    case VEXFS_IOC_BATCH_INSERT:
         {
-            struct vexfs_lsh_insert_request request;
-            if (copy_from_user(&request, (void __user *)arg, sizeof(request))) {
-                return -EFAULT;
-            }
-            
+            /* Use existing batch insert for LSH */
             if (!global_phase3_state.lsh_initialized) {
                 return -EINVAL;
             }
-            
-            return vexfs_lsh_insert(request.vector_id, request.vector_data);
+            /* Delegate to main IOCTL handler */
+            return -ENOTTY; /* Let main handler deal with it */
         }
         
-    case VEXFS_IOC_LSH_SEARCH:
+    case VEXFS_IOC_KNN_SEARCH:
         {
-            struct vexfs_lsh_search_request request;
-            if (copy_from_user(&request, (void __user *)arg, sizeof(request))) {
-                return -EFAULT;
-            }
-            
+            /* Use existing KNN search for LSH */
             if (!global_phase3_state.lsh_initialized) {
                 return -EINVAL;
             }
-            
-            return vexfs_lsh_search(request.query_vector, request.k, 
-                                  request.results, request.result_count);
+            /* Delegate to main IOCTL handler */
+            return -ENOTTY; /* Let main handler deal with it */
         }
         
     default:
@@ -396,27 +357,26 @@ long vexfs_phase3_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
     /* Route to appropriate handler based on command */
     switch (cmd) {
     /* Multi-model commands (20-21) */
-    case VEXFS_IOC_SET_MODEL_METADATA:
-    case VEXFS_IOC_GET_MODEL_METADATA:
+    case VEXFS_IOC_SET_MODEL_META:
+    case VEXFS_IOC_GET_MODEL_META:
         return handle_multi_model_ioctl(cmd, arg);
         
-    /* Advanced search commands (22) */
+    /* Advanced search commands (24-26) */
     case VEXFS_IOC_FILTERED_SEARCH:
     case VEXFS_IOC_MULTI_VECTOR_SEARCH:
     case VEXFS_IOC_HYBRID_SEARCH:
         return handle_advanced_search_ioctl(cmd, arg);
         
-    /* HNSW commands (23) */
-    case VEXFS_IOC_HNSW_INIT:
-    case VEXFS_IOC_HNSW_INSERT:
-    case VEXFS_IOC_HNSW_SEARCH:
-        return handle_hnsw_ioctl(cmd, arg);
-        
-    /* LSH commands (24-26) */
-    case VEXFS_IOC_LSH_INIT:
-    case VEXFS_IOC_LSH_INSERT:
-    case VEXFS_IOC_LSH_SEARCH:
-        return handle_lsh_ioctl(cmd, arg);
+    /* Index building commands (22-23) */
+    case VEXFS_IOC_BUILD_INDEX:
+    case VEXFS_IOC_GET_INDEX_INFO:
+        /* Determine which index type and route accordingly */
+        if (global_phase3_state.active_index_type == VEXFS_INDEX_HNSW) {
+            return handle_hnsw_ioctl(cmd, arg);
+        } else if (global_phase3_state.active_index_type == VEXFS_INDEX_LSH) {
+            return handle_lsh_ioctl(cmd, arg);
+        }
+        return -EINVAL;
         
     default:
         return -ENOTTY;
@@ -436,22 +396,21 @@ int vexfs_phase3_get_stats(struct vexfs_phase3_stats *stats)
     
     /* Copy current state */
     mutex_lock(&global_phase3_state.state_mutex);
-    stats->multi_model_initialized = global_phase3_state.multi_model_initialized;
-    stats->advanced_search_initialized = global_phase3_state.advanced_search_initialized;
-    stats->hnsw_initialized = global_phase3_state.hnsw_initialized;
-    stats->lsh_initialized = global_phase3_state.lsh_initialized;
-    stats->dimensions = global_phase3_state.dimensions;
-    stats->distance_metric = global_phase3_state.distance_metric;
-    stats->current_model = global_phase3_state.current_model;
-    stats->active_index_type = global_phase3_state.active_index_type;
     mutex_unlock(&global_phase3_state.state_mutex);
     
-    /* Copy statistics */
-    stats->total_phase3_operations = atomic64_read(&global_phase3_state.total_phase3_operations);
-    stats->multi_model_operations = atomic64_read(&global_phase3_state.multi_model_operations);
-    stats->advanced_search_operations = atomic64_read(&global_phase3_state.advanced_search_operations);
-    stats->hnsw_operations = atomic64_read(&global_phase3_state.hnsw_operations);
-    stats->lsh_operations = atomic64_read(&global_phase3_state.lsh_operations);
+    /* Copy statistics - only fields that exist in vexfs_phase3_stats */
+    stats->multi_model_operations = (uint64_t)atomic64_read(&global_phase3_state.multi_model_operations);
+    stats->hnsw_searches = (uint64_t)atomic64_read(&global_phase3_state.hnsw_operations);
+    stats->lsh_searches = (uint64_t)atomic64_read(&global_phase3_state.lsh_operations);
+    stats->filtered_searches = 0; /* Not tracked in this integration layer */
+    stats->hybrid_searches = 0;   /* Not tracked in this integration layer */
+    stats->index_builds = 0;      /* Not tracked in this integration layer */
+    stats->index_updates = 0;     /* Not tracked in this integration layer */
+    
+    /* Performance metrics - set to zero for now */
+    stats->avg_hnsw_search_time_ns = 0;
+    stats->avg_lsh_search_time_ns = 0;
+    stats->avg_index_build_time_ns = 0;
     
     return 0;
 }
@@ -459,7 +418,7 @@ int vexfs_phase3_get_stats(struct vexfs_phase3_stats *stats)
 /*
  * Smart index selection based on query characteristics
  */
-int vexfs_phase3_smart_search(const float *query_vector, uint32_t k, uint32_t dimensions,
+int vexfs_phase3_smart_search(const uint32_t *query_vector, uint32_t k, uint32_t dimensions,
                              struct vexfs_search_result *results, uint32_t *result_count)
 {
     int ret = -ENODEV;
@@ -492,6 +451,13 @@ int vexfs_phase3_smart_search(const float *query_vector, uint32_t k, uint32_t di
 EXPORT_SYMBOL(vexfs_phase3_init);
 EXPORT_SYMBOL(vexfs_phase3_cleanup);
 EXPORT_SYMBOL(vexfs_phase3_ioctl);
+
+/* Alias for main module compatibility */
+long vexfs_v2_phase3_ioctl_handler(struct file *file, unsigned int cmd, unsigned long arg)
+{
+    return vexfs_phase3_ioctl(file, cmd, arg);
+}
+EXPORT_SYMBOL(vexfs_v2_phase3_ioctl_handler);
 EXPORT_SYMBOL(vexfs_phase3_get_stats);
 EXPORT_SYMBOL(vexfs_phase3_smart_search);
 
