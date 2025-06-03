@@ -1,13 +1,23 @@
-# VexFS v2.0 - Full Kernel-Native Vector Filesystem
-# Makefile for building the enhanced kernel module
+# VexFS v2.0 - Full Kernel-Native Vector Filesystem with Phase 3 Advanced Indexing
+# Makefile for building the enhanced kernel module with all components
 
-obj-m += vexfs_v2.o
+obj-m += vexfs_v2_phase3.o
+
+# Phase 3 Advanced Indexing Components
+vexfs_v2_phase3-objs := vexfs_v2_main.o \
+                        vexfs_v2_search.o \
+                        vexfs_v2_monitoring.o \
+                        vexfs_v2_multi_model.o \
+                        vexfs_v2_advanced_search.o \
+                        vexfs_v2_hnsw.o \
+                        vexfs_v2_lsh.o \
+                        vexfs_v2_phase3_integration.o
 
 # Kernel build directory
 KDIR := /lib/modules/$(shell uname -r)/build
 
-# Build flags for optimization
-ccflags-y := -O2 -Wall -Wextra
+# Build flags for optimization and Phase 3 features
+ccflags-y := -O2 -Wall -Wextra -DVEXFS_PHASE3_ENABLED
 
 # Default target
 all:
@@ -19,11 +29,11 @@ clean:
 
 # Install target
 install: all
-	sudo insmod vexfs_v2.ko
+	sudo insmod vexfs_v2_phase3.ko
 
 # Uninstall target
 uninstall:
-	sudo rmmod vexfs_v2 || true
+	sudo rmmod vexfs_v2_phase3 || true
 
 # Test target - mount the filesystem
 test: install

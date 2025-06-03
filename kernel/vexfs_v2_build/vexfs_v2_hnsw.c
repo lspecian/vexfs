@@ -22,6 +22,7 @@
 #include <linux/atomic.h>
 #include <linux/list.h>
 #include <linux/rbtree.h>
+#include <linux/delay.h>
 
 #ifdef __KERNEL__
 #include "vexfs_v2_phase3.h"
@@ -34,7 +35,7 @@
 #define HNSW_DEFAULT_M 16
 #define HNSW_DEFAULT_EF_CONSTRUCTION 200
 #define HNSW_DEFAULT_EF_SEARCH 50
-#define HNSW_ML_FACTOR 1.0 / log(2.0)
+#define HNSW_ML_FACTOR_BITS 0x3fb8aa3b  /* IEEE 754 representation of 1.0 / log(2.0) ≈ 1.4427 */
 #define HNSW_MAX_CONNECTIONS_PER_LAYER 64
 #define HNSW_PRUNE_THRESHOLD 32
 
@@ -44,6 +45,7 @@ struct hnsw_node {
     uint32_t layer_count;
     uint32_t dimensions;
     struct list_head global_list;
+    struct rb_node rb_node;
     struct mutex node_mutex;
     
     /* Layer connections - array of connection lists */
@@ -120,20 +122,20 @@ static struct hnsw_index *global_hnsw_index = NULL;
 static DEFINE_MUTEX(hnsw_global_mutex);
 
 /* Forward declarations */
-static int hnsw_distance_scaled(const float *vec1, const float *vec2, 
+static int hnsw_distance_scaled(const uint32_t *vec1, const uint32_t *vec2,
                                uint32_t dimensions, uint32_t metric);
 static struct hnsw_node *hnsw_find_node(struct hnsw_index *index, uint64_t node_id);
 static int hnsw_select_layer_for_node(void);
 static int hnsw_add_connection(struct hnsw_node *node, uint32_t layer, 
                               uint64_t target_id, uint64_t distance);
-static int hnsw_search_layer(struct hnsw_index *index, const float *query,
+static int hnsw_search_layer(struct hnsw_index *index, const uint32_t *query,
                             uint64_t entry_point, uint32_t layer, uint32_t ef,
                             struct hnsw_candidate_list *candidates);
 
 /*
  * Distance calculation with integer arithmetic for kernel compatibility
  */
-static int hnsw_distance_scaled(const float *vec1, const float *vec2, 
+static int hnsw_distance_scaled(const uint32_t *vec1, const uint32_t *vec2,
                                uint32_t dimensions, uint32_t metric)
 {
     uint64_t distance = 0;
@@ -184,7 +186,7 @@ static struct hnsw_node *hnsw_find_node(struct hnsw_index *index, uint64_t node_
     struct rb_node *node = index->node_tree.rb_node;
     
     while (node) {
-        struct hnsw_node *hnsw_node = rb_entry(node, struct hnsw_node, global_list);
+        struct hnsw_node *hnsw_node = rb_entry(node, struct hnsw_node, rb_node);
         
         if (node_id < hnsw_node->vector_id) {
             node = node->rb_left;
@@ -393,7 +395,7 @@ static int hnsw_add_candidate(struct hnsw_candidate_list *list,
 /*
  * Search single layer of HNSW graph
  */
-static int hnsw_search_layer(struct hnsw_index *index, const float *query,
+static int hnsw_search_layer(struct hnsw_index *index, const uint32_t *query,
                             uint64_t entry_point, uint32_t layer, uint32_t ef,
                             struct hnsw_candidate_list *candidates)
 {
@@ -555,7 +557,7 @@ int vexfs_hnsw_init(uint32_t dimensions, uint32_t distance_metric)
 /*
  * Insert vector into HNSW index
  */
-int vexfs_hnsw_insert(uint64_t vector_id, const float *vector)
+int vexfs_hnsw_insert(uint64_t vector_id, const uint32_t *vector)
 {
     struct hnsw_index *index = global_hnsw_index;
     struct hnsw_node *new_node, *entry_node;
@@ -688,7 +690,7 @@ int vexfs_hnsw_insert(uint64_t vector_id, const float *vector)
 /*
  * Search HNSW index for k nearest neighbors
  */
-int vexfs_hnsw_search(const float *query_vector, uint32_t k, 
+int vexfs_hnsw_search(const uint32_t *query_vector, uint32_t k, 
                      struct vexfs_search_result *results, uint32_t *result_count)
 {
     struct hnsw_index *index = global_hnsw_index;
@@ -698,120 +700,6 @@ int vexfs_hnsw_search(const float *query_vector, uint32_t k,
     uint32_t i;
     
     if (!index || !query_vector || !results || !result_count) {
-        return -EINVAL;
-    }
-    
-    if (atomic_read(&index->node_count) == 0) {
-        *result_count = 0;
-        return 0;
-    }
-    
-    start_time = ktime_get_ns();
-    atomic_inc(&index->active_searches);
-    atomic64_inc(&index->stats.total_searches);
-    
-    /* Initialize candidate list */
-    ret = hnsw_init_candidate_list(&candidates, index->ef_search);
-    if (ret) {
-        atomic_dec(&index->active_searches);
-        return ret;
-    }
-    
-    /* Search from top layer down to layer 0 */
-    for (layer = index->max_layer; layer >= 0; layer--) {
-        uint32_t ef = (layer == 0) ? max(index->ef_search, k) : 1;
-        
-        ret = hnsw_search_layer(index, query_vector, index->entry_point_id,
-                               layer, ef, &candidates);
-        if (ret) {
-            break;
-        }
-    }
-    
-    /* Copy results */
-    *result_count = min(k, candidates.size);
-    for (i = 0; i < *result_count; i++) {
-        results[i].vector_id = candidates.candidates[i].node_id;
-        results[i].distance = candidates.candidates[i].distance;
-        results[i].score = UINT64_MAX - candidates.candidates[i].distance;
-        results[i].metadata_size = 0;
-    }
-    
-    hnsw_free_candidate_list(&candidates);
-    atomic_dec(&index->active_searches);
-    
-    /* Update statistics */
-    uint64_t search_time = ktime_get_ns() - start_time;
-    index->stats.avg_search_time_ns = 
-        (index->stats.avg_search_time_ns + search_time) / 2;
-    
-    printk(KERN_DEBUG "VexFS HNSW: Search completed, found %u results in %llu ns\n",
-           *result_count, search_time);
-    
-    return ret;
-}
-
-/*
- * Get HNSW index statistics
- */
-int vexfs_hnsw_get_stats(struct vexfs_hnsw_stats *stats)
-{
-    struct hnsw_index *index = global_hnsw_index;
-    
-    if (!index || !stats) {
-        return -EINVAL;
-    }
-    
-    memset(stats, 0, sizeof(*stats));
-    
-    stats->node_count = atomic_read(&index->node_count);
-    stats->max_layer = index->max_layer;
-    stats->entry_point_id = index->entry_point_id;
-    stats->total_searches = atomic64_read(&index->stats.total_searches);
-    stats->total_insertions = atomic64_read(&index->stats.total_insertions);
-    stats->total_deletions = atomic64_read(&index->stats.total_deletions);
-    stats->distance_calculations = atomic64_read(&index->stats.distance_calculations);
-    stats->layer_traversals = atomic64_read(&index->stats.layer_traversals);
-    stats->avg_search_time_ns = index->stats.avg_search_time_ns;
-    stats->avg_insert_time_ns = index->stats.avg_insert_time_ns;
-    stats->memory_usage = index->total_memory_usage;
-    stats->active_searches = atomic_read(&index->active_searches);
-    
-    memcpy(stats->layer_distribution, index->stats.layer_distribution,
-           sizeof(stats->layer_distribution));
-    
-    return 0;
-}
-
-/*
- * Cleanup HNSW index
- */
-void vexfs_hnsw_cleanup(void)
-{
-    struct hnsw_index *index;
-    struct hnsw_node *node, *tmp;
-    uint32_t i;
-    
-    mutex_lock(&hnsw_global_mutex);
-    
-    index = global_hnsw_index;
-    if (!index) {
-        mutex_unlock(&hnsw_global_mutex);
-        return;
-    }
-    
-    global_hnsw_index = NULL;
-    mutex_unlock(&hnsw_global_mutex);
-    
-    /* Wait for active searches to complete */
-    while (atomic_read(&index->active_searches) > 0) {
-        msleep(10);
-    }
-    
-    /* Free all nodes */
-    list_for_each_entry_safe(node, tmp, &index->node_list, global_list) {
-        list_del(&node->global_list
-if (!index || !query_vector || !results || !result_count) {
         return -EINVAL;
     }
     

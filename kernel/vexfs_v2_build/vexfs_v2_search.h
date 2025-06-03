@@ -30,14 +30,16 @@
 /* Search result structure */
 struct vexfs_search_result {
     __u64 vector_id;        /* ID of the matching vector */
-    __u32 distance;         /* Distance/similarity score (integer to avoid SSE) */
+    __u64 distance;         /* Distance/similarity score */
+    __u64 score;            /* Computed score (inverse of distance) */
+    __u32 metadata_size;    /* Size of additional metadata */
     __u32 metadata_offset;  /* Offset to additional metadata */
     __u32 reserved;
 };
 
 /* k-NN search request */
 struct vexfs_knn_query {
-    float *query_vector;        /* Input query vector */
+    uint32_t *query_vector;     /* Input query vector (as uint32_t to avoid FPU) */
     __u32 dimensions;           /* Vector dimensions */
     __u32 k;                    /* Number of nearest neighbors */
     __u32 distance_metric;      /* Distance calculation method */
@@ -55,7 +57,7 @@ struct vexfs_knn_query {
 
 /* Range search request */
 struct vexfs_range_query {
-    float *query_vector;        /* Input query vector */
+    uint32_t *query_vector;     /* Input query vector (as uint32_t to avoid FPU) */
     __u32 dimensions;           /* Vector dimensions */
     __u32 max_distance;         /* Maximum distance threshold (integer to avoid SSE) */
     __u32 distance_metric;      /* Distance calculation method */
@@ -155,13 +157,13 @@ int vexfs_batch_search(struct file *file, struct vexfs_batch_search *batch);
 /* Index management */
 int vexfs_build_search_index(struct vexfs_vector_file_info *meta);
 int vexfs_rebuild_search_index(struct file *file);
-int vexfs_update_search_index(struct file *file, __u64 vector_id, float *vector);
+int vexfs_update_search_index(struct file *file, __u64 vector_id, uint32_t *vector);
 
-/* Distance calculations */
-float vexfs_euclidean_distance(const float *a, const float *b, __u32 dimensions);
-float vexfs_cosine_similarity(const float *a, const float *b, __u32 dimensions);
-float vexfs_dot_product(const float *a, const float *b, __u32 dimensions);
-float vexfs_manhattan_distance(const float *a, const float *b, __u32 dimensions);
+/* Distance calculations (integer arithmetic to avoid SSE issues) */
+__u32 vexfs_euclidean_distance(const uint32_t *a, const uint32_t *b, __u32 dimensions);
+__u32 vexfs_cosine_similarity(const uint32_t *a, const uint32_t *b, __u32 dimensions);
+__s32 vexfs_dot_product(const uint32_t *a, const uint32_t *b, __u32 dimensions);
+__u32 vexfs_manhattan_distance(const uint32_t *a, const uint32_t *b, __u32 dimensions);
 
 /* Search statistics and monitoring */
 int vexfs_get_search_stats(struct file *file, struct vexfs_search_stats *stats);
