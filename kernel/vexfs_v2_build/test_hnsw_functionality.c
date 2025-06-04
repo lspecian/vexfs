@@ -18,54 +18,14 @@
 #include <errno.h>
 #include <stdint.h>
 
-/* VexFS v2.0 ioctl definitions (must match kernel module) */
-#define VEXFS_IOC_MAGIC 'V'
-#define VEXFS_IOC_SET_VECTOR_META    _IOW(VEXFS_IOC_MAGIC, 1, struct vexfs_vector_file_info)
-#define VEXFS_IOC_GET_VECTOR_META    _IOR(VEXFS_IOC_MAGIC, 2, struct vexfs_vector_file_info)
-#define VEXFS_IOC_VECTOR_SEARCH      _IOWR(VEXFS_IOC_MAGIC, 3, struct vexfs_vector_search_request)
-#define VEXFS_IOC_BATCH_INSERT       _IOW(VEXFS_IOC_MAGIC, 4, struct vexfs_batch_insert_request)
-
-/* Vector element types */
-#define VEXFS_VECTOR_FLOAT32    0x01
-#define VEXFS_VECTOR_FLOAT16    0x02
-#define VEXFS_VECTOR_INT8       0x03
-#define VEXFS_VECTOR_BINARY     0x04
+/* Use official UAPI header for integer-based interface */
+#include "vexfs_v2_uapi.h"
 
 /* Vector storage optimization flags */
 #define VEXFS_OPT_SIMD_ALIGN    0x01
 #define VEXFS_OPT_BATCH_PROC    0x02
 #define VEXFS_OPT_NUMA_AWARE    0x04
 #define VEXFS_OPT_COMPRESS      0x08
-
-/* Structures (must match kernel module EXACTLY) */
-struct vexfs_vector_file_info {
-    uint32_t dimensions;
-    uint32_t element_type;
-    uint32_t vector_count;        /* FIXED: uint32_t to match kernel */
-    uint32_t storage_format;
-    uint64_t data_offset;
-    uint64_t index_offset;
-    uint32_t compression_type;
-    uint32_t alignment_bytes;
-};
-
-struct vexfs_vector_search_request {
-    float *query_vector;
-    uint32_t dimensions;
-    uint32_t k;                    /* Number of nearest neighbors */
-    uint32_t search_type;          /* 0=euclidean, 1=cosine, 2=dot_product */
-    float *results;                /* Output: distances */
-    uint64_t *result_ids;          /* Output: vector IDs */
-    uint32_t result_count;         /* Output: actual results found */
-};
-
-struct vexfs_batch_insert_request {
-    float *vectors;
-    uint32_t vector_count;
-    uint32_t dimensions;
-    uint64_t *vector_ids;          /* Optional: custom IDs */
-    uint32_t flags;                /* Insert flags */
-};
 
 void print_test_header(const char *test_name) {
     printf("\n=== %s ===\n", test_name);
@@ -144,7 +104,11 @@ int test_hnsw_vector_search(const char *mount_point) {
     struct vexfs_vector_search_request search_req;
     float query_vector[4] = {1.0f, 2.0f, 3.0f, 4.0f};
     uint64_t result_ids[10];
-    float result_distances[10];
+    uint32_t result_distances_bits[10];
+    
+    /* Convert query vector to IEEE 754 bit representation */
+    uint32_t query_vector_bits[4];
+    vexfs_float_array_to_bits(query_vector, query_vector_bits, 4);
     
     print_test_header("HNSW Vector Search Test");
     
@@ -178,11 +142,11 @@ int test_hnsw_vector_search(const char *mount_point) {
     
     /* Prepare search request */
     memset(&search_req, 0, sizeof(search_req));
-    search_req.query_vector = query_vector;
+    search_req.query_vector_bits = query_vector_bits;
     search_req.dimensions = 4;  /* Must match metadata dimensions */
     search_req.k = 5;
     search_req.search_type = 0;  /* 0=euclidean distance */
-    search_req.results = result_distances;
+    search_req.results_bits = result_distances_bits;
     search_req.result_ids = result_ids;
     search_req.result_count = 0;  /* Will be set by kernel */
     
@@ -200,7 +164,7 @@ int test_hnsw_vector_search(const char *mount_point) {
     /* Display results */
     for (int i = 0; i < search_req.result_count && i < 5; i++) {
         printf("Result %d: ID=%lu, Distance=%.3f\n",
-               i, search_req.result_ids[i], search_req.results[i]);
+               i, search_req.result_ids[i], search_req.results_bits[i]);
     }
     
     close(fd);
@@ -223,6 +187,10 @@ int test_batch_vector_operations(const char *mount_point) {
         17.0f, 18.0f, 19.0f, 20.0f  /* Vector 5 */
     };
     uint64_t vector_ids[5] = {100, 101, 102, 103, 104};
+    
+    /* Convert float vectors to IEEE 754 bit representation */
+    uint32_t vector_bits[20];  /* 5 vectors * 4 dimensions */
+    vexfs_float_array_to_bits(vectors, vector_bits, 20);
     
     print_test_header("Batch Vector Operations Test");
     
@@ -256,7 +224,7 @@ int test_batch_vector_operations(const char *mount_point) {
     
     /* Prepare batch insert request */
     memset(&batch_req, 0, sizeof(batch_req));
-    batch_req.vectors = vectors;
+    batch_req.vectors_bits = vector_bits;
     batch_req.vector_count = 5;
     batch_req.dimensions = 4;  /* Must match metadata dimensions */
     batch_req.vector_ids = vector_ids;

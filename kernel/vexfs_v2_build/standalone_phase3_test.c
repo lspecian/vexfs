@@ -248,6 +248,8 @@ int test_filtered_search(int fd) {
     uint32_t result_count;
     struct vexfs_search_filter filter;
     float query_vector[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+    uint32_t query_vector_bits[4];
+    vexfs_float_array_to_bits(query_vector, query_vector_bits, 4);
     int ret;
     
     print_test_header("Filtered Search Test");

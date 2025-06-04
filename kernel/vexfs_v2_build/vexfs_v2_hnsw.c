@@ -30,6 +30,31 @@
 #include "vexfs_v2_phase3.h"
 #endif
 
+/* IEEE 754 conversion utilities for kernel space */
+static inline __u32 vexfs_ieee754_to_fixed(__u32 ieee754_bits)
+{
+    /* Extract IEEE 754 components */
+    __u32 sign = (ieee754_bits >> 31) & 0x1;
+    __u32 exponent = (ieee754_bits >> 23) & 0xFF;
+    __u32 mantissa = ieee754_bits & 0x7FFFFF;
+    
+    /* Handle special cases */
+    if (exponent == 0) return 0; /* Zero or denormal */
+    if (exponent == 0xFF) return 0x7FFFFFFF; /* Infinity or NaN */
+    
+    /* Convert to fixed-point (scale by 1000 for precision) */
+    __u32 value = (mantissa | 0x800000) >> 10; /* Add implicit 1 and scale */
+    __s32 exp_bias = (__s32)exponent - 127 - 13; /* Adjust for scaling */
+    
+    if (exp_bias > 0) {
+        value <<= exp_bias;
+    } else if (exp_bias < 0) {
+        value >>= (-exp_bias);
+    }
+    
+    return sign ? (~value + 1) : value; /* Apply sign */
+}
+
 /* HNSW Configuration Constants */
 #define HNSW_MAX_LAYERS 16
 #define HNSW_DEFAULT_M 16
@@ -142,10 +167,13 @@ static int hnsw_distance_scaled(const uint32_t *vec1, const uint32_t *vec2,
     uint32_t i;
     int32_t diff, v1_scaled, v2_scaled;
     
-    /* Scale floats to integers (multiply by 1000) */
+    /* Convert IEEE 754 to fixed-point integers (scale by 1000) */
     for (i = 0; i < dimensions; i++) {
-        v1_scaled = (int32_t)(vec1[i] * 1000);
-        v2_scaled = (int32_t)(vec2[i] * 1000);
+        /* Use proper IEEE 754 conversion instead of floating-point multiplication */
+        uint32_t v1_fixed = vexfs_ieee754_to_fixed(vec1[i]);
+        uint32_t v2_fixed = vexfs_ieee754_to_fixed(vec2[i]);
+        v1_scaled = (int32_t)v1_fixed; /* Already scaled in IEEE 754 conversion */
+        v2_scaled = (int32_t)v2_fixed; /* Already scaled in IEEE 754 conversion */
         
         switch (metric) {
         case VEXFS_DISTANCE_EUCLIDEAN:

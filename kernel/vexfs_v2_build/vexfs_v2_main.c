@@ -44,8 +44,8 @@
 #include "vexfs_v2_phase3.h"
 #endif
 
-/* Define FLT_MAX for kernel space */
-#define FLT_MAX 3.40282347e+38F
+/* Define maximum distance value for kernel space (no floating-point) */
+#define VEXFS_MAX_UINT32 0xFFFFFFFF
 
 #define VEXFS_MAGIC 0x56455846  /* "VEXF" */
 #define VEXFS_V2_MAGIC 0x56455832  /* "VEX2" - VexFS v2.0 */
@@ -339,6 +339,7 @@ static float vexfs_simd_euclidean_distance_avx2(const float *vec1, const float *
     
     return result;
 }
+#endif /* DISABLED: VEXFS_ENABLE_SIMD_FLOAT_OPS - causes __fixunssfsi errors */
 
 /* AVX2 Dot product calculation for float32 vectors */
 #if 0 /* DISABLED: VEXFS_ENABLE_SIMD_FLOAT_OPS - causes __fixunssfsi errors */
@@ -643,7 +644,6 @@ static int __maybe_unused vexfs_simd_batch_dot_product(struct vexfs_v2_sb_info *
 
 /* Note: Structures are now defined in vexfs_v2_uapi.h and vexfs_v2_search.h */
 
-#endif /* VEXFS_ENABLE_SIMD_FLOAT_OPS */
 
 /* Forward declarations */
 static int vexfs_perform_vector_search(struct vexfs_simd_context *ctx,
@@ -756,7 +756,7 @@ static long vexfs_vector_ioctl(struct file *file, unsigned int cmd, unsigned lon
         }
         
         /* Validate search parameters */
-        if (!req.query_vector || req.dimensions != vii->vector_dimensions) {
+        if (!req.query_vector_bits || req.dimensions != vii->vector_dimensions) {
             /* 🔥 MONITORING: Track validation error */
             u64 latency_ns = ktime_get_ns() - start_time_ns;
             vexfs_record_search_operation(latency_ns, false);
@@ -812,7 +812,7 @@ static long vexfs_vector_ioctl(struct file *file, unsigned int cmd, unsigned lon
         vexfs_record_batch_size(req.vector_count);
         
         /* Validate insert parameters */
-        if (!req.vectors || req.dimensions != vii->vector_dimensions) {
+        if (!req.vectors_bits || req.dimensions != vii->vector_dimensions) {
             /* 🔥 MONITORING: Track validation error */
             u64 latency_ns = ktime_get_ns() - start_time_ns;
             vexfs_record_batch_insert(req.vector_count, latency_ns, 0, false);
@@ -1032,7 +1032,7 @@ static int vexfs_perform_vector_search(struct vexfs_simd_context *ctx,
     }
     
     /* Copy query vector from user space */
-    if (copy_from_user(query_vector, req->query_vector,
+    if (copy_from_user(query_vector, req->query_vector_bits,
                        req->dimensions * sizeof(uint32_t))) {
         ret = -EFAULT;
         goto cleanup;
@@ -1049,7 +1049,7 @@ static int vexfs_perform_vector_search(struct vexfs_simd_context *ctx,
     
     /* Initialize results */
     for (i = 0; i < req->k; i++) {
-        distances[i] = 0xFFFFFFFF; /* Max uint32_t value instead of FLT_MAX */
+        distances[i] = VEXFS_MAX_UINT32; /* Max uint32_t value for maximum distance */
         result_ids[i] = 0;
         hnsw_results[i] = 0;
     }
@@ -1135,7 +1135,7 @@ linear_search:
     }
     
     /* Copy results back to user space */
-    if (copy_to_user(req->results, distances, req->result_count * sizeof(uint32_t))) {
+    if (copy_to_user(req->results_bits, distances, req->result_count * sizeof(uint32_t))) {
         ret = -EFAULT;
         goto cleanup;
     }
@@ -1201,7 +1201,7 @@ static int vexfs_batch_insert_vectors(struct vexfs_simd_context *ctx,
     }
     
     /* 🔥 OPTIMIZATION 4: Single bulk copy operation from user space */
-    if (copy_from_user(vectors, req->vectors, total_vector_bytes)) {
+    if (copy_from_user(vectors, req->vectors_bits, total_vector_bytes)) {
         ret = -EFAULT;
         goto cleanup;
     }
@@ -1325,7 +1325,7 @@ static struct inode *vexfs_v2_alloc_inode(struct super_block *sb)
     
     /* 🔥 Initialize vector-specific fields 🔥 */
     vi->is_vector_file = 0;
-    vi->vector_element_type = VEXFS_VECTOR_FLOAT32;  /* Default to float32 */
+    vi->vector_element_type = VEXFS_VECTOR_FLOAT32;  /* Default to float32 (stored as uint32_t IEEE 754) */
     vi->vector_dimensions = 0;
     vi->vector_count = 0;
     vi->vector_alignment = 32;  /* Default to 32-byte alignment (AVX2) */

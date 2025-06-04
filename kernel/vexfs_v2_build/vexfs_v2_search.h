@@ -126,7 +126,7 @@ struct vexfs_search_config {
         struct {
             __u32 hash_tables;  /* LSH: number of hash tables */
             __u32 hash_bits;    /* LSH: bits per hash */
-            float bucket_width; /* LSH: bucket width */
+            __u32 bucket_width_bits; /* LSH: bucket width (IEEE 754 bits) */
         } lsh;
     } params;
 };

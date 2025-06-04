@@ -23,6 +23,47 @@
 #include "vexfs_v2_search.h"
 #include "vexfs_v2_uapi.h"
 
+/* IEEE 754 conversion utilities for kernel space */
+static inline __u32 vexfs_ieee754_to_fixed(__u32 ieee754_bits)
+{
+    /* Extract IEEE 754 components */
+    __u32 sign = (ieee754_bits >> 31) & 0x1;
+    __u32 exponent = (ieee754_bits >> 23) & 0xFF;
+    __u32 mantissa = ieee754_bits & 0x7FFFFF;
+    
+    /* Handle special cases */
+    if (exponent == 0) return 0; /* Zero or denormal */
+    if (exponent == 0xFF) return 0x7FFFFFFF; /* Infinity or NaN */
+    
+    /* Convert to fixed-point (scale by 1000 for precision) */
+    __u32 value = (mantissa | 0x800000) >> 10; /* Add implicit 1 and scale */
+    __s32 exp_bias = (__s32)exponent - 127 - 13; /* Adjust for scaling */
+    
+    if (exp_bias > 0) {
+        value <<= exp_bias;
+    } else if (exp_bias < 0) {
+        value >>= (-exp_bias);
+    }
+    
+    return sign ? (~value + 1) : value; /* Apply sign */
+}
+
+static inline __u32 vexfs_fixed_to_ieee754(__s32 fixed_value)
+{
+    /* Simple conversion back to IEEE 754 representation */
+    if (fixed_value == 0) return 0;
+    
+    __u32 sign = (fixed_value < 0) ? 0x80000000 : 0;
+    __u32 abs_value = (fixed_value < 0) ? (-fixed_value) : fixed_value;
+    
+    /* Find leading bit position */
+    __u32 leading_bit = 31 - __builtin_clz(abs_value);
+    __u32 exponent = leading_bit + 127 - 13; /* Adjust for our scaling */
+    __u32 mantissa = (abs_value << (23 - leading_bit)) & 0x7FFFFF;
+    
+    return sign | (exponent << 23) | mantissa;
+}
+
 /* Search result for internal sorting */
 struct vexfs_internal_result {
     __u64 vector_id;
@@ -45,15 +86,11 @@ __u32 vexfs_euclidean_distance(const uint32_t *a, const uint32_t *b, __u32 dimen
     __u32 i;
     /* Removed float union to avoid floating-point operations in kernel */
     
-    /* No FPU operations - use integer arithmetic only */
+    /* No FPU operations - use proper IEEE 754 conversion */
     for (i = 0; i < dimensions; i++) {
-        /* Convert float to fixed-point using union to avoid FPU */
-        __u32 conv_a_i = *(const __u32*)&a[i];
-        __u32 conv_b_i = *(const __u32*)&b[i];
-        
-        /* Extract mantissa and exponent for fixed-point conversion */
-        __s32 a_fixed = (__s32)((conv_a_i & 0x7FFFFF) >> 10); /* Simplified conversion */
-        __s32 b_fixed = (__s32)((conv_b_i & 0x7FFFFF) >> 10);
+        /* Convert IEEE 754 uint32_t to fixed-point using proper conversion */
+        __s32 a_fixed = (__s32)vexfs_ieee754_to_fixed(a[i]);
+        __s32 b_fixed = (__s32)vexfs_ieee754_to_fixed(b[i]);
         __s32 diff = a_fixed - b_fixed;
         sum += (__u64)(diff * diff);
     }
@@ -70,15 +107,11 @@ __u32 vexfs_cosine_similarity(const uint32_t *a, const uint32_t *b, __u32 dimens
     __u32 i;
     /* Removed float union to avoid floating-point operations in kernel */
     
-    /* No FPU operations - use integer arithmetic only */
+    /* No FPU operations - use proper IEEE 754 conversion */
     for (i = 0; i < dimensions; i++) {
-        /* Convert float to fixed-point using union to avoid FPU */
-        __u32 conv_a_i = *(const __u32*)&a[i];
-        __u32 conv_b_i = *(const __u32*)&b[i];
-        
-        /* Extract mantissa for fixed-point conversion */
-        __s32 a_fixed = (__s32)((conv_a_i & 0x7FFFFF) >> 10);
-        __s32 b_fixed = (__s32)((conv_b_i & 0x7FFFFF) >> 10);
+        /* Convert IEEE 754 uint32_t to fixed-point using proper conversion */
+        __s32 a_fixed = (__s32)vexfs_ieee754_to_fixed(a[i]);
+        __s32 b_fixed = (__s32)vexfs_ieee754_to_fixed(b[i]);
         dot_product += (__s64)(a_fixed * b_fixed);
         norm_a += (__u64)(a_fixed * a_fixed);
         norm_b += (__u64)(b_fixed * b_fixed);
@@ -108,13 +141,9 @@ __s32 vexfs_dot_product(const uint32_t *a, const uint32_t *b, __u32 dimensions)
     
     /* No FPU operations - use integer arithmetic only */
     for (i = 0; i < dimensions; i++) {
-        /* Convert float to fixed-point using union to avoid FPU */
-        __u32 conv_a_i = *(const __u32*)&a[i];
-        __u32 conv_b_i = *(const __u32*)&b[i];
-        
-        /* Extract mantissa for fixed-point conversion */
-        __s32 a_fixed = (__s32)((conv_a_i & 0x7FFFFF) >> 10);
-        __s32 b_fixed = (__s32)((conv_b_i & 0x7FFFFF) >> 10);
+        /* Convert IEEE 754 uint32_t to fixed-point using proper conversion */
+        __s32 a_fixed = (__s32)vexfs_ieee754_to_fixed(a[i]);
+        __s32 b_fixed = (__s32)vexfs_ieee754_to_fixed(b[i]);
         result += (__s64)(a_fixed * b_fixed);
     }
     
@@ -130,13 +159,9 @@ __u32 vexfs_manhattan_distance(const uint32_t *a, const uint32_t *b, __u32 dimen
     
     /* No FPU operations - use integer arithmetic only */
     for (i = 0; i < dimensions; i++) {
-        /* Convert float to fixed-point using union to avoid FPU */
-        __u32 conv_a_i = *(const __u32*)&a[i];
-        __u32 conv_b_i = *(const __u32*)&b[i];
-        
-        /* Extract mantissa for fixed-point conversion */
-        __s32 a_fixed = (__s32)((conv_a_i & 0x7FFFFF) >> 10);
-        __s32 b_fixed = (__s32)((conv_b_i & 0x7FFFFF) >> 10);
+        /* Convert IEEE 754 uint32_t to fixed-point using proper conversion */
+        __s32 a_fixed = (__s32)vexfs_ieee754_to_fixed(a[i]);
+        __s32 b_fixed = (__s32)vexfs_ieee754_to_fixed(b[i]);
         __s32 diff = a_fixed - b_fixed;
         __u32 abs_diff = (diff < 0) ? (__u32)(-diff) : (__u32)diff;
         sum += abs_diff;
@@ -260,7 +285,7 @@ static int vexfs_brute_force_knn(struct file *file, struct vexfs_knn_query *quer
     
     for (i = 0; i < query->results_found; i++) {
         query->results[i].vector_id = candidates[i].vector_id;
-        /* Convert integer distance back to float for user interface using union to avoid SSE */
+        /* Keep distance as uint32_t - no floating-point conversion needed */
         __u32 distance_conv_i = candidates[i].distance;
         /* Scale down by 1000 using integer arithmetic to avoid floating point */
         distance_conv_i = distance_conv_i / 1000;
