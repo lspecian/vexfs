@@ -1,10 +1,11 @@
-vexfs_v2_advanced_search.o: \
- /home/luis/Development/oss/vexfs/kernel/vexfs_v2_build/vexfs_v2_advanced_search.c \
+vexfs_v2_lsh.o: \
+ /home/luis/Development/oss/vexfs/kernel/search/vexfs_v2_lsh.c \
  include/linux/compiler-version.h include/linux/kconfig.h \
  include/generated/autoconf.h include/linux/compiler_types.h \
  include/linux/compiler_attributes.h include/linux/compiler-gcc.h \
- include/linux/module.h include/linux/list.h include/linux/container_of.h \
- include/linux/build_bug.h include/linux/compiler.h \
+ include/linux/kernel.h include/linux/stdarg.h include/linux/align.h \
+ include/linux/const.h include/vdso/const.h include/uapi/linux/const.h \
+ include/linux/array_size.h include/linux/compiler.h \
  include/linux/compiler_types.h arch/x86/include/generated/asm/rwonce.h \
  include/asm-generic/rwonce.h include/linux/kasan-checks.h \
  include/linux/types.h include/uapi/linux/types.h \
@@ -17,84 +18,81 @@ vexfs_v2_advanced_search.o: \
  include/uapi/linux/stddef.h arch/x86/include/asm/posix_types.h \
  arch/x86/include/uapi/asm/posix_types_64.h \
  include/uapi/asm-generic/posix_types.h include/linux/kcsan-checks.h \
- include/linux/poison.h include/linux/const.h include/vdso/const.h \
- include/uapi/linux/const.h arch/x86/include/asm/barrier.h \
- arch/x86/include/asm/alternative.h include/linux/stringify.h \
+ include/linux/limits.h include/uapi/linux/limits.h include/vdso/limits.h \
+ include/linux/linkage.h include/linux/stringify.h include/linux/export.h \
+ arch/x86/include/asm/linkage.h arch/x86/include/asm/ibt.h \
+ include/linux/container_of.h include/linux/build_bug.h \
+ include/linux/bitops.h include/linux/bits.h include/vdso/bits.h \
+ include/uapi/linux/bits.h include/linux/typecheck.h \
+ include/uapi/linux/kernel.h include/uapi/linux/sysinfo.h \
+ include/asm-generic/bitops/generic-non-atomic.h \
+ arch/x86/include/asm/barrier.h arch/x86/include/asm/alternative.h \
  arch/x86/include/asm/asm.h arch/x86/include/asm/extable_fixup_types.h \
  arch/x86/include/asm/nops.h include/asm-generic/barrier.h \
- include/linux/stat.h arch/x86/include/uapi/asm/stat.h \
- include/uapi/linux/stat.h include/linux/time.h include/linux/cache.h \
- include/uapi/linux/kernel.h include/uapi/linux/sysinfo.h \
- arch/x86/include/asm/cache.h include/linux/linkage.h \
- include/linux/export.h arch/x86/include/asm/linkage.h \
- arch/x86/include/asm/ibt.h include/linux/math64.h include/linux/math.h \
- arch/x86/include/asm/div64.h include/asm-generic/div64.h \
- include/vdso/math64.h include/linux/time64.h include/vdso/time64.h \
- include/uapi/linux/time.h include/uapi/linux/time_types.h \
- include/linux/time32.h include/linux/timex.h include/uapi/linux/timex.h \
- include/uapi/linux/param.h arch/x86/include/generated/uapi/asm/param.h \
- include/asm-generic/param.h include/uapi/asm-generic/param.h \
- arch/x86/include/asm/timex.h arch/x86/include/asm/processor.h \
- arch/x86/include/asm/processor-flags.h \
- arch/x86/include/uapi/asm/processor-flags.h include/linux/mem_encrypt.h \
- arch/x86/include/asm/mem_encrypt.h include/linux/init.h \
- include/linux/cc_platform.h arch/x86/include/asm/math_emu.h \
- arch/x86/include/asm/ptrace.h arch/x86/include/asm/segment.h \
- arch/x86/include/asm/page_types.h arch/x86/include/asm/page_64_types.h \
- arch/x86/include/asm/kaslr.h arch/x86/include/uapi/asm/ptrace.h \
- arch/x86/include/uapi/asm/ptrace-abi.h \
- arch/x86/include/asm/paravirt_types.h arch/x86/include/asm/desc_defs.h \
- arch/x86/include/asm/pgtable_types.h \
- arch/x86/include/asm/pgtable_64_types.h arch/x86/include/asm/sparsemem.h \
- arch/x86/include/asm/nospec-branch.h include/linux/static_key.h \
- include/linux/jump_label.h arch/x86/include/asm/jump_label.h \
- include/linux/objtool.h include/linux/objtool_types.h \
- arch/x86/include/asm/cpufeatures.h \
- arch/x86/include/asm/required-features.h \
- arch/x86/include/asm/disabled-features.h \
- arch/x86/include/asm/msr-index.h include/linux/bits.h \
- include/vdso/bits.h include/uapi/linux/bits.h \
- arch/x86/include/asm/unwind_hints.h arch/x86/include/asm/orc_types.h \
- arch/x86/include/uapi/asm/byteorder.h \
- include/linux/byteorder/little_endian.h \
- include/uapi/linux/byteorder/little_endian.h include/linux/swab.h \
- include/uapi/linux/swab.h arch/x86/include/uapi/asm/swab.h \
- include/linux/byteorder/generic.h arch/x86/include/asm/percpu.h \
- include/asm-generic/percpu.h include/linux/threads.h \
- include/linux/percpu-defs.h arch/x86/include/asm/current.h \
- arch/x86/include/asm/asm-offsets.h include/generated/asm-offsets.h \
- arch/x86/include/asm/GEN-for-each-reg.h \
- arch/x86/include/asm/spinlock_types.h \
- include/asm-generic/qspinlock_types.h \
- include/asm-generic/qrwlock_types.h arch/x86/include/asm/proto.h \
- arch/x86/include/uapi/asm/ldt.h arch/x86/include/uapi/asm/sigcontext.h \
- arch/x86/include/asm/cpuid.h arch/x86/include/asm/string.h \
- arch/x86/include/asm/string_64.h arch/x86/include/asm/paravirt.h \
- include/linux/bug.h arch/x86/include/asm/bug.h \
- include/linux/instrumentation.h include/asm-generic/bug.h \
- include/linux/once_lite.h include/linux/panic.h include/linux/printk.h \
- include/linux/stdarg.h include/linux/kern_levels.h \
- include/linux/ratelimit_types.h include/linux/spinlock_types_raw.h \
- include/linux/lockdep_types.h include/linux/dynamic_debug.h \
- include/linux/cpumask.h include/linux/cleanup.h include/linux/kernel.h \
- include/linux/align.h include/linux/array_size.h include/linux/limits.h \
- include/uapi/linux/limits.h include/vdso/limits.h include/linux/bitops.h \
- include/linux/typecheck.h \
- include/asm-generic/bitops/generic-non-atomic.h \
  arch/x86/include/asm/bitops.h arch/x86/include/asm/rmwcc.h \
  include/linux/args.h include/asm-generic/bitops/sched.h \
- arch/x86/include/asm/arch_hweight.h \
+ arch/x86/include/asm/arch_hweight.h arch/x86/include/asm/cpufeatures.h \
+ arch/x86/include/asm/required-features.h \
+ arch/x86/include/asm/disabled-features.h \
  include/asm-generic/bitops/const_hweight.h \
  include/asm-generic/bitops/instrumented-atomic.h \
  include/linux/instrumented.h include/linux/kmsan-checks.h \
  include/asm-generic/bitops/instrumented-non-atomic.h \
  include/asm-generic/bitops/instrumented-lock.h \
- include/asm-generic/bitops/le.h \
+ include/asm-generic/bitops/le.h arch/x86/include/uapi/asm/byteorder.h \
+ include/linux/byteorder/little_endian.h \
+ include/uapi/linux/byteorder/little_endian.h include/linux/swab.h \
+ include/uapi/linux/swab.h arch/x86/include/uapi/asm/swab.h \
+ include/linux/byteorder/generic.h \
  include/asm-generic/bitops/ext2-atomic-setbit.h include/linux/hex.h \
- include/linux/kstrtox.h include/linux/log2.h include/linux/minmax.h \
+ include/linux/kstrtox.h include/linux/log2.h include/linux/math.h \
+ arch/x86/include/asm/div64.h include/asm-generic/div64.h \
+ include/linux/minmax.h include/linux/panic.h include/linux/printk.h \
+ include/linux/init.h include/linux/kern_levels.h \
+ include/linux/ratelimit_types.h include/uapi/linux/param.h \
+ arch/x86/include/generated/uapi/asm/param.h include/asm-generic/param.h \
+ include/uapi/asm-generic/param.h include/linux/spinlock_types_raw.h \
+ arch/x86/include/asm/spinlock_types.h \
+ include/asm-generic/qspinlock_types.h \
+ include/asm-generic/qrwlock_types.h include/linux/lockdep_types.h \
+ include/linux/once_lite.h include/linux/dynamic_debug.h \
+ include/linux/jump_label.h arch/x86/include/asm/jump_label.h \
  include/linux/sprintf.h include/linux/static_call_types.h \
  include/linux/instruction_pointer.h include/linux/wordpart.h \
- include/linux/bitmap.h include/linux/errno.h include/uapi/linux/errno.h \
+ include/linux/module.h include/linux/list.h include/linux/poison.h \
+ include/linux/stat.h arch/x86/include/uapi/asm/stat.h \
+ include/uapi/linux/stat.h include/linux/time.h include/linux/cache.h \
+ arch/x86/include/asm/cache.h include/linux/math64.h \
+ include/vdso/math64.h include/linux/time64.h include/vdso/time64.h \
+ include/uapi/linux/time.h include/uapi/linux/time_types.h \
+ include/linux/time32.h include/linux/timex.h include/uapi/linux/timex.h \
+ arch/x86/include/asm/timex.h arch/x86/include/asm/processor.h \
+ arch/x86/include/asm/processor-flags.h \
+ arch/x86/include/uapi/asm/processor-flags.h include/linux/mem_encrypt.h \
+ arch/x86/include/asm/mem_encrypt.h include/linux/cc_platform.h \
+ arch/x86/include/asm/math_emu.h arch/x86/include/asm/ptrace.h \
+ arch/x86/include/asm/segment.h arch/x86/include/asm/page_types.h \
+ arch/x86/include/asm/page_64_types.h arch/x86/include/asm/kaslr.h \
+ arch/x86/include/uapi/asm/ptrace.h \
+ arch/x86/include/uapi/asm/ptrace-abi.h \
+ arch/x86/include/asm/paravirt_types.h arch/x86/include/asm/desc_defs.h \
+ arch/x86/include/asm/pgtable_types.h \
+ arch/x86/include/asm/pgtable_64_types.h arch/x86/include/asm/sparsemem.h \
+ arch/x86/include/asm/nospec-branch.h include/linux/static_key.h \
+ include/linux/objtool.h include/linux/objtool_types.h \
+ arch/x86/include/asm/msr-index.h arch/x86/include/asm/unwind_hints.h \
+ arch/x86/include/asm/orc_types.h arch/x86/include/asm/percpu.h \
+ include/asm-generic/percpu.h include/linux/threads.h \
+ include/linux/percpu-defs.h arch/x86/include/asm/current.h \
+ arch/x86/include/asm/asm-offsets.h include/generated/asm-offsets.h \
+ arch/x86/include/asm/GEN-for-each-reg.h arch/x86/include/asm/proto.h \
+ arch/x86/include/uapi/asm/ldt.h arch/x86/include/uapi/asm/sigcontext.h \
+ arch/x86/include/asm/cpuid.h arch/x86/include/asm/string.h \
+ arch/x86/include/asm/string_64.h arch/x86/include/asm/paravirt.h \
+ include/linux/bug.h arch/x86/include/asm/bug.h \
+ include/linux/instrumentation.h include/asm-generic/bug.h \
+ include/linux/cpumask.h include/linux/cleanup.h include/linux/bitmap.h \
+ include/linux/errno.h include/uapi/linux/errno.h \
  arch/x86/include/generated/uapi/asm/errno.h \
  include/uapi/asm-generic/errno.h include/uapi/asm-generic/errno-base.h \
  include/linux/find.h include/linux/string.h include/linux/err.h \
@@ -269,7 +267,9 @@ vexfs_v2_advanced_search.o: \
  arch/x86/include/asm/module.h include/asm-generic/module.h \
  arch/x86/include/asm/orc_types.h include/linux/vmalloc.h \
  arch/x86/include/asm/vmalloc.h arch/x86/include/asm/pgtable_areas.h \
- include/linux/sort.h \
- /home/luis/Development/oss/vexfs/kernel/vexfs_v2_build/vexfs_v2_search.h \
- /home/luis/Development/oss/vexfs/kernel/vexfs_v2_build/vexfs_v2_uapi.h \
- /home/luis/Development/oss/vexfs/kernel/vexfs_v2_build/vexfs_v2_phase3.h
+ include/linux/hashtable.h include/linux/delay.h \
+ arch/x86/include/asm/delay.h include/asm-generic/delay.h \
+ /home/luis/Development/oss/vexfs/kernel/search/../core/vexfs_v2_phase3.h \
+ /home/luis/Development/oss/vexfs/kernel/search/../core/../uapi/vexfs_v2_uapi.h \
+ /home/luis/Development/oss/vexfs/kernel/search/../core/../search/vexfs_v2_search.h \
+ /home/luis/Development/oss/vexfs/kernel/search/../core/../search/../uapi/vexfs_v2_uapi.h

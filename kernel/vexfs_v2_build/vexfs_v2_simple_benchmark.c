@@ -80,7 +80,7 @@ struct performance_metrics {
 };
 
 /* Global test configuration */
-static char mount_point[256] = "/tmp/vexfs_v2_316_test";
+static char mount_point[256] = "/tmp/vexfs_v2_test";
 static int test_duration = 10;
 static int dimensions = 128;
 static int batch_size = 50;
@@ -329,7 +329,7 @@ static void print_results(const char *test_name, struct performance_metrics *met
 static void print_usage(const char *program_name) {
     printf("Usage: %s [options]\n", program_name);
     printf("Options:\n");
-    printf("  -m <mount_point>  VexFS v2.0 mount point (default: /tmp/vexfs_v2_316_test)\n");
+    printf("  -m <mount_point>  VexFS v2.0 mount point (default: /tmp/vexfs_v2_test)\n");
     printf("  -d <duration>     Test duration in seconds (default: 10)\n");
     printf("  -D <dimensions>   Vector dimensions (default: 128)\n");
     printf("  -b <batch_size>   Batch size for insert operations (default: 50)\n");

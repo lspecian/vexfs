@@ -19,11 +19,11 @@ This strategy provides a systematic approach to achieve clarity and maintainabil
 ### 1. **Multiple VexFS Implementations**
 ```
 Current Confusion:
-├── Kernel Module (vexfs_v2_phase3) - WORKING
+├── Kernel Module (vexfs_v2) - WORKING
 ├── FUSE Implementation - STATUS UNCLEAR
 ├── Legacy kernel modules - DEPRECATED?
 ├── Multiple test programs - WHICH ONES WORK?
-└── Mixed API versions - v1, v2, phase3?
+└── Mixed API versions - v1, v2.0?
 ```
 
 ### 2. **File Structure Chaos**
@@ -166,7 +166,7 @@ Current: Multiple kernel modules
 Target: Single authoritative kernel module
 
 Actions:
-1. Identify the working kernel module (vexfs_v2_phase3)
+1. Identify the working kernel module (vexfs_v2)
 2. Archive older versions
 3. Consolidate functionality
 4. Clean up build system

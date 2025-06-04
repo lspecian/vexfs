@@ -317,8 +317,60 @@ cleanup:
 /*
  * Main k-NN search function
  */
+/**
+ * vexfs_v2_search_knn - Perform k-nearest neighbor search (standardized API)
+ * @file: File pointer for the VexFS file
+ * @query: k-NN query parameters
+ * @results: Output array for search results
+ * @result_count: Output parameter for number of results found
+ *
+ * Performs k-nearest neighbor search using the configured index.
+ * This is the standardized API function that replaces vexfs_knn_search.
+ *
+ * Return: 0 on success, negative error code on failure
+ */
+int vexfs_v2_search_knn(struct file *file, const struct vexfs_knn_query *query,
+                       struct vexfs_search_result *results, uint32_t *result_count)
+{
+    struct vexfs_knn_query local_query;
+    
+    /* Validate input parameters */
+    if (!file || !query || !query->query_vector || !results || !result_count) {
+        return -EINVAL;
+    }
+    
+    if (query->dimensions == 0 || query->k == 0) {
+        return -EINVAL;
+    }
+    
+    /* Copy query to local structure for compatibility with existing implementation */
+    memcpy(&local_query, query, sizeof(struct vexfs_knn_query));
+    local_query.results = results;
+    
+    /* For now, use brute force search
+     * TODO: Implement indexed search (HNSW, LSH, etc.)
+     */
+    int ret = vexfs_brute_force_knn(file, &local_query);
+    if (ret == 0) {
+        *result_count = local_query.results_found;
+    }
+    
+    return ret;
+}
+
+/**
+ * vexfs_knn_search - Legacy API wrapper (deprecated)
+ * @file: File pointer for the VexFS file
+ * @query: k-NN query parameters
+ *
+ * Legacy wrapper for backward compatibility. Use vexfs_v2_search_knn instead.
+ *
+ * Return: 0 on success, negative error code on failure
+ */
 int vexfs_knn_search(struct file *file, struct vexfs_knn_query *query)
 {
+    uint32_t result_count;
+    
     /* Validate input parameters */
     if (!query || !query->query_vector || !query->results) {
         return -EINVAL;
@@ -328,56 +380,131 @@ int vexfs_knn_search(struct file *file, struct vexfs_knn_query *query)
         return -EINVAL;
     }
     
-    /* For now, use brute force search
-     * TODO: Implement indexed search (HNSW, LSH, etc.)
-     */
-    return vexfs_brute_force_knn(file, query);
+    /* Call standardized API */
+    return vexfs_v2_search_knn(file, query, query->results, &result_count);
 }
 
-/*
- * Range search implementation
+/**
+ * vexfs_v2_search_range - Perform range search within distance threshold (standardized API)
+ * @file: File pointer for the VexFS file
+ * @query: Range query parameters
+ * @results: Output array for search results
+ * @result_count: Output parameter for number of results found
+ *
+ * Finds all vectors within a specified distance threshold.
+ * This is the standardized API function that replaces vexfs_range_search.
+ *
+ * Return: 0 on success, negative error code on failure
  */
-int vexfs_range_search(struct file *file, struct vexfs_range_query *query)
+int vexfs_v2_search_range(struct file *file, const struct vexfs_range_query *query,
+                         struct vexfs_search_result *results, uint32_t *result_count)
 {
+    /* Validate input parameters */
+    if (!file || !query || !query->query_vector || !results || !result_count) {
+        return -EINVAL;
+    }
+    
+    if (query->dimensions == 0 || query->max_results == 0) {
+        return -EINVAL;
+    }
+    
     /* TODO: Implement range search
      * Similar to k-NN but with distance threshold instead of k limit
      */
+    *result_count = 0;
     return -ENOSYS;  /* Not implemented yet */
 }
 
-/*
- * Batch search implementation
+/**
+ * vexfs_range_search - Legacy API wrapper (deprecated)
+ * @file: File pointer for the VexFS file
+ * @query: Range query parameters
+ *
+ * Legacy wrapper for backward compatibility. Use vexfs_v2_search_range instead.
+ *
+ * Return: 0 on success, negative error code on failure
  */
-int vexfs_batch_search(struct file *file, struct vexfs_batch_search *batch)
+int vexfs_range_search(struct file *file, struct vexfs_range_query *query)
+{
+    uint32_t result_count;
+    
+    if (!query || !query->results) {
+        return -EINVAL;
+    }
+    
+    /* Call standardized API */
+    int ret = vexfs_v2_search_range(file, query, query->results, &result_count);
+    if (ret == 0) {
+        query->results_found = result_count;
+    }
+    
+    return ret;
+}
+
+/**
+ * vexfs_v2_search_batch - Perform batch search operations (standardized API)
+ * @file: File pointer for the VexFS file
+ * @batch: Batch search parameters
+ *
+ * Performs multiple search operations in a single call for improved performance.
+ * This is the standardized API function that replaces vexfs_batch_search.
+ *
+ * Return: 0 on success, negative error code on failure
+ */
+int vexfs_v2_search_batch(struct file *file, const struct vexfs_batch_search *batch)
 {
     __u32 i;
     int ret = 0;
     ktime_t start_time, end_time;
+    struct vexfs_batch_search *local_batch;
     
-    if (!batch || !batch->queries) {
+    /* Validate input parameters */
+    if (!file || !batch || !batch->queries) {
         return -EINVAL;
     }
     
+    if (batch->query_count == 0) {
+        return -EINVAL;
+    }
+    
+    /* Create local copy for modification */
+    local_batch = (struct vexfs_batch_search *)batch;
+    
     start_time = ktime_get();
-    batch->successful_queries = 0;
-    batch->failed_queries = 0;
+    local_batch->successful_queries = 0;
+    local_batch->failed_queries = 0;
     
     /* Process each query sequentially
      * TODO: Implement parallel processing
      */
     for (i = 0; i < batch->query_count; i++) {
-        ret = vexfs_knn_search(file, &batch->queries[i]);
+        ret = vexfs_knn_search(file, &local_batch->queries[i]);
         if (ret == 0) {
-            batch->successful_queries++;
+            local_batch->successful_queries++;
         } else {
-            batch->failed_queries++;
+            local_batch->failed_queries++;
         }
     }
     
     end_time = ktime_get();
-    batch->total_search_time_ns = ktime_to_ns(ktime_sub(end_time, start_time));
+    local_batch->total_search_time_ns = ktime_to_ns(ktime_sub(end_time, start_time));
     
-    return (batch->successful_queries > 0) ? 0 : ret;
+    return (local_batch->successful_queries > 0) ? 0 : ret;
+}
+
+/**
+ * vexfs_batch_search - Legacy API wrapper (deprecated)
+ * @file: File pointer for the VexFS file
+ * @batch: Batch search parameters
+ *
+ * Legacy wrapper for backward compatibility. Use vexfs_v2_search_batch instead.
+ *
+ * Return: 0 on success, negative error code on failure
+ */
+int vexfs_batch_search(struct file *file, struct vexfs_batch_search *batch)
+{
+    /* Call standardized API */
+    return vexfs_v2_search_batch(file, batch);
 }
 
 /*
