@@ -8,7 +8,8 @@
 #include <time.h>
 #include <linux/types.h>
 
-/* Include the search header for Phase 2 functionality */
+/* Include the UAPI header for integer-based interface */
+#include "vexfs_v2_uapi.h"
 #include "vexfs_v2_search.h"
 
 void print_test_header(const char *test_name) {
@@ -55,7 +56,17 @@ int test_vector_insertion(int fd) {
     };
     __u64 ids[] = {1, 2, 3, 4, 5};
     
-    struct vexfs_batch_insert_request req = {5, 4, vectors, ids};
+    /* Convert float vectors to IEEE 754 bit representation */
+    uint32_t vector_bits[20];  /* 5 vectors * 4 dimensions */
+    vexfs_float_array_to_bits(vectors, vector_bits, 20);
+    
+    struct vexfs_batch_insert_request req = {
+        .vectors_bits = vector_bits,
+        .vector_count = 5,
+        .dimensions = 4,
+        .vector_ids = ids,
+        .flags = 0
+    };
     if (ioctl(fd, VEXFS_IOC_BATCH_INSERT, &req) != 0) {
         perror("❌ Failed to batch insert vectors");
         return -1;
@@ -72,8 +83,12 @@ int test_knn_search(int fd) {
     float query_vector[] = {1.1, 2.1, 3.1, 4.1};
     struct vexfs_search_result results[3];
     
+    /* Convert query vector to IEEE 754 bit representation */
+    uint32_t query_bits[4];
+    vexfs_float_array_to_bits(query_vector, query_bits, 4);
+    
     struct vexfs_knn_query knn_query = {
-        .query_vector = query_vector,
+        .query_vector = query_bits,
         .dimensions = 4,
         .k = 3,
         .distance_metric = 0, // Euclidean
@@ -103,10 +118,14 @@ int test_range_search(int fd) {
     float query_vector[] = {2.0, 3.0, 4.0, 5.0};
     struct vexfs_search_result results[10];
     
+    /* Convert query vector to IEEE 754 bit representation */
+    uint32_t range_query_bits[4];
+    vexfs_float_array_to_bits(query_vector, range_query_bits, 4);
+    
     struct vexfs_range_query range_query = {
-        .query_vector = query_vector,
+        .query_vector = range_query_bits,
         .dimensions = 4,
-        .max_distance = 1000, // Large range to catch nearby vectors
+        .max_distance = vexfs_float_to_bits(1000.0f), // Large range to catch nearby vectors
         .distance_metric = 0, // Euclidean
         .max_results = 10,
         .search_flags = 0,

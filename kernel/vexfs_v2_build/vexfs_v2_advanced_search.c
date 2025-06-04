@@ -24,6 +24,31 @@
 #include "vexfs_v2_phase3.h"
 #include "vexfs_v2_uapi.h"
 
+/* IEEE 754 conversion utilities for kernel space */
+static inline __u32 vexfs_ieee754_to_fixed(__u32 ieee754_bits)
+{
+    /* Extract IEEE 754 components */
+    __u32 sign = (ieee754_bits >> 31) & 0x1;
+    __u32 exponent = (ieee754_bits >> 23) & 0xFF;
+    __u32 mantissa = ieee754_bits & 0x7FFFFF;
+    
+    /* Handle special cases */
+    if (exponent == 0) return 0; /* Zero or denormal */
+    if (exponent == 0xFF) return 0x7FFFFFFF; /* Infinity or NaN */
+    
+    /* Convert to fixed-point (scale by 1000 for precision) */
+    __u32 value = (mantissa | 0x800000) >> 10; /* Add implicit 1 and scale */
+    __s32 exp_bias = (__s32)exponent - 127 - 13; /* Adjust for scaling */
+    
+    if (exp_bias > 0) {
+        value <<= exp_bias;
+    } else if (exp_bias < 0) {
+        value >>= (-exp_bias);
+    }
+    
+    return sign ? (~value + 1) : value; /* Apply sign */
+}
+
 /* Advanced search statistics - internal atomic counters */
 static struct {
     atomic64_t filtered_searches;
@@ -47,7 +72,7 @@ struct filter_context {
 
 /* Multi-vector search context */
 struct multi_search_context {
-    const float *query_vectors;
+    const uint32_t *query_vectors; /* IEEE 754 representation as uint32_t */
     uint32_t query_count;
     uint32_t dimensions;
     uint32_t k_per_query;
@@ -58,7 +83,7 @@ struct multi_search_context {
 
 /* Hybrid search context */
 struct hybrid_search_context {
-    const float *query_vector;
+    const uint32_t *query_vector; /* IEEE 754 representation as uint32_t */
     uint32_t dimensions;
     uint32_t k;
     uint32_t primary_metric;
@@ -222,9 +247,15 @@ static uint64_t calculate_distance_int(const int32_t *vec1, const int32_t *vec2,
             }
             
             if (norm1 > 0 && norm2 > 0) {
-                /* Approximate cosine distance */
-                distance = 1000000 - (uint64_t)((dot_product * 1000000) / 
-                          (int64_t)(norm1 * norm2 / 1000000));
+                /* Approximate cosine distance using integer arithmetic */
+                uint64_t numerator = (uint64_t)dot_product * 1000000ULL;
+                uint64_t denominator = ((uint64_t)norm1 * (uint64_t)norm2) / 1000000ULL;
+                if (denominator > 0) {
+                    uint64_t cosine_scaled = numerator / denominator;
+                    distance = (cosine_scaled < 1000000) ? (1000000 - cosine_scaled) : 0;
+                } else {
+                    distance = 1000000; /* Maximum distance */
+                }
             } else {
                 distance = 1000000; /* Maximum distance */
             }
@@ -300,8 +331,8 @@ int vexfs_filtered_search(const struct vexfs_filtered_search *request,
             
             /* Convert query vector to integer (avoid floating-point in kernel) */
             for (j = 0; j < request->dimensions; j++) {
-                /* Reinterpret float bits as int32 to avoid floating-point operations */
-                query_int[j] = *(int32_t*)&request->query_vector[j];
+                /* Convert IEEE 754 uint32_t to fixed-point using proper conversion */
+                query_int[j] = (__s32)vexfs_ieee754_to_fixed(request->query_vector_bits[j]);
             }
             
             uint64_t distance = calculate_distance_int(query_int, stored_vector,
@@ -357,7 +388,7 @@ int vexfs_multi_vector_search(const struct vexfs_multi_vector_search *request,
     
     /* Process each query vector */
     for (query_idx = 0; query_idx < request->query_count; query_idx++) {
-        const float *query = &request->query_vectors[query_idx * request->dimensions];
+        const uint32_t *query = (const uint32_t *)&request->query_vectors_bits[query_idx * request->dimensions];
         struct vexfs_search_result *query_results = 
             &results[query_idx * request->k_per_query];
         uint32_t found = 0;
@@ -372,9 +403,8 @@ int vexfs_multi_vector_search(const struct vexfs_multi_vector_search *request,
             
             /* Convert query vector to integer (avoid floating-point in kernel) */
             for (j = 0; j < request->dimensions; j++) {
-                /* Multiply by 1000 using integer arithmetic to avoid floating-point */
-                int32_t temp = *(int32_t*)&query[j]; /* Reinterpret float bits as int32 */
-                query_int[j] = temp; /* Use as-is for now, or implement proper conversion */
+                /* Convert IEEE 754 uint32_t to fixed-point using proper conversion */
+                query_int[j] = (__s32)vexfs_ieee754_to_fixed(query[j]);
             }
             
             uint64_t distance = calculate_distance_int(query_int, stored_vector,
@@ -437,8 +467,8 @@ int vexfs_hybrid_search(const struct vexfs_hybrid_search *request,
         
         /* Convert query vector to integer (avoid floating-point in kernel) */
         for (j = 0; j < request->dimensions; j++) {
-            /* Reinterpret float bits as int32 to avoid floating-point operations */
-            query_int[j] = *(int32_t*)&request->query_vector[j];
+            /* Convert IEEE 754 uint32_t to fixed-point using proper conversion */
+            query_int[j] = (__s32)vexfs_ieee754_to_fixed(request->query_vector_bits[j]);
         }
         
         /* Calculate distances using both metrics */

@@ -123,7 +123,7 @@ struct vexfs_hnsw_config {
     uint32_t ef_construction;          /* efConstruction parameter */
     uint32_t max_layers;               /* Maximum number of layers */
     uint32_t entry_point_search;       /* ef parameter for search */
-    float level_multiplier;            /* Level generation multiplier */
+    uint32_t level_multiplier_bits;    /* Level generation multiplier (IEEE 754 bits) */
     uint32_t reserved[4];
 } __packed;
 
@@ -132,7 +132,7 @@ struct vexfs_lsh_config {
     uint32_t num_hash_tables;          /* Number of hash tables */
     uint32_t num_hash_functions;       /* Hash functions per table */
     uint32_t bucket_size;              /* Target bucket size */
-    float hash_width;                  /* Hash function width */
+    uint32_t hash_width_bits;          /* Hash function width (IEEE 754 bits) */
     uint32_t reserved[4];
 } __packed;
 
@@ -161,9 +161,9 @@ struct vexfs_multi_vector_search {
     uint32_t k;                        /* Results per query */
     uint32_t k_per_query;              /* Results per individual query */
     uint32_t distance_metric;
-    float *query_vectors;              /* Array of query vectors */
+    uint32_t *query_vectors_bits;      /* Array of query vectors (IEEE 754 bits) */
     uint64_t *result_ids;              /* Output: vector IDs */
-    float *result_distances;           /* Output: distances */
+    uint32_t *result_distances_bits;   /* Output: distances (IEEE 754 bits) */
     uint32_t *result_counts;           /* Output: results per query */
     struct vexfs_search_result *results; /* Output: search results */
 } __packed;
@@ -173,7 +173,7 @@ struct vexfs_filtered_search {
     uint32_t dimensions;
     uint32_t k;
     uint32_t distance_metric;
-    float *query_vector;
+    uint32_t *query_vector_bits;       /* Query vector (IEEE 754 bits) */
     
     /* Filter criteria */
     uint32_t filter_count;
@@ -185,7 +185,7 @@ struct vexfs_filtered_search {
     
     /* Results */
     uint64_t *result_ids;
-    float *result_distances;
+    uint32_t *result_distances_bits;   /* Distances (IEEE 754 bits) */
     uint32_t result_count;
     struct vexfs_search_result *results; /* Output: search results */
 } __packed;
@@ -194,24 +194,24 @@ struct vexfs_filtered_search {
 struct vexfs_hybrid_search {
     /* Vector component */
     uint32_t dimensions;
-    float *query_vector;
-    float vector_weight;               /* 0.0 - 1.0 */
+    uint32_t *query_vector_bits;       /* Query vector (IEEE 754 bits) */
+    uint32_t vector_weight_bits;       /* 0.0 - 1.0 (IEEE 754 bits) */
     
     /* Keyword component */
     char keyword_query[256];
-    float keyword_weight;              /* 0.0 - 1.0 */
+    uint32_t keyword_weight_bits;      /* 0.0 - 1.0 (IEEE 754 bits) */
     
     /* Search parameters */
     uint32_t k;
     uint32_t distance_metric;
     uint32_t primary_metric;           /* Primary distance metric */
     uint32_t secondary_metric;         /* Secondary distance metric */
-    float primary_weight;              /* Primary metric weight */
-    float secondary_weight;            /* Secondary metric weight */
+    uint32_t primary_weight_bits;      /* Primary metric weight (IEEE 754 bits) */
+    uint32_t secondary_weight_bits;    /* Secondary metric weight (IEEE 754 bits) */
     
     /* Results */
     uint64_t *result_ids;
-    float *result_scores;              /* Combined scores */
+    uint32_t *result_scores_bits;      /* Combined scores (IEEE 754 bits) */
     uint32_t result_count;
     struct vexfs_search_result *results; /* Output: search results */
 } __packed;
@@ -305,9 +305,9 @@ int vexfs_advanced_search_init(void);
 void vexfs_advanced_search_exit(void);
 
 /* Index Management */
-int vexfs_index_insert_vector(vexfs_index_type_t index_type, uint64_t vector_id, float *vector, uint32_t dimensions);
+int vexfs_index_insert_vector(vexfs_index_type_t index_type, uint64_t vector_id, uint32_t *vector_bits, uint32_t dimensions);
 int vexfs_index_remove_vector(vexfs_index_type_t index_type, uint64_t vector_id);
-int vexfs_index_update_vector(vexfs_index_type_t index_type, uint64_t vector_id, float *new_vector, uint32_t dimensions);
+int vexfs_index_update_vector(vexfs_index_type_t index_type, uint64_t vector_id, uint32_t *new_vector_bits, uint32_t dimensions);
 
 /* Performance Monitoring */
 struct vexfs_phase3_stats {

@@ -1,0 +1,30 @@
+{
+  "name": "vexfs-dev-cli",
+  "version": "1.0.0",
+  "description": "VexFS Developer CLI Tool",
+  "main": "vexfs-dev-cli.js",
+  "bin": {
+    "vexfs-cli": "./vexfs-dev-cli.js"
+  },
+  "scripts": {
+    "build": "tsc vexfs-dev-cli.ts --outDir dist --target es2020 --module commonjs --esModuleInterop true --strict true",
+    "start": "node dist/vexfs-dev-cli.js"
+  },
+  "dependencies": {
+    "commander": "^9.4.1",
+    "node-fetch": "^2.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "typescript": "^4.8.0"
+  },
+  "keywords": [
+    "vexfs",
+    "vector",
+    "filesystem",
+    "ai",
+    "cli"
+  ],
+  "author": "VexFS Team",
+  "license": "Apache-2.0"
+}

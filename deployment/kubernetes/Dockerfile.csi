@@ -1,0 +1,83 @@
+# VexFS CSI Driver Dockerfile
+# Multi-stage build for VexFS Container Storage Interface driver
+
+# Build stage
+FROM golang:1.21-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache \
+    git \
+    make \
+    gcc \
+    musl-dev \
+    linux-headers
+
+# Set working directory
+WORKDIR /build
+
+# Copy CSI driver source
+COPY csi/ ./csi/
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Build the CSI driver
+RUN CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-extldflags "-static"' -o vexfs-csi ./csi/cmd/
+
+# Runtime stage
+FROM alpine:3.18
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    util-linux \
+    e2fsprogs \
+    xfsprogs \
+    ca-certificates \
+    kmod
+
+# Create necessary directories
+RUN mkdir -p /var/lib/kubelet/plugins \
+    && mkdir -p /var/lib/kubelet/plugins_registry \
+    && mkdir -p /csi \
+    && mkdir -p /lib/modules
+
+# Copy the CSI driver binary
+COPY --from=builder /build/vexfs-csi /bin/vexfs-csi
+
+# Copy VexFS kernel module (if available)
+RUN if [ -f /build/vexfs_v2_phase3.ko ]; then cp /build/vexfs_v2_phase3.ko /lib/modules/; fi
+
+# Copy helper scripts
+COPY scripts/mount-vexfs.sh /bin/mount-vexfs.sh
+COPY scripts/umount-vexfs.sh /bin/umount-vexfs.sh
+
+# Make scripts executable
+RUN chmod +x /bin/mount-vexfs.sh /bin/umount-vexfs.sh /bin/vexfs-csi
+
+# Create non-root user for security
+RUN addgroup -g 1000 vexfs && \
+    adduser -D -u 1000 -G vexfs vexfs
+
+# Set up proper permissions
+RUN chown -R vexfs:vexfs /csi
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD /bin/vexfs-csi --version || exit 1
+
+# Labels for metadata
+LABEL maintainer="VexFS Team <dev@vexfs.org>" \
+      version="1.0.0" \
+      description="VexFS Container Storage Interface (CSI) Driver" \
+      org.opencontainers.image.title="VexFS CSI Driver" \
+      org.opencontainers.image.description="Kubernetes CSI driver for VexFS vector filesystem" \
+      org.opencontainers.image.version="1.0.0" \
+      org.opencontainers.image.vendor="VexFS Project" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
+# Switch to non-root user
+USER vexfs
+
+# Set entrypoint
+ENTRYPOINT ["/bin/vexfs-csi"]

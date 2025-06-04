@@ -30,6 +30,31 @@
 #include "vexfs_v2_phase3.h"
 #endif
 
+/* IEEE 754 conversion utilities for kernel space */
+static inline __u32 vexfs_ieee754_to_fixed(__u32 ieee754_bits)
+{
+    /* Extract IEEE 754 components */
+    __u32 sign = (ieee754_bits >> 31) & 0x1;
+    __u32 exponent = (ieee754_bits >> 23) & 0xFF;
+    __u32 mantissa = ieee754_bits & 0x7FFFFF;
+    
+    /* Handle special cases */
+    if (exponent == 0) return 0; /* Zero or denormal */
+    if (exponent == 0xFF) return 0x7FFFFFFF; /* Infinity or NaN */
+    
+    /* Convert to fixed-point (scale by 1000 for precision) */
+    __u32 value = (mantissa | 0x800000) >> 10; /* Add implicit 1 and scale */
+    __s32 exp_bias = (__s32)exponent - 127 - 13; /* Adjust for scaling */
+    
+    if (exp_bias > 0) {
+        value <<= exp_bias;
+    } else if (exp_bias < 0) {
+        value >>= (-exp_bias);
+    }
+    
+    return sign ? (~value + 1) : value; /* Apply sign */
+}
+
 /* LSH Configuration Constants */
 #define LSH_MAX_HASH_FUNCTIONS 64
 #define LSH_MAX_HASH_TABLES 32
@@ -196,8 +221,8 @@ static int lsh_random_projection_hash(struct lsh_random_projection *rp,
     /* Compute dot product with projection vector using integer arithmetic */
     /* Use union to avoid floating-point arithmetic */
     for (i = 0; i < dimensions; i++) {
-        /* Use pointer casting to avoid floating-point operations */
-        uint32_t vec_bits = *(const uint32_t*)&vector[i];
+        /* Use proper IEEE 754 conversion instead of unsafe pointer casting */
+        uint32_t vec_bits = vector[i]; /* Already uint32_t IEEE 754 representation */
         /* Simple approximation: use the raw bits shifted for scaling */
         int32_t vec_scaled = (int32_t)(vec_bits >> 16); /* Rough scaling */
         
@@ -260,16 +285,16 @@ static uint32_t lsh_compute_hash(struct lsh_hash_function *func, const uint32_t 
         /* MinHash implementation would go here */
         /* For now, return simple hash using union to avoid floating-point */
         {
-            /* Use pointer casting to avoid floating-point operations */
-            uint32_t vec_bits = *(const uint32_t*)&vector[0];
+            /* Use proper IEEE 754 representation instead of unsafe pointer casting */
+            uint32_t vec_bits = vector[0]; /* Already uint32_t IEEE 754 representation */
             return hash_32(vec_bits, 32);
         }
         
     case LSH_P_STABLE:
         /* P-stable hash implementation would go here */
         {
-            /* Use pointer casting to avoid floating-point operations */
-            uint32_t vec_bits = *(const uint32_t*)&vector[0];
+            /* Use proper IEEE 754 representation instead of unsafe pointer casting */
+            uint32_t vec_bits = vector[0]; /* Already uint32_t IEEE 754 representation */
             return hash_32(vec_bits, 32);
         }
         

@@ -127,3 +127,34 @@ venv_fuse_test/
 # VM images directory
 tests/vm_images/
 
+
+# Build artifacts and packages that should not be committed
+*.tar.gz
+vexfs-developer-package-*.tar.gz
+bindings/typescript/vexfs-sdk-*.tgz
+
+# Developer package directory (should be generated, not committed)
+developer-package/
+
+# Build scripts (should be in scripts/ directory)
+build_developer_package.sh
+build_final_package.sh
+
+# Test binaries and artifacts
+test_phase3_basic
+PHASE3_TESTING_SUMMARY.md
+# Python virtual environments
+venv_fuse_test/
+
+# Rust build artifacts (vexctl)
+vexctl/target/
+
+# Test data (should be generated, not committed)
+test_data/
+
+# External integration projects (should be separate repos)
+vexfs-auto-ingest/
+vexfs-qdrant-adapter/
+
+# Root level test files (should be in appropriate test directories)
+test_phase3_basic.c

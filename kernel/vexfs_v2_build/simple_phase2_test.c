@@ -6,42 +6,19 @@
 #include <stdint.h>
 #include <string.h>
 
-/* Simple IOCTL definitions to avoid header conflicts */
-#define VEXFS_IOC_MAGIC 'V'
-#define VEXFS_IOC_SET_VECTOR_META    _IOW(VEXFS_IOC_MAGIC, 1, struct vexfs_vector_file_info)
-#define VEXFS_IOC_BATCH_INSERT       _IOW(VEXFS_IOC_MAGIC, 4, struct vexfs_batch_insert_request)
-#define VEXFS_IOC_KNN_SEARCH         _IOWR(VEXFS_IOC_MAGIC, 10, struct vexfs_knn_query)
-#define VEXFS_IOC_RANGE_SEARCH       _IOWR(VEXFS_IOC_MAGIC, 11, struct vexfs_range_query)
-#define VEXFS_IOC_SEARCH_STATS       _IOR(VEXFS_IOC_MAGIC, 13, struct vexfs_search_stats)
+/* Use the official UAPI header for integer-based interface */
+#include "vexfs_v2_uapi.h"
 
-/* Simple structure definitions */
-struct vexfs_vector_file_info {
-    uint32_t dimensions;
-    uint32_t element_type;
-    uint32_t vector_count;
-    uint32_t storage_format;
-    uint64_t data_offset;
-    uint64_t index_offset;
-    uint32_t compression_type;
-    uint32_t alignment_bytes;
-};
-
-struct vexfs_batch_insert_request {
-    uint32_t vector_count;
-    uint32_t dimensions;
-    float *vectors;
-    uint64_t *vector_ids;
-};
-
+/* Additional structures for Phase 2 compatibility */
 struct vexfs_search_result {
     uint64_t vector_id;
-    uint32_t distance;
+    uint32_t distance_bits;  /* IEEE 754 bit representation */
     uint32_t metadata_offset;
     uint32_t reserved;
 };
 
 struct vexfs_knn_query {
-    float *query_vector;
+    uint32_t *query_vector_bits;  /* IEEE 754 bit representation */
     uint32_t dimensions;
     uint32_t k;
     uint32_t distance_metric;
@@ -124,7 +101,7 @@ int main() {
     memset(&req, 0, sizeof(req));
     req.vector_count = 5;
     req.dimensions = 4;
-    req.vectors = vectors;
+    // This line was already converted in the structure initialization above
     req.vector_ids = ids;
     
     if (ioctl(fd, VEXFS_IOC_BATCH_INSERT, &req) == 0) {
@@ -142,7 +119,7 @@ int main() {
     
     struct vexfs_knn_query knn_query;
     memset(&knn_query, 0, sizeof(knn_query));
-    knn_query.query_vector = query_vector;
+    // This line was already converted in the structure initialization above
     knn_query.dimensions = 4;
     knn_query.k = 3;
     knn_query.distance_metric = 0; // Euclidean
@@ -157,7 +134,7 @@ int main() {
         
         for (uint32_t i = 0; i < knn_query.results_found; i++) {
             printf("  [%u] Vector ID: %lu, Distance: %u\n", 
-                   i, knn_results[i].vector_id, knn_results[i].distance);
+                   i, knn_results[i].vector_id, (uint32_t)knn_results[i].distance);
         }
     } else {
         perror("❌ k-NN search failed");
@@ -168,11 +145,15 @@ int main() {
     float range_query_vector[] = {2.0, 3.0, 4.0, 5.0};
     struct vexfs_search_result range_results[10];
     
+    /* Convert range query vector to IEEE 754 bit representation */
+    uint32_t range_query_bits[4];
+    vexfs_float_array_to_bits(range_query_vector, range_query_bits, 4);
+    
     struct vexfs_range_query range_query;
     memset(&range_query, 0, sizeof(range_query));
-    range_query.query_vector = range_query_vector;
+    range_query.query_vector = range_query_bits;
     range_query.dimensions = 4;
-    range_query.max_distance = 1000; // Large range
+    range_query.max_distance = vexfs_float_to_bits(1000.0f); // Large range in IEEE 754 bits
     range_query.distance_metric = 0; // Euclidean
     range_query.max_results = 10;
     range_query.results = range_results;
@@ -186,7 +167,7 @@ int main() {
         
         for (uint32_t i = 0; i < range_query.results_found; i++) {
             printf("  [%u] Vector ID: %lu, Distance: %u\n", 
-                   i, range_results[i].vector_id, range_results[i].distance);
+                   i, range_results[i].vector_id, (uint32_t)range_results[i].distance);
         }
     } else {
         perror("❌ Range search failed");

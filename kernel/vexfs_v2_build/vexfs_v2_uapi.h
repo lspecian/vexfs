@@ -102,37 +102,43 @@ struct vexfs_vector_file_info {
 
 /*
  * Vector Search Request Structure
- * 
+ *
  * This structure defines a vector similarity search request.
  * Used for finding k-nearest neighbors.
- * 
+ *
+ * KERNEL COMPATIBILITY: Uses uint32_t for IEEE 754 bit representation
+ * to avoid floating-point operations in kernel space.
+ *
  * Size: 40 bytes (validated)
  */
 struct vexfs_vector_search_request {
-    float    *query_vector;  /* Input: Query vector data */
-    __u32     dimensions;    /* Vector dimensions */
-    __u32     k;             /* Number of nearest neighbors to find */
-    __u32     search_type;   /* Search algorithm (VEXFS_SEARCH_*) */
-    float    *results;       /* Output: Distance scores */
-    __u64    *result_ids;    /* Output: Vector IDs of results */
-    __u32     result_count;  /* Output: Actual number of results found */
+    __u32    *query_vector_bits;  /* Input: Query vector data (IEEE 754 bits) */
+    __u32     dimensions;         /* Vector dimensions */
+    __u32     k;                  /* Number of nearest neighbors to find */
+    __u32     search_type;        /* Search algorithm (VEXFS_SEARCH_*) */
+    __u32    *results_bits;       /* Output: Distance scores (IEEE 754 bits) */
+    __u64    *result_ids;         /* Output: Vector IDs of results */
+    __u32     result_count;       /* Output: Actual number of results found */
 };
 
 /*
  * Batch Insert Request Structure
- * 
+ *
  * CRITICAL: This structure layout has been validated through extensive testing.
  * The field order MUST match the kernel module exactly:
  * 1. vectors (pointer)
  * 2. vector_count (32-bit)
- * 3. dimensions (32-bit) 
+ * 3. dimensions (32-bit)
  * 4. vector_ids (pointer)
  * 5. flags (32-bit)
- * 
+ *
+ * KERNEL COMPATIBILITY: Uses uint32_t for IEEE 754 bit representation
+ * to avoid floating-point operations in kernel space.
+ *
  * Total size: 32 bytes (validated with working tests)
  */
 struct vexfs_batch_insert_request {
-    float    *vectors;       /* Input: Vector data array */
+    __u32    *vectors_bits;  /* Input: Vector data array (IEEE 754 bits) */
     __u32     vector_count;  /* Number of vectors to insert */
     __u32     dimensions;    /* Vector dimensions */
     __u64    *vector_ids;    /* Optional: Custom vector IDs */
@@ -181,9 +187,9 @@ _Static_assert(sizeof(struct vexfs_batch_insert_request) == VEXFS_BATCH_INSERT_R
  * Helper Macros for Common Operations
  */
 
-/* Calculate vector data size in bytes */
+/* Calculate vector data size in bytes (using uint32_t for IEEE 754 bits) */
 #define VEXFS_VECTOR_DATA_SIZE(dimensions, count) \
-    ((dimensions) * (count) * sizeof(float))
+    ((dimensions) * (count) * sizeof(__u32))
 
 /* Calculate vector ID array size in bytes */
 #define VEXFS_VECTOR_ID_SIZE(count) \
@@ -205,5 +211,49 @@ _Static_assert(sizeof(struct vexfs_batch_insert_request) == VEXFS_BATCH_INSERT_R
 #define VEXFS_E_INVALID_TYPE        1003
 #define VEXFS_E_SIMD_UNAVAILABLE    1004
 #define VEXFS_E_MEMORY_ALIGNMENT    1005
+
+/*
+ * Userspace Conversion Utilities for IEEE 754 Bit Representation
+ *
+ * These utilities allow userspace applications to convert between
+ * float values and their IEEE 754 bit representation for kernel
+ * compatibility.
+ */
+#ifndef __KERNEL__
+#include <stdint.h>
+
+/* Convert float to IEEE 754 bit representation */
+static inline uint32_t vexfs_float_to_bits(float f) {
+    union { float f; uint32_t bits; } u = { .f = f };
+    return u.bits;
+}
+
+/* Convert IEEE 754 bit representation to float */
+static inline float vexfs_bits_to_float(uint32_t bits) {
+    union { uint32_t bits; float f; } u = { .bits = bits };
+    return u.f;
+}
+
+/* Convert float array to bit array */
+static inline void vexfs_float_array_to_bits(const float *floats, uint32_t *bits, uint32_t count) {
+    uint32_t i;
+    for (i = 0; i < count; i++) {
+        bits[i] = vexfs_float_to_bits(floats[i]);
+    }
+}
+
+/* Convert bit array to float array */
+static inline void vexfs_bits_array_to_float(const uint32_t *bits, float *floats, uint32_t count) {
+    uint32_t i;
+    for (i = 0; i < count; i++) {
+        floats[i] = vexfs_bits_to_float(bits[i]);
+    }
+}
+
+/* Helper macros for common conversions */
+#define VEXFS_FLOAT_TO_BITS(f) vexfs_float_to_bits(f)
+#define VEXFS_BITS_TO_FLOAT(b) vexfs_bits_to_float(b)
+
+#endif /* !__KERNEL__ */
 
 #endif /* _VEXFS_V2_UAPI_H */
