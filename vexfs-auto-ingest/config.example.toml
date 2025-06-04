@@ -1,0 +1,101 @@
+# VexFS Auto-Ingestion Configuration Example
+# Copy this file to /etc/vexfs/config.toml or ~/.config/vexfs/config.toml
+
+[auto_ingest]
+# Enable/disable auto-ingestion
+enabled = false
+
+# Paths to watch for file changes
+watch_paths = ["/mnt/vexfs", "/home/user/documents"]
+
+# File patterns to include (glob patterns)
+include_patterns = [
+    "*.txt",
+    "*.md", 
+    "*.pdf",
+    "*.doc",
+    "*.docx",
+    "*.json",
+    "*.csv"
+]
+
+# File patterns to exclude (glob patterns)
+exclude_patterns = [
+    "*.vxvec",      # Embedding sidecar files
+    "*.tmp",        # Temporary files
+    "*.log",        # Log files
+    ".git/*",       # Git repository files
+    ".vexfsignore"  # Ignore files
+]
+
+# Maximum file size to process (in bytes)
+max_file_size = 10485760  # 10MB
+
+# Debounce delay in milliseconds (wait time after file change)
+debounce_ms = 1000
+
+# Batch processing size
+batch_size = 10
+
+[providers]
+# Default provider to use for embeddings
+default_provider = "ollama"
+
+[providers.openai]
+# Enable OpenAI provider
+enabled = false
+
+# OpenAI API key (can also be set via OPENAI_API_KEY environment variable)
+# api_key = "sk-..."
+
+# Model to use for embeddings
+model = "text-embedding-3-small"
+
+# Custom base URL (optional, defaults to OpenAI's API)
+# base_url = "https://api.openai.com/v1"
+
+# Request timeout in seconds
+timeout_seconds = 30
+
+# Maximum retry attempts
+max_retries = 3
+
+[providers.ollama]
+# Enable Ollama provider
+enabled = true
+
+# Ollama base URL
+base_url = "http://localhost:11434"
+
+# Model to use for embeddings
+model = "nomic-embed-text"
+
+# Request timeout in seconds
+timeout_seconds = 60
+
+# Maximum retry attempts
+max_retries = 3
+
+[storage]
+# Storage method for embeddings
+# Options: "Sidecar", "ExtendedAttributes", "VexFSNative"
+method = "Sidecar"
+
+# Sidecar file extension
+sidecar_extension = "vxvec"
+
+# Use extended attributes if available (Linux only)
+use_xattr = false
+
+# Compress stored embeddings
+compress = true
+
+[logging]
+# Log level: "trace", "debug", "info", "warn", "error"
+level = "info"
+
+# Log file path (optional, logs to stdout if not specified)
+# file = "/var/log/vexfs-auto-ingest.log"
+
+# Use JSON format for logs
+json_format = false

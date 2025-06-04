@@ -153,8 +153,8 @@ vexctl/target/
 test_data/
 
 # External integration projects (should be separate repos)
-vexfs-auto-ingest/
-vexfs-qdrant-adapter/
+# vexfs-auto-ingest/
+# vexfs-qdrant-adapter/
 
 # Root level test files (should be in appropriate test directories)
 test_phase3_basic.c

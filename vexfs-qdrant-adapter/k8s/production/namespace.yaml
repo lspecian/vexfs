@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vexfs-qdrant-adapter
+  labels:
+    name: vexfs-qdrant-adapter
+    environment: production
+    app.kubernetes.io/name: vexfs-qdrant-adapter
+    app.kubernetes.io/version: "2.0.0-phase4"
+    app.kubernetes.io/component: vector-database
+    app.kubernetes.io/part-of: vexfs-ecosystem
+  annotations:
+    description: "VexFS v2 Qdrant Adapter - Production Vector Database"
+    contact: "vexfs-team@example.com"
+    documentation: "https://github.com/vexfs/vexfs-qdrant-adapter"
