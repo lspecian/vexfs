@@ -11,19 +11,7 @@
 /* Include the UAPI header for integer-based interface */
 #include "vexfs_v2_uapi.h"
 #include "vexfs_v2_search.h"
-
-void print_test_header(const char *test_name) {
-    printf("\n🔍 %s\n", test_name);
-    printf("================================================\n");
-}
-
-void print_search_results(struct vexfs_search_result *results, __u32 count) {
-    printf("📊 Search Results (%u found):\n", count);
-    for (__u32 i = 0; i < count; i++) {
-        printf("  [%u] Vector ID: %lu, Distance: %u\n", 
-               i, results[i].vector_id, results[i].distance);
-    }
-}
+#include "test_common.h"
 
 int test_vector_insertion(int fd) {
     print_test_header("Phase 1: Vector Insertion Test");
