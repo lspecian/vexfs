@@ -1,0 +1,250 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vexfs-qdrant-adapter
+  namespace: vexfs-qdrant-adapter
+  labels:
+    app: vexfs-qdrant-adapter
+    version: "2.0.0-phase4"
+    component: vector-database
+    tier: production
+  annotations:
+    deployment.kubernetes.io/revision: "1"
+    description: "VexFS v2 Qdrant Adapter - Production Deployment"
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: vexfs-qdrant-adapter
+      tier: production
+  template:
+    metadata:
+      labels:
+        app: vexfs-qdrant-adapter
+        version: "2.0.0-phase4"
+        component: vector-database
+        tier: production
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: vexfs-qdrant-adapter
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+      - name: vexfs-qdrant-adapter
+        image: vexfs/qdrant-adapter:2.0.0-phase4
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http-api
+          containerPort: 6333
+          protocol: TCP
+        - name: grpc-api
+          containerPort: 6334
+          protocol: TCP
+        - name: metrics
+          containerPort: 8080
+          protocol: TCP
+        env:
+        - name: ENVIRONMENT
+          value: "production"
+        - name: LOG_LEVEL
+          value: "INFO"
+        - name: API_HOST
+          value: "0.0.0.0"
+        - name: API_PORT
+          value: "6333"
+        - name: API_GRPC_PORT
+          value: "6334"
+        - name: METRICS_PORT
+          value: "8080"
+        - name: VEXFS_DEVICE
+          value: "/dev/vexfs_v2_phase4"
+        - name: MAX_CONCURRENT_REQUESTS
+          value: "1000"
+        - name: REQUEST_TIMEOUT
+          value: "30"
+        - name: MEMORY_LIMIT_MB
+          value: "2048"
+        - name: PHASE4_PERFORMANCE_MODE
+          value: "true"
+        - name: PHASE4_MONITORING_ENABLED
+          value: "true"
+        - name: PHASE4_METRICS_RETENTION_HOURS
+          value: "24"
+        envFrom:
+        - configMapRef:
+            name: vexfs-qdrant-adapter-config
+        - secretRef:
+            name: vexfs-qdrant-adapter-secrets
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+            ephemeral-storage: "1Gi"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+            ephemeral-storage: "10Gi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http-api
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http-api
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /startup
+            port: http-api
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 30
+        volumeMounts:
+        - name: vexfs-device
+          mountPath: /dev/vexfs_v2_phase4
+        - name: data-storage
+          mountPath: /data
+        - name: logs
+          mountPath: /var/log/vexfs
+        - name: config
+          mountPath: /etc/vexfs
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - NET_BIND_SERVICE
+      - name: metrics-exporter
+        image: vexfs/metrics-exporter:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: metrics-export
+          containerPort: 9090
+          protocol: TCP
+        env:
+        - name: VEXFS_ADAPTER_URL
+          value: "http://localhost:6333"
+        - name: EXPORT_INTERVAL
+          value: "15"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: metrics-export
+          initialDelaySeconds: 15
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: metrics-export
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: vexfs-device
+        hostPath:
+          path: /dev/vexfs_v2_phase4
+          type: CharDevice
+      - name: data-storage
+        persistentVolumeClaim:
+          claimName: vexfs-qdrant-adapter-data
+      - name: logs
+        emptyDir:
+          sizeLimit: 1Gi
+      - name: config
+        configMap:
+          name: vexfs-qdrant-adapter-config
+          defaultMode: 0644
+      - name: tmp
+        emptyDir:
+          sizeLimit: 500Mi
+      nodeSelector:
+        vexfs.io/kernel-module: "available"
+        kubernetes.io/arch: amd64
+      tolerations:
+      - key: "vexfs.io/specialized-node"
+        operator: "Equal"
+        value: "true"
+        effect: "NoSchedule"
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - vexfs-qdrant-adapter
+              topologyKey: kubernetes.io/hostname
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: vexfs.io/kernel-module
+                operator: In
+                values:
+                - available
+      terminationGracePeriodSeconds: 60
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vexfs-qdrant-adapter-data
+  namespace: vexfs-qdrant-adapter
+  labels:
+    app: vexfs-qdrant-adapter
+    component: storage
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: fast-ssd
+  volumeMode: Filesystem

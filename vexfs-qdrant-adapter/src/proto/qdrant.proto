@@ -1,0 +1,701 @@
+syntax = "proto3";
+
+package qdrant;
+
+import "google/protobuf/struct.proto";
+
+// Main Qdrant gRPC service definition
+service Qdrant {
+    // Collection management
+    rpc CreateCollection(CreateCollectionRequest) returns (CollectionOperationResponse);
+    rpc DeleteCollection(DeleteCollectionRequest) returns (CollectionOperationResponse);
+    rpc GetCollectionInfo(GetCollectionInfoRequest) returns (GetCollectionInfoResponse);
+    rpc ListCollections(ListCollectionsRequest) returns (ListCollectionsResponse);
+    rpc UpdateCollection(UpdateCollectionRequest) returns (CollectionOperationResponse);
+    
+    // Point operations
+    rpc UpsertPoints(UpsertPointsRequest) returns (PointsOperationResponse);
+    rpc DeletePoints(DeletePointsRequest) returns (PointsOperationResponse);
+    rpc GetPoints(GetPointsRequest) returns (GetPointsResponse);
+    rpc SearchPoints(SearchPointsRequest) returns (SearchResponse);
+    rpc SearchPointsBatch(SearchPointsBatchRequest) returns (SearchBatchResponse);
+    
+    // Streaming operations (Phase 2 focus)
+    rpc StreamSearchPoints(SearchPointsRequest) returns (stream SearchResponse);
+    rpc StreamUpsertPoints(stream UpsertPointsRequest) returns (PointsOperationResponse);
+    rpc StreamGetPoints(GetPointsRequest) returns (stream GetPointsResponse);
+    
+    // Additional operations
+    rpc Recommend(RecommendRequest) returns (RecommendResponse);
+    rpc Scroll(ScrollRequest) returns (ScrollResponse);
+    rpc CountPoints(CountPointsRequest) returns (CountResponse);
+}
+
+// Basic data types
+message PointId {
+    oneof point_id_options {
+        uint64 num = 1;
+        string uuid = 2;
+    }
+}
+
+message Vector {
+    repeated float data = 1;
+}
+
+message NamedVectors {
+    map<string, Vector> vectors = 1;
+}
+
+message Vectors {
+    oneof vectors_options {
+        Vector vector = 1;
+        NamedVectors named_vectors = 2;
+    }
+}
+
+message Point {
+    PointId id = 1;
+    Vectors vectors = 2;
+    google.protobuf.Struct payload = 3;
+}
+
+// Distance metrics
+enum Distance {
+    UNKNOWN_DISTANCE = 0;
+    COSINE = 1;
+    EUCLIDEAN = 2;
+    DOT = 3;
+}
+
+// Vector configuration
+message VectorParams {
+    uint64 size = 1;
+    Distance distance = 2;
+    optional HnswConfig hnsw_config = 3;
+    optional QuantizationConfig quantization_config = 4;
+    optional bool on_disk = 5;
+}
+
+message HnswConfig {
+    optional uint64 m = 1;
+    optional uint64 ef_construct = 2;
+    optional uint64 full_scan_threshold = 3;
+    optional uint64 max_indexing_threads = 4;
+    optional bool on_disk = 5;
+    optional uint64 payload_m = 6;
+}
+
+message QuantizationConfig {
+    oneof quantization {
+        ScalarQuantization scalar = 1;
+        ProductQuantization product = 2;
+        BinaryQuantization binary = 3;
+    }
+}
+
+message ScalarQuantization {
+    enum QuantizationType {
+        UNKNOWN_QUANTIZATION = 0;
+        INT8 = 1;
+    }
+    QuantizationType type = 1;
+    optional float quantile = 2;
+    optional bool always_ram = 3;
+}
+
+message ProductQuantization {
+    enum CompressionRatio {
+        UNKNOWN_COMPRESSION = 0;
+        X4 = 1;
+        X8 = 2;
+        X16 = 3;
+        X32 = 4;
+        X64 = 5;
+    }
+    CompressionRatio compression = 1;
+    optional bool always_ram = 2;
+}
+
+message BinaryQuantization {
+    optional bool always_ram = 1;
+}
+
+// Collection operations
+message CreateCollectionRequest {
+    string collection_name = 1;
+    oneof vectors_config {
+        VectorParams vectors = 4;
+        VectorsConfigMap vectors_config_map = 5;
+    }
+    optional uint32 shard_number = 6;
+    optional uint32 replication_factor = 7;
+    optional uint32 write_consistency_factor = 8;
+    optional bool on_disk_payload = 9;
+    optional uint64 timeout = 10;
+}
+
+message VectorsConfigMap {
+    map<string, VectorParams> vectors = 1;
+}
+
+message DeleteCollectionRequest {
+    string collection_name = 1;
+    optional uint64 timeout = 2;
+}
+
+message GetCollectionInfoRequest {
+    string collection_name = 1;
+}
+
+message ListCollectionsRequest {
+}
+
+message UpdateCollectionRequest {
+    string collection_name = 1;
+    optional OptimizerConfig optimizer_config = 2;
+    optional CollectionParams params = 3;
+    optional uint64 timeout = 4;
+}
+
+message CollectionParams {
+    optional uint32 replication_factor = 1;
+    optional uint32 write_consistency_factor = 2;
+    optional bool on_disk_payload = 3;
+}
+
+message OptimizerConfig {
+    optional double deleted_threshold = 1;
+    optional uint64 vacuum_min_vector_number = 2;
+    optional uint64 default_segment_number = 3;
+    optional uint64 max_segment_size = 4;
+    optional uint64 memmap_threshold = 5;
+    optional uint64 indexing_threshold = 6;
+    optional uint64 flush_interval_sec = 7;
+    optional uint64 max_optimization_threads = 8;
+}
+
+// Collection responses
+message CollectionOperationResponse {
+    bool result = 1;
+    double time = 2;
+}
+
+message CollectionInfo {
+    enum CollectionStatus {
+        UNKNOWN_COLLECTION_STATUS = 0;
+        GREEN = 1;
+        YELLOW = 2;
+        RED = 3;
+    }
+    
+    CollectionStatus status = 1;
+    enum OptimizerStatus {
+        UNKNOWN_OPTIMIZER_STATUS = 0;
+        OK = 1;
+        ERROR = 2;
+    }
+    OptimizerStatus optimizer_status = 2;
+    uint64 vectors_count = 3;
+    uint64 indexed_vectors_count = 4;
+    uint64 points_count = 5;
+    uint64 segments_count = 6;
+    CollectionConfig config = 7;
+    map<string, PayloadSchemaInfo> payload_schema = 8;
+}
+
+message CollectionConfig {
+    CollectionParams params = 1;
+    HnswConfig hnsw_config = 2;
+    OptimizerConfig optimizer_config = 3;
+    WalConfig wal_config = 4;
+    QuantizationConfig quantization_config = 5;
+}
+
+message WalConfig {
+    optional uint64 wal_capacity_mb = 1;
+    optional uint64 wal_segments_ahead = 2;
+}
+
+message PayloadSchemaInfo {
+    enum PayloadSchemaType {
+        UNKNOWN_TYPE = 0;
+        KEYWORD = 1;
+        INTEGER = 2;
+        FLOAT = 3;
+        GEO = 4;
+        TEXT = 5;
+        BOOL = 6;
+        DATETIME = 7;
+    }
+    PayloadSchemaType data_type = 1;
+    optional PayloadIndexInfo params = 2;
+    optional uint64 points = 3;
+}
+
+message PayloadIndexInfo {
+    oneof index_params {
+        TextIndexParams text_index_params = 1;
+        IntegerIndexParams integer_index_params = 2;
+    }
+}
+
+message TextIndexParams {
+    enum TokenizerType {
+        UNKNOWN_TOKENIZER = 0;
+        PREFIX = 1;
+        WHITESPACE = 2;
+        WORD = 3;
+        MULTILINGUAL = 4;
+    }
+    TokenizerType tokenizer = 1;
+    optional bool lowercase = 2;
+    optional uint64 min_token_len = 3;
+    optional uint64 max_token_len = 4;
+}
+
+message IntegerIndexParams {
+    optional bool lookup = 1;
+    optional bool range = 2;
+}
+
+message GetCollectionInfoResponse {
+    CollectionInfo result = 1;
+    double time = 2;
+}
+
+message CollectionDescription {
+    string name = 1;
+}
+
+message ListCollectionsResponse {
+    repeated CollectionDescription collections = 1;
+    double time = 2;
+}
+
+// Point operations
+message UpsertPointsRequest {
+    string collection_name = 1;
+    optional bool wait = 2;
+    repeated Point points = 3;
+    optional WriteOrdering ordering = 4;
+    optional ShardKeySelector shard_key_selector = 5;
+}
+
+message DeletePointsRequest {
+    string collection_name = 1;
+    optional bool wait = 2;
+    PointsSelector points = 3;
+    optional WriteOrdering ordering = 4;
+    optional ShardKeySelector shard_key_selector = 5;
+}
+
+message GetPointsRequest {
+    string collection_name = 1;
+    repeated PointId ids = 2;
+    optional WithPayloadSelector with_payload = 3;
+    optional WithVectorsSelector with_vectors = 4;
+    optional ReadConsistency read_consistency = 5;
+    optional ShardKeySelector shard_key_selector = 6;
+}
+
+message SearchPointsRequest {
+    string collection_name = 1;
+    repeated float vector = 2;
+    optional string vector_name = 3;
+    optional Filter filter = 4;
+    uint64 limit = 5;
+    optional WithPayloadSelector with_payload = 6;
+    optional SearchParams params = 7;
+    optional float score_threshold = 8;
+    optional uint64 offset = 9;
+    optional WithVectorsSelector with_vectors = 10;
+    optional ReadConsistency read_consistency = 11;
+    optional ShardKeySelector shard_key_selector = 12;
+    optional LookupLocation lookup_from = 13;
+}
+
+message SearchPointsBatchRequest {
+    string collection_name = 1;
+    repeated SearchPoints search_points = 2;
+    optional ReadConsistency read_consistency = 3;
+    optional uint64 timeout = 4;
+}
+
+message SearchPoints {
+    repeated float vector = 1;
+    optional string vector_name = 2;
+    optional Filter filter = 3;
+    uint64 limit = 4;
+    optional WithPayloadSelector with_payload = 5;
+    optional SearchParams params = 6;
+    optional float score_threshold = 7;
+    optional uint64 offset = 8;
+    optional WithVectorsSelector with_vectors = 9;
+    optional LookupLocation lookup_from = 10;
+}
+
+// Point responses
+message PointsOperationResponse {
+    UpdateResult result = 1;
+    double time = 2;
+}
+
+message UpdateResult {
+    optional uint64 operation_id = 1;
+    enum UpdateStatus {
+        UNKNOWN_UPDATE_STATUS = 0;
+        ACKNOWLEDGED = 1;
+        COMPLETED = 2;
+    }
+    UpdateStatus status = 2;
+}
+
+message ScoredPoint {
+    PointId id = 1;
+    google.protobuf.Struct payload = 2;
+    float score = 3;
+    optional Vectors vectors = 4;
+    optional uint64 version = 5;
+    optional ShardKey shard_key = 6;
+    optional string order_value = 7;
+}
+
+message SearchResponse {
+    repeated ScoredPoint result = 1;
+    double time = 2;
+}
+
+message SearchBatchResponse {
+    repeated BatchResult result = 1;
+    double time = 2;
+}
+
+message BatchResult {
+    repeated ScoredPoint result = 1;
+}
+
+message RetrievedPoint {
+    PointId id = 1;
+    google.protobuf.Struct payload = 2;
+    optional Vectors vectors = 3;
+    optional uint64 version = 4;
+    optional ShardKey shard_key = 5;
+    optional string order_value = 6;
+}
+
+message GetPointsResponse {
+    repeated RetrievedPoint result = 1;
+    double time = 2;
+}
+
+// Additional operations
+message RecommendRequest {
+    string collection_name = 1;
+    repeated PointId positive = 2;
+    repeated PointId negative = 3;
+    optional Filter filter = 4;
+    uint64 limit = 5;
+    optional WithPayloadSelector with_payload = 6;
+    optional SearchParams params = 7;
+    optional float score_threshold = 8;
+    optional uint64 offset = 9;
+    optional WithVectorsSelector with_vectors = 10;
+    optional string using = 11;
+    optional LookupLocation lookup_from = 12;
+    optional ReadConsistency read_consistency = 13;
+    optional RecommendStrategy strategy = 14;
+    optional ContextExamplePair positive_vectors = 15;
+    optional ContextExamplePair negative_vectors = 16;
+}
+
+message RecommendResponse {
+    repeated ScoredPoint result = 1;
+    double time = 2;
+}
+
+message ScrollRequest {
+    string collection_name = 1;
+    optional Filter filter = 2;
+    optional PointId offset = 3;
+    optional uint32 limit = 4;
+    optional WithPayloadSelector with_payload = 5;
+    optional WithVectorsSelector with_vectors = 6;
+    optional ReadConsistency read_consistency = 7;
+    optional ShardKeySelector shard_key_selector = 8;
+    optional OrderBy order_by = 9;
+}
+
+message ScrollResponse {
+    repeated RetrievedPoint result = 1;
+    optional PointId next_page_offset = 2;
+    double time = 3;
+}
+
+message CountPointsRequest {
+    string collection_name = 1;
+    optional Filter filter = 2;
+    optional bool exact = 3;
+    optional ReadConsistency read_consistency = 4;
+    optional ShardKeySelector shard_key_selector = 5;
+}
+
+message CountResponse {
+    uint64 result = 1;
+    double time = 2;
+}
+
+// Supporting types
+message Filter {
+    repeated Condition should = 1;
+    repeated Condition must = 2;
+    repeated Condition must_not = 3;
+    optional Filter min_should = 4;
+}
+
+message Condition {
+    oneof condition_one_of {
+        FieldCondition field = 1;
+        IsEmptyCondition is_empty = 2;
+        HasIdCondition has_id = 3;
+        Filter filter = 4;
+        IsNullCondition is_null = 5;
+        NestedCondition nested = 6;
+    }
+}
+
+message FieldCondition {
+    string key = 1;
+    Match match = 2;
+    optional Range range = 3;
+    optional GeoBoundingBox geo_bounding_box = 4;
+    optional GeoRadius geo_radius = 5;
+    optional GeoPolygon geo_polygon = 6;
+    optional ValuesCount values_count = 7;
+}
+
+message IsEmptyCondition {
+    string key = 1;
+}
+
+message IsNullCondition {
+    string key = 1;
+}
+
+message HasIdCondition {
+    repeated PointId has_id = 1;
+}
+
+message NestedCondition {
+    string key = 1;
+    Filter filter = 2;
+}
+
+message Match {
+    oneof match_value {
+        string keyword = 1;
+        int64 integer = 2;
+        bool boolean = 3;
+        string text = 4;
+        RepeatedStrings keywords = 5;
+        RepeatedIntegers integers = 6;
+        RepeatedBools booleans = 7;
+        AnyVariants any = 8;
+        RepeatedStrings except_keywords = 9;
+        RepeatedIntegers except_integers = 10;
+    }
+}
+
+message RepeatedStrings {
+    repeated string strings = 1;
+}
+
+message RepeatedIntegers {
+    repeated int64 integers = 1;
+}
+
+message RepeatedBools {
+    repeated bool bools = 1;
+}
+
+message AnyVariants {
+    repeated AnyVariant any = 1;
+}
+
+message AnyVariant {
+    oneof variant {
+        string keyword = 1;
+        int64 integer = 2;
+        bool boolean = 3;
+    }
+}
+
+message Range {
+    optional double lt = 1;
+    optional double gt = 2;
+    optional double gte = 3;
+    optional double lte = 4;
+}
+
+message GeoBoundingBox {
+    GeoPoint top_left = 1;
+    GeoPoint bottom_right = 2;
+}
+
+message GeoRadius {
+    GeoPoint center = 1;
+    double radius = 2;
+}
+
+message GeoPolygon {
+    GeoLineString exterior = 1;
+    repeated GeoLineString interiors = 2;
+}
+
+message GeoLineString {
+    repeated GeoPoint points = 1;
+}
+
+message GeoPoint {
+    double lon = 1;
+    double lat = 2;
+}
+
+message ValuesCount {
+    optional uint64 lt = 1;
+    optional uint64 gt = 2;
+    optional uint64 gte = 3;
+    optional uint64 lte = 4;
+}
+
+message PointsSelector {
+    oneof points_selector_one_of {
+        PointsIdsList points = 1;
+        Filter filter = 2;
+    }
+}
+
+message PointsIdsList {
+    repeated PointId ids = 1;
+}
+
+message WithPayloadSelector {
+    oneof selector_options {
+        bool enable = 1;
+        PayloadIncludeSelector include = 2;
+        PayloadExcludeSelector exclude = 3;
+    }
+}
+
+message PayloadIncludeSelector {
+    repeated string fields = 1;
+}
+
+message PayloadExcludeSelector {
+    repeated string fields = 1;
+}
+
+message WithVectorsSelector {
+    oneof selector_options {
+        bool enable = 1;
+        VectorsSelector include = 2;
+    }
+}
+
+message VectorsSelector {
+    repeated string names = 1;
+}
+
+message SearchParams {
+    optional HnswSearchParams hnsw_params = 1;
+    optional QuantizationSearchParams quantization = 2;
+    optional bool indexed_only = 3;
+}
+
+message HnswSearchParams {
+    optional uint64 ef = 1;
+}
+
+message QuantizationSearchParams {
+    optional bool ignore = 1;
+    optional bool rescore = 2;
+    optional double oversampling = 3;
+}
+
+message WriteOrdering {
+    enum WriteOrderingType {
+        WEAK = 0;
+        MEDIUM = 1;
+        STRONG = 2;
+    }
+    WriteOrderingType type = 1;
+}
+
+message ReadConsistency {
+    oneof value {
+        uint64 factor = 1;
+        ReadConsistencyType type = 2;
+    }
+}
+
+enum ReadConsistencyType {
+    ALL = 0;
+    MAJORITY = 1;
+    QUORUM = 2;
+}
+
+message ShardKeySelector {
+    repeated ShardKey shard_keys = 1;
+}
+
+message ShardKey {
+    oneof key {
+        string keyword = 1;
+        uint64 number = 2;
+    }
+}
+
+message LookupLocation {
+    string collection = 1;
+    optional string vector = 2;
+    optional ShardKeySelector shard_key_selector = 3;
+}
+
+message RecommendStrategy {
+    enum RecommendStrategyType {
+        AVERAGE_VECTOR = 0;
+        BEST_SCORE = 1;
+    }
+    RecommendStrategyType strategy = 1;
+}
+
+message ContextExamplePair {
+    repeated VectorExample positive = 1;
+    repeated VectorExample negative = 2;
+}
+
+message VectorExample {
+    oneof example {
+        PointId id = 1;
+        Vector vector = 2;
+    }
+}
+
+message OrderBy {
+    string key = 1;
+    optional Direction direction = 2;
+    optional OrderValue start_from = 3;
+}
+
+enum Direction {
+    ASC = 0;
+    DESC = 1;
+}
+
+message OrderValue {
+    oneof variant {
+        int64 int = 1;
+        double float = 2;
+        string string = 3;
+    }
+}
