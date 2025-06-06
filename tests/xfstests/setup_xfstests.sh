@@ -197,7 +197,7 @@ EOF
 create_device_setup() {
     echo "💾 Creating test device setup script..."
     
-    cat > "${SCRIPT_DIR}/setup_test_devices.sh" << 'EOF'
+    cat > "${SCRIPT_DIR}/setup_test_devices.sh" << 'DEVICE_SETUP_EOF'
 #!/bin/bash
 #
 # VexFS Test Device Setup Script
@@ -423,7 +423,7 @@ main() {
 }
 
 main "$@"
-EOF
+DEVICE_SETUP_EOF
 
     chmod +x "${SCRIPT_DIR}/setup_test_devices.sh"
     echo "✅ Test device setup script created"

@@ -1,0 +1,65 @@
+# Multi-stage build for VexFS Qdrant Adapter
+FROM rust:1.75-slim as builder
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy Cargo files
+COPY rust/Cargo.toml rust/Cargo.lock ./
+
+# Copy source code
+COPY rust/src ./src/
+COPY rust/tests ./tests/
+
+# Build the application with server features
+RUN cargo build --release --features server --bin vexfs_unified_server
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app user
+RUN useradd -r -s /bin/false vexfs
+
+# Create data directory
+RUN mkdir -p /data && chown vexfs:vexfs /data
+
+# Copy binary from builder stage
+COPY --from=builder /app/target/release/vexfs_unified_server /usr/local/bin/
+
+# Copy configuration files
+COPY docker/config/vexfs-qdrant.toml /etc/vexfs/config.toml
+
+# Set permissions
+RUN chmod +x /usr/local/bin/vexfs_unified_server
+
+# Switch to app user
+USER vexfs
+
+# Expose ports
+EXPOSE 6333 6334
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:6333/health || exit 1
+
+# Set environment variables
+ENV RUST_LOG=info
+ENV VEXFS_CONFIG_PATH=/etc/vexfs/config.toml
+ENV VEXFS_DATA_PATH=/data
+
+# Start the server
+CMD ["vexfs_unified_server", "--config", "/etc/vexfs/config.toml"]

@@ -1,0 +1,146 @@
+version: '3.8'
+
+services:
+  # VexFS Qdrant Adapter Service
+  vexfs-qdrant:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.vexfs-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - vexfs_data:/data
+      - ../rust:/app/rust:ro
+    environment:
+      - VEXFS_MODE=kernel
+      - RUST_LOG=info
+      - VEXFS_PERFORMANCE_MODE=true
+      - QDRANT_API_PORT=6333
+      - METRICS_PORT=6334
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      - prometheus
+    networks:
+      - vexfs-network
+
+  # VexFS Kernel Module Service (for direct kernel integration testing)
+  vexfs-kernel:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.vexfs-kernel
+    privileged: true
+    volumes:
+      - /lib/modules:/lib/modules:ro
+      - /dev:/dev
+      - vexfs_kernel_data:/mnt/vexfs
+    environment:
+      - VEXFS_KERNEL_MODE=true
+      - VEXFS_MOUNT_POINT=/mnt/vexfs
+    healthcheck:
+      test: ["CMD", "test", "-d", "/mnt/vexfs"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - vexfs-network
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:v2.40.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - vexfs-network
+
+  # Grafana for metrics visualization
+  grafana:
+    image: grafana/grafana:9.3.0
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    depends_on:
+      - prometheus
+    networks:
+      - vexfs-network
+
+  # Load testing service
+  load-tester:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.load-tester
+    volumes:
+      - ./load-test-results:/results
+    environment:
+      - TARGET_HOST=vexfs-qdrant
+      - TARGET_PORT=6333
+      - TEST_DURATION=300
+      - CONCURRENT_CLIENTS=16
+      - VECTOR_DIMENSIONS=384
+    depends_on:
+      - vexfs-qdrant
+    networks:
+      - vexfs-network
+    profiles:
+      - load-test
+
+  # Test runner service
+  test-runner:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.test-runner
+    volumes:
+      - ../rust:/app/rust:ro
+      - ./test-results:/results
+    environment:
+      - RUST_TEST_THREADS=8
+      - CARGO_TARGET_DIR=/tmp/target
+    command: >
+      sh -c "
+        cargo test --features server --release -- --nocapture &&
+        cargo test comprehensive_qdrant_test_suite_fixed --release -- --nocapture
+      "
+    depends_on:
+      - vexfs-qdrant
+    networks:
+      - vexfs-network
+    profiles:
+      - test
+
+volumes:
+  vexfs_data:
+    driver: local
+  vexfs_kernel_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  vexfs-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

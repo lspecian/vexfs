@@ -23,8 +23,8 @@
 //! This library provides both userspace and kernel functionality for VexFS.
 //! Kernel functionality is implemented via C FFI with the vexfs_module_entry.c file.
 
-#![cfg_attr(feature = "kernel", no_std)]
-#![cfg_attr(feature = "kernel", no_main)]
+#![cfg_attr(all(feature = "kernel", not(feature = "std")), no_std)]
+#![cfg_attr(all(feature = "kernel", not(feature = "std")), no_main)]
 
 // Conditional compilation for userspace vs kernel
 #[cfg(not(feature = "kernel"))]
@@ -126,6 +126,10 @@ pub use chromadb_api::{
     ChromaDBApi, Collection, Document, QueryResult, DistanceFunction,
 };
 
+// Multi-dialect server support - only available in userspace with server feature
+#[cfg(all(not(feature = "kernel"), feature = "server"))]
+pub mod dialects;
+
 // C FFI exports - Re-export key functions at the crate level for easier access
 pub use ffi::{
     vexfs_rust_init, vexfs_rust_exit, vexfs_rust_fill_super,
@@ -196,6 +200,7 @@ pub mod vexfs_api;
 
 // FUSE implementation for userspace testing
 #[cfg(feature = "fuse_support")]
+#[cfg(all(feature = "fuse_support", not(feature = "kernel")))]
 pub mod fuse_impl;
 
 // Conditional compilation for userspace-only modules
@@ -220,8 +225,8 @@ pub fn test_vector_operations() -> core::result::Result<(), String> {
     Ok(())
 }
 
-// Kernel module panic handler
-#[cfg(feature = "kernel")]
+// Kernel module panic handler (only when no_std is active and std is not available)
+#[cfg(all(feature = "kernel", not(feature = "std")))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}

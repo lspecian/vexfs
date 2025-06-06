@@ -38,6 +38,7 @@ tower = { version = "0.4", optional = true }
 tower-http = { version = "0.5", features = ["cors"], optional = true }
 tracing = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"], optional = true }
+chrono = { version = "0.4", features = ["serde"], optional = true }
 
 [dev-dependencies]
 fastrand = "2.0"
@@ -87,8 +88,8 @@ default = ["std"]
 std = ["serde", "serde_json", "uuid"]
 kernel = ["linked_list_allocator"]  # Keep for future RfL approach but disabled
 c_bindings = []  # New feature for current C FFI approach
-fuse_support = ["fuse", "time", "time01", "clap", "libc"]  # FUSE userspace testing
-server = ["axum", "tokio", "tower", "tower-http", "tracing", "tracing-subscriber", "serde", "serde_json", "uuid"]  # ChromaDB-compatible server
+fuse_support = ["std", "fuse", "time", "time01", "clap", "libc"]  # FUSE userspace testing
+server = ["axum", "tokio", "tower", "tower-http", "tracing", "tracing-subscriber", "serde", "serde_json", "uuid", "chrono"]  # ChromaDB-compatible server
 
 [[bin]]
 name = "vexfs_fuse"
@@ -103,6 +104,11 @@ required-features = ["server"]
 [[bin]]
 name = "vexfs_server_enhanced"
 path = "src/bin/vexfs_server_enhanced.rs"
+required-features = ["server"]
+
+[[bin]]
+name = "vexfs_unified_server"
+path = "src/bin/vexfs_unified_server.rs"
 required-features = ["server"]
 
 [[bin]]

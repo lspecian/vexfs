@@ -1,0 +1,63 @@
+# VexFS Server - Working Version
+FROM rust:latest as builder
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy all source files
+COPY . .
+
+# Build the working VexFS binaries
+RUN cargo build --release --no-default-features --features std --bin comprehensive_test_runner
+RUN cargo build --release --no-default-features --features std --bin anns_benchmark_test
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+# Install runtime dependencies including curl for health checks
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app user
+RUN useradd -r -s /bin/false vexfs
+
+# Create data directory
+RUN mkdir -p /data && chown vexfs:vexfs /data
+
+# Copy binaries from builder
+COPY --from=builder /app/target/release/comprehensive_test_runner /usr/local/bin/vexfs_test_runner
+COPY --from=builder /app/target/release/anns_benchmark_test /usr/local/bin/vexfs_benchmark
+
+# Copy entrypoint script
+COPY vexfs-server-entrypoint.sh /usr/local/bin/vexfs_server.sh
+RUN chmod +x /usr/local/bin/vexfs_server.sh
+
+# Set ownership and permissions
+RUN chown -R vexfs:vexfs /usr/local/bin/vexfs* /data
+
+# Switch to app user
+USER vexfs
+
+# Expose port (for future HTTP server implementation)
+EXPOSE 8000
+
+# Set environment variables
+ENV RUST_LOG=info
+ENV PORT=8000
+ENV VEXFS_DATA_DIR=/data
+
+# Health check using a simple command
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD pgrep -f vexfs_server.sh || exit 1
+
+# Run the server
+CMD ["/usr/local/bin/vexfs_server.sh"]

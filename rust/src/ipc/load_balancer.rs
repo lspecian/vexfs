@@ -264,8 +264,8 @@ impl LoadBalancer {
     }
 
     /// Perform maintenance (cleanup expired sessions, etc.)
-    pub fn perform_maintenance(&mut self) -> IpcResult<MaintenanceResult> {
-        let mut result = MaintenanceResult::default();
+    pub fn perform_maintenance(&mut self) -> IpcResult<LoadBalancerMaintenanceResult> {
+        let mut result = LoadBalancerMaintenanceResult::default();
         
         // Clean up expired sticky sessions
         let current_time = self.get_current_timestamp();
@@ -474,7 +474,7 @@ impl LoadBalancer {
 
 /// Maintenance result
 #[derive(Debug, Clone, Default)]
-pub struct MaintenanceResult {
+pub struct LoadBalancerMaintenanceResult {
     pub expired_sessions: usize,
     pub circuit_breakers_reset: usize,
 }
