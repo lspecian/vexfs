@@ -3,9 +3,13 @@ use fuse::{
     ReplyWrite, ReplyCreate, ReplyOpen, ReplyEmpty, ReplyStatfs,
 };
 use libc::{ENOENT, ENOSYS, ENOTDIR, EEXIST, EINVAL, EIO, EACCES, EPERM};
+#[cfg(feature = "std")]
 use std::collections::HashMap;
+#[cfg(feature = "std")]
 use std::ffi::OsStr;
+#[cfg(feature = "std")]
 use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(feature = "std")]
 use std::sync::{Arc, Mutex};
 use time::OffsetDateTime;
 use time01::Timespec;

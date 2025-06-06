@@ -1,0 +1,116 @@
+# VexFS v2.0 Vector Processing Module Makefile
+# 
+# This Makefile builds the SIMD-accelerated vector processing module
+# and test suite for Task 49 implementation.
+
+# Kernel module configuration
+obj-m += vexfs_v2_vector_processing.o
+
+# Source files for the vector processing module
+vexfs_v2_vector_processing-objs := vexfs_v2_vector_processing.o
+
+# Kernel build directory
+KDIR ?= /lib/modules/$(shell uname -r)/build
+
+# Compiler flags
+EXTRA_CFLAGS += -I$(PWD)
+EXTRA_CFLAGS += -DCONFIG_X86_64
+EXTRA_CFLAGS += -Wall -Wextra
+EXTRA_CFLAGS += -O2
+
+# Test program configuration
+TEST_PROG = test_vector_processing
+TEST_SOURCES = test_vector_processing.c
+TEST_CFLAGS = -Wall -Wextra -O2 -std=c99 -D_GNU_SOURCE
+TEST_LIBS = -lm -lrt
+
+# Default target
+all: module test
+
+# Build kernel module
+module:
+	@echo "Building VexFS v2.0 Vector Processing kernel module..."
+	$(MAKE) -C $(KDIR) M=$(PWD) modules
+
+# Build test program
+test: $(TEST_PROG)
+
+$(TEST_PROG): $(TEST_SOURCES) vexfs_v2_vector_processing.h
+	@echo "Building vector processing test suite..."
+	gcc $(TEST_CFLAGS) -o $(TEST_PROG) $(TEST_SOURCES) $(TEST_LIBS)
+
+# Clean build artifacts
+clean:
+	@echo "Cleaning build artifacts..."
+	$(MAKE) -C $(KDIR) M=$(PWD) clean
+	rm -f $(TEST_PROG)
+	rm -f *.o *.ko *.mod.c *.mod *.symvers *.order
+	rm -f .*.cmd .tmp_versions
+
+# Install module (requires root)
+install: module
+	@echo "Installing VexFS v2.0 Vector Processing module..."
+	sudo insmod vexfs_v2_vector_processing.ko
+	@echo "Module installed successfully"
+
+# Remove module (requires root)
+remove:
+	@echo "Removing VexFS v2.0 Vector Processing module..."
+	sudo rmmod vexfs_v2_vector_processing || true
+	@echo "Module removed"
+
+# Run tests (requires module to be loaded)
+run-test: test
+	@echo "Running vector processing tests..."
+	./$(TEST_PROG)
+
+# Full test cycle: build, install, test, remove
+test-cycle: clean all install run-test remove
+
+# Check module status
+status:
+	@echo "Checking module status..."
+	@lsmod | grep vexfs_v2_vector_processing || echo "Module not loaded"
+	@ls -la /dev/vexfs* 2>/dev/null || echo "No VexFS devices found"
+
+# Show module information
+info: module
+	@echo "Module information:"
+	@modinfo vexfs_v2_vector_processing.ko
+
+# Debug build with additional flags
+debug: EXTRA_CFLAGS += -DDEBUG -g
+debug: TEST_CFLAGS += -DDEBUG -g
+debug: all
+
+# Performance build with optimizations
+performance: EXTRA_CFLAGS += -O3 -march=native
+performance: TEST_CFLAGS += -O3 -march=native
+performance: all
+
+# Help target
+help:
+	@echo "VexFS v2.0 Vector Processing Build System"
+	@echo "========================================="
+	@echo ""
+	@echo "Available targets:"
+	@echo "  all          - Build both kernel module and test program"
+	@echo "  module       - Build kernel module only"
+	@echo "  test         - Build test program only"
+	@echo "  clean        - Clean all build artifacts"
+	@echo "  install      - Install kernel module (requires root)"
+	@echo "  remove       - Remove kernel module (requires root)"
+	@echo "  run-test     - Run test suite"
+	@echo "  test-cycle   - Full test cycle (build, install, test, remove)"
+	@echo "  status       - Check module and device status"
+	@echo "  info         - Show module information"
+	@echo "  debug        - Build with debug flags"
+	@echo "  performance  - Build with performance optimizations"
+	@echo "  help         - Show this help message"
+	@echo ""
+	@echo "Examples:"
+	@echo "  make -f Makefile.vector_processing all"
+	@echo "  make -f Makefile.vector_processing test-cycle"
+	@echo "  make -f Makefile.vector_processing debug"
+
+.PHONY: all module test clean install remove run-test test-cycle status info debug performance help

@@ -1,0 +1,376 @@
+# Load testing container for VexFS Qdrant Adapter
+FROM rust:1.75-slim as builder
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Create a simple load testing application
+COPY <<EOF ./Cargo.toml
+[package]
+name = "vexfs-load-tester"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.0", features = ["full"] }
+reqwest = { version = "0.11", features = ["json"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+clap = { version = "4.0", features = ["derive"] }
+uuid = { version = "1.0", features = ["v4"] }
+rand = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+EOF
+
+# Create the load testing source code
+COPY <<EOF ./src/main.rs
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::Semaphore;
+use serde_json::json;
+use clap::Parser;
+use uuid::Uuid;
+use rand::Rng;
+
+#[derive(Parser)]
+#[command(name = "vexfs-load-tester")]
+#[command(about = "Load testing tool for VexFS Qdrant Adapter")]
+struct Args {
+    #[arg(long, default_value = "vexfs-qdrant")]
+    target_host: String,
+    
+    #[arg(long, default_value = "6333")]
+    target_port: u16,
+    
+    #[arg(long, default_value = "300")]
+    test_duration: u64,
+    
+    #[arg(long, default_value = "16")]
+    concurrent_clients: usize,
+    
+    #[arg(long, default_value = "384")]
+    vector_dimensions: usize,
+    
+    #[arg(long, default_value = "10000")]
+    operations_per_client: usize,
+}
+
+#[derive(Debug)]
+struct TestResults {
+    total_operations: u64,
+    successful_operations: u64,
+    failed_operations: u64,
+    total_duration: Duration,
+    average_latency: Duration,
+    p95_latency: Duration,
+    p99_latency: Duration,
+    ops_per_second: f64,
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+    
+    println!("🚀 Starting VexFS Qdrant Adapter Load Test");
+    println!("Target: {}:{}", args.target_host, args.target_port);
+    println!("Duration: {}s", args.test_duration);
+    println!("Concurrent clients: {}", args.concurrent_clients);
+    println!("Vector dimensions: {}", args.vector_dimensions);
+    
+    let base_url = format!("http://{}:{}", args.target_host, args.target_port);
+    let client = reqwest::Client::new();
+    
+    // Create test collection
+    let collection_name = "load_test_collection";
+    create_collection(&client, &base_url, collection_name, args.vector_dimensions).await?;
+    
+    // Run load test
+    let results = run_load_test(
+        &client,
+        &base_url,
+        collection_name,
+        &args,
+    ).await?;
+    
+    // Print results
+    print_results(&results);
+    
+    // Save results to file
+    save_results(&results, "/results/load-test-results.json").await?;
+    
+    Ok(())
+}
+
+async fn create_collection(
+    client: &reqwest::Client,
+    base_url: &str,
+    collection_name: &str,
+    vector_size: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let url = format!("{}/collections/{}", base_url, collection_name);
+    let payload = json!({
+        "vectors": {
+            "size": vector_size,
+            "distance": "Cosine"
+        }
+    });
+    
+    let response = client.put(&url).json(&payload).send().await?;
+    
+    if response.status().is_success() {
+        println!("✅ Collection '{}' created successfully", collection_name);
+    } else {
+        println!("⚠️  Collection creation failed: {}", response.status());
+    }
+    
+    Ok(())
+}
+
+async fn run_load_test(
+    client: &reqwest::Client,
+    base_url: &str,
+    collection_name: &str,
+    args: &Args,
+) -> Result<TestResults, Box<dyn std::error::Error>> {
+    let semaphore = Arc::new(Semaphore::new(args.concurrent_clients));
+    let mut handles = Vec::new();
+    let start_time = Instant::now();
+    
+    for client_id in 0..args.concurrent_clients {
+        let client = client.clone();
+        let base_url = base_url.to_string();
+        let collection_name = collection_name.to_string();
+        let semaphore = semaphore.clone();
+        let vector_dimensions = args.vector_dimensions;
+        let operations_per_client = args.operations_per_client;
+        
+        let handle = tokio::spawn(async move {
+            let _permit = semaphore.acquire().await.unwrap();
+            run_client_operations(
+                &client,
+                &base_url,
+                &collection_name,
+                client_id,
+                vector_dimensions,
+                operations_per_client,
+            ).await
+        });
+        
+        handles.push(handle);
+    }
+    
+    // Wait for all clients to complete
+    let mut all_latencies = Vec::new();
+    let mut total_successful = 0;
+    let mut total_failed = 0;
+    
+    for handle in handles {
+        let (successful, failed, latencies) = handle.await?;
+        total_successful += successful;
+        total_failed += failed;
+        all_latencies.extend(latencies);
+    }
+    
+    let total_duration = start_time.elapsed();
+    let total_operations = total_successful + total_failed;
+    
+    // Calculate statistics
+    all_latencies.sort();
+    let average_latency = if !all_latencies.is_empty() {
+        all_latencies.iter().sum::<Duration>() / all_latencies.len() as u32
+    } else {
+        Duration::from_millis(0)
+    };
+    
+    let p95_index = (all_latencies.len() as f64 * 0.95) as usize;
+    let p99_index = (all_latencies.len() as f64 * 0.99) as usize;
+    
+    let p95_latency = all_latencies.get(p95_index).copied().unwrap_or(Duration::from_millis(0));
+    let p99_latency = all_latencies.get(p99_index).copied().unwrap_or(Duration::from_millis(0));
+    
+    let ops_per_second = total_operations as f64 / total_duration.as_secs_f64();
+    
+    Ok(TestResults {
+        total_operations,
+        successful_operations: total_successful,
+        failed_operations: total_failed,
+        total_duration,
+        average_latency,
+        p95_latency,
+        p99_latency,
+        ops_per_second,
+    })
+}
+
+async fn run_client_operations(
+    client: &reqwest::Client,
+    base_url: &str,
+    collection_name: &str,
+    client_id: usize,
+    vector_dimensions: usize,
+    operations_count: usize,
+) -> (u64, u64, Vec<Duration>) {
+    let mut successful = 0;
+    let mut failed = 0;
+    let mut latencies = Vec::new();
+    let mut rng = rand::thread_rng();
+    
+    for i in 0..operations_count {
+        let operation_start = Instant::now();
+        
+        // Alternate between insert and search operations
+        let success = if i % 2 == 0 {
+            // Insert operation
+            insert_point(client, base_url, collection_name, client_id, i, vector_dimensions, &mut rng).await
+        } else {
+            // Search operation
+            search_points(client, base_url, collection_name, vector_dimensions, &mut rng).await
+        };
+        
+        let latency = operation_start.elapsed();
+        latencies.push(latency);
+        
+        if success {
+            successful += 1;
+        } else {
+            failed += 1;
+        }
+    }
+    
+    (successful, failed, latencies)
+}
+
+async fn insert_point(
+    client: &reqwest::Client,
+    base_url: &str,
+    collection_name: &str,
+    client_id: usize,
+    operation_id: usize,
+    vector_dimensions: usize,
+    rng: &mut rand::rngs::ThreadRng,
+) -> bool {
+    let url = format!("{}/collections/{}/points", base_url, collection_name);
+    
+    let vector: Vec<f32> = (0..vector_dimensions)
+        .map(|_| rng.gen_range(-1.0..1.0))
+        .collect();
+    
+    let point_id = format!("{}_{}", client_id, operation_id);
+    
+    let payload = json!({
+        "points": [{
+            "id": point_id,
+            "vector": vector,
+            "payload": {
+                "client_id": client_id,
+                "operation_id": operation_id,
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            }
+        }]
+    });
+    
+    match client.put(&url).json(&payload).send().await {
+        Ok(response) => response.status().is_success(),
+        Err(_) => false,
+    }
+}
+
+async fn search_points(
+    client: &reqwest::Client,
+    base_url: &str,
+    collection_name: &str,
+    vector_dimensions: usize,
+    rng: &mut rand::rngs::ThreadRng,
+) -> bool {
+    let url = format!("{}/collections/{}/points/search", base_url, collection_name);
+    
+    let query_vector: Vec<f32> = (0..vector_dimensions)
+        .map(|_| rng.gen_range(-1.0..1.0))
+        .collect();
+    
+    let payload = json!({
+        "vector": query_vector,
+        "limit": 10,
+        "with_payload": true
+    });
+    
+    match client.post(&url).json(&payload).send().await {
+        Ok(response) => response.status().is_success(),
+        Err(_) => false,
+    }
+}
+
+fn print_results(results: &TestResults) {
+    println!("\n📊 LOAD TEST RESULTS");
+    println!("=" * 50);
+    println!("Total operations: {}", results.total_operations);
+    println!("Successful operations: {}", results.successful_operations);
+    println!("Failed operations: {}", results.failed_operations);
+    println!("Success rate: {:.2}%", (results.successful_operations as f64 / results.total_operations as f64) * 100.0);
+    println!("Total duration: {:.2}s", results.total_duration.as_secs_f64());
+    println!("Operations per second: {:.0}", results.ops_per_second);
+    println!("Average latency: {:.2}ms", results.average_latency.as_millis());
+    println!("P95 latency: {:.2}ms", results.p95_latency.as_millis());
+    println!("P99 latency: {:.2}ms", results.p99_latency.as_millis());
+    
+    // Performance validation
+    if results.ops_per_second >= 500000.0 {
+        println!("✅ Performance target met: {:.0} ops/sec >= 500K ops/sec", results.ops_per_second);
+    } else {
+        println!("❌ Performance target not met: {:.0} ops/sec < 500K ops/sec", results.ops_per_second);
+    }
+}
+
+async fn save_results(results: &TestResults, file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let json_results = json!({
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "total_operations": results.total_operations,
+        "successful_operations": results.successful_operations,
+        "failed_operations": results.failed_operations,
+        "success_rate": (results.successful_operations as f64 / results.total_operations as f64) * 100.0,
+        "total_duration_seconds": results.total_duration.as_secs_f64(),
+        "ops_per_second": results.ops_per_second,
+        "average_latency_ms": results.average_latency.as_millis(),
+        "p95_latency_ms": results.p95_latency.as_millis(),
+        "p99_latency_ms": results.p99_latency.as_millis(),
+        "performance_target_met": results.ops_per_second >= 500000.0
+    });
+    
+    tokio::fs::write(file_path, json_results.to_string()).await?;
+    println!("📁 Results saved to {}", file_path);
+    
+    Ok(())
+}
+EOF
+
+# Build the load tester
+RUN cargo build --release
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create results directory
+RUN mkdir -p /results
+
+# Copy binary from builder stage
+COPY --from=builder /app/target/release/vexfs-load-tester /usr/local/bin/
+
+# Set permissions
+RUN chmod +x /usr/local/bin/vexfs-load-tester
+
+# Set default command
+CMD ["vexfs-load-tester"]

@@ -1,0 +1,226 @@
+# VexFS eBPF Tracing Configuration
+# Default configuration for VexFS kernel module tracing
+
+# General Settings
+general:
+  # Default tracing duration in seconds
+  default_duration: 60
+  
+  # Output directory for trace results
+  output_dir: "../results"
+  
+  # Log level (DEBUG, INFO, WARN, ERROR)
+  log_level: "INFO"
+  
+  # Maximum file size for trace outputs (MB)
+  max_output_size: 100
+  
+  # Cleanup old results after N days
+  cleanup_after_days: 7
+
+# Kernel Tracing Configuration
+kernel_trace:
+  # Enable/disable specific trace categories
+  filesystem_ops: true
+  memory_ops: true
+  lock_ops: true
+  error_tracking: true
+  module_lifecycle: true
+  
+  # Sampling configuration
+  sampling:
+    # Sample every Nth operation (1 = all operations)
+    filesystem_sample_rate: 1
+    memory_sample_rate: 1
+    lock_sample_rate: 1
+  
+  # Thresholds for alerts
+  thresholds:
+    # Slow operation threshold (microseconds)
+    slow_operation_threshold: 10000
+    # Large allocation threshold (bytes)
+    large_allocation_threshold: 1048576
+    # Lock hold time threshold (microseconds)
+    lock_contention_threshold: 1000
+
+# Performance Tracing Configuration
+performance_trace:
+  # Vector operation tracking
+  vector_ops:
+    track_latency: true
+    track_throughput: true
+    track_dimensions: true
+    
+  # HNSW algorithm tracking
+  hnsw_tracking:
+    track_graph_size: true
+    track_search_hops: true
+    track_build_time: true
+    
+  # LSH algorithm tracking
+  lsh_tracking:
+    track_hash_time: true
+    track_bucket_distribution: true
+    track_collision_rate: true
+  
+  # I/O performance tracking
+  io_tracking:
+    track_read_latency: true
+    track_write_latency: true
+    track_throughput: true
+    
+  # Cache performance tracking
+  cache_tracking:
+    track_hit_rate: true
+    track_miss_patterns: true
+    
+  # Performance alerts
+  alerts:
+    # High latency threshold (milliseconds)
+    high_latency_threshold: 50
+    # Low cache hit rate threshold (percentage)
+    low_cache_hit_threshold: 80
+    # High error rate threshold (percentage)
+    high_error_rate_threshold: 5
+
+# Memory Tracing Configuration
+memory_trace:
+  # Memory tracking options
+  tracking:
+    track_allocations: true
+    track_deallocations: true
+    track_leaks: true
+    track_fragmentation: true
+    
+  # Vector memory tracking
+  vector_memory:
+    track_vector_allocs: true
+    track_buffer_usage: true
+    track_dimension_impact: true
+    
+  # Leak detection
+  leak_detection:
+    # Consider allocation a potential leak after N seconds
+    leak_threshold_seconds: 300
+    # Alert when outstanding allocations exceed this count
+    outstanding_alloc_threshold: 1000
+    
+  # Memory pressure detection
+  pressure_detection:
+    # Alert when total memory usage exceeds N MB
+    high_usage_threshold_mb: 100
+    # Alert when allocation failure rate exceeds N%
+    failure_rate_threshold: 1
+    
+  # Memory analysis
+  analysis:
+    # Track allocation patterns
+    track_allocation_patterns: true
+    # Track allocation lifetimes
+    track_lifetimes: true
+    # Generate stack traces for large allocations
+    stack_trace_large_allocs: true
+
+# Output Configuration
+output:
+  # Output format options
+  format:
+    # Include timestamps in output
+    timestamps: true
+    # Include process information
+    process_info: true
+    # Include function names
+    function_names: true
+    # Include stack traces for errors
+    error_stack_traces: true
+    
+  # Real-time monitoring
+  realtime:
+    # Update interval for real-time stats (seconds)
+    stats_interval: 10
+    # Update interval for alerts (seconds)
+    alert_interval: 1
+    
+  # Post-processing
+  post_processing:
+    # Generate summary reports
+    generate_summary: true
+    # Generate performance analysis
+    generate_analysis: true
+    # Generate recommendations
+    generate_recommendations: true
+
+# Integration Settings
+integration:
+  # Grafana integration (if available)
+  grafana:
+    enabled: false
+    endpoint: "http://localhost:3000"
+    dashboard_id: "vexfs-tracing"
+    
+  # Prometheus integration (if available)
+  prometheus:
+    enabled: false
+    pushgateway: "http://localhost:9091"
+    job_name: "vexfs-tracing"
+    
+  # Syslog integration
+  syslog:
+    enabled: false
+    facility: "local0"
+    severity: "info"
+
+# Advanced Settings
+advanced:
+  # eBPF program settings
+  ebpf:
+    # Maximum number of events in eBPF maps
+    max_events: 10000
+    # eBPF program timeout (seconds)
+    program_timeout: 300
+    
+  # Kernel symbol resolution
+  symbols:
+    # Attempt to resolve kernel symbols
+    resolve_symbols: true
+    # Path to kernel symbol map
+    symbol_map_path: "/proc/kallsyms"
+    
+  # Debug settings
+  debug:
+    # Enable debug output
+    debug_mode: false
+    # Verbose eBPF program output
+    verbose_ebpf: false
+    # Save raw eBPF output
+    save_raw_output: false
+
+# Environment-Specific Overrides
+environments:
+  development:
+    general:
+      log_level: "DEBUG"
+    advanced:
+      debug:
+        debug_mode: true
+        verbose_ebpf: true
+        
+  production:
+    general:
+      log_level: "WARN"
+      cleanup_after_days: 3
+    performance_trace:
+      alerts:
+        high_latency_threshold: 20
+    memory_trace:
+      pressure_detection:
+        high_usage_threshold_mb: 500
+        
+  testing:
+    general:
+      default_duration: 30
+      log_level: "INFO"
+    kernel_trace:
+      sampling:
+        filesystem_sample_rate: 10
+        memory_sample_rate: 5
