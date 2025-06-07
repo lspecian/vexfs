@@ -59,6 +59,7 @@ tasks/
 .windsurfrules
 .roomodes
 .taskmasterconfig
+.taskmaster/
 scripts/
 # Large VM images
 tests/legacy/vm_management/vm/images/*.qcow2
