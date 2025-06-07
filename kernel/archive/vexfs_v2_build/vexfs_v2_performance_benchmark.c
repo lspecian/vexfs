@@ -2,7 +2,7 @@
  * VexFS v2.0 Performance Benchmarking Suite
  *
  * Comprehensive performance testing for kernel-native vector operations
- * targeting 100,000+ ops/sec for both basic and vector operations.
+ * with SIMD optimization for both basic and vector operations.
  */
 
 #include <stdio.h>

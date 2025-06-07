@@ -50,10 +50,10 @@ cat /proc/filesystems | grep vexfs
 VexFS v2.0: initializing full kernel-native vector filesystem 🚀
 VexFS v2.0 monitoring system initialized
 VexFS v2.0: Monitoring system initialized successfully
-VexFS v2.0: module loaded successfully! Target: 100,000+ ops/sec 🔥
+VexFS v2.0: module loaded successfully! 🔥
 ```
 
-## Performance Target: 100,000+ ops/sec
+## Performance Optimization
 
 ### Why This Target?
 
@@ -261,7 +261,7 @@ sudo file -s /dev/device
 
 ## Conclusion
 
-VexFS represents a breakthrough in vector database performance by implementing vector operations directly in kernel space with full SIMD optimization. The 100,000+ ops/sec target is achievable through:
+VexFS implements vector operations directly in kernel space with full SIMD optimization. Performance benefits are achieved through:
 
 - Kernel-native implementation eliminating user-space overhead
 - SIMD acceleration for parallel vector operations

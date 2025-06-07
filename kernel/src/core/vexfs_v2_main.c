@@ -2,10 +2,10 @@
  * VexFS v2.0 - Full Kernel-Native Vector Filesystem Implementation
  * 
  * This extends the proven vexfs_fixed.c foundation with comprehensive
- * vector database capabilities, targeting 100,000+ ops/sec performance.
- * 
+ * vector database capabilities with SIMD optimization.
+ *
  * Building on: 54,530 ops/sec basic operations (vexfs_fixed.c)
- * Target: 100,000+ ops/sec for both basic AND vector operations
+ * Enhanced with SIMD-optimized vector operations
  */
 
 #include <linux/module.h>
@@ -1725,7 +1725,7 @@ static int __init vexfs_v2_init(void)
         printk(KERN_INFO "VexFS v2.0: Monitoring system initialized successfully\n");
     }
     
-    printk(KERN_INFO "VexFS v2.0: module loaded successfully! Target: 100,000+ ops/sec 🔥\n");
+    printk(KERN_INFO "VexFS v2.0: module loaded successfully! 🔥\n");
     return 0;
 }
 
