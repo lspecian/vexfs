@@ -194,10 +194,25 @@ int vexfs_scalar_quantize_simd(const __u32 *input_bits, void *output,
 int vexfs_product_quantize(const __u32 *input_bits, __u8 *output_codes,
                           __u32 dimensions, __u32 vector_count,
                           const struct vexfs_pq_config *config);
+int vexfs_product_quantize_with_codebooks(const __u32 *input_bits, __u8 *output_codes,
+                                         __u32 dimensions, __u32 vector_count,
+                                         const struct vexfs_pq_config *config,
+                                         const __u32 *codebooks_bits);
 int vexfs_train_pq_codebooks(const __u32 *training_data_bits,
                             __u32 dimensions, __u32 training_count,
                             const struct vexfs_pq_config *config,
                             __u32 *codebooks_bits);
+int vexfs_train_pq_codebooks_kmeans(const __u32 *training_data_bits,
+                                   __u32 dimensions, __u32 training_count,
+                                   const struct vexfs_pq_config *config,
+                                   __u32 *codebooks_bits);
+__u32 vexfs_compute_subvector_distance(const __u32 *vec1_bits, const __u32 *vec2_bits,
+                                      __u32 dimensions);
+int vexfs_pq_search_with_codes(const __u32 *query_bits, const __u8 *pq_codes,
+                              __u32 dimensions, __u32 vector_count,
+                              const struct vexfs_pq_config *config,
+                              const __u32 *codebooks_bits,
+                              __u32 *result_indices, __u32 k);
 
 /* Binary Quantization Functions */
 int vexfs_binary_quantize(const __u32 *input_bits, __u8 *output_codes,
@@ -214,11 +229,15 @@ int vexfs_l2_normalize_avx2(const __u32 *input_bits, __u32 *output_bits,
 int vexfs_l2_normalize_avx512(const __u32 *input_bits, __u32 *output_bits,
                              __u32 dimensions, __u32 vector_count);
 int vexfs_scalar_quantize_avx2(const __u32 *input_bits, void *output,
-                              __u32 dimensions, __u32 vector_count,
-                              __u32 quant_type, __u32 scale_bits, __u32 offset_bits);
+                               __u32 dimensions, __u32 vector_count,
+                               __u32 quant_type, __u32 scale_bits, __u32 offset_bits);
 int vexfs_binary_quantize_avx2(const __u32 *input_bits, __u8 *output_codes,
-                              __u32 dimensions, __u32 vector_count,
-                              __u32 threshold_bits);
+                               __u32 dimensions, __u32 vector_count,
+                               __u32 threshold_bits);
+int vexfs_product_quantize_avx2(const __u32 *input_bits, __u8 *output_codes,
+                               __u32 dimensions, __u32 vector_count,
+                               const struct vexfs_pq_config *config,
+                               const __u32 *codebooks_bits);
 #endif
 
 #ifdef CONFIG_ARM64

@@ -616,27 +616,79 @@ int vexfs_product_quantize(const __u32 *input_bits, __u8 *output_codes,
                           __u32 dimensions, __u32 vector_count,
                           const struct vexfs_pq_config *config)
 {
-    /* Simplified product quantization implementation */
-    __u32 v, s;
+    return vexfs_product_quantize_with_codebooks(input_bits, output_codes,
+                                               dimensions, vector_count,
+                                               config, NULL);
+}
+
+/*
+ * Enhanced Product Quantization with SIMD acceleration
+ */
+int vexfs_product_quantize_with_codebooks(const __u32 *input_bits, __u8 *output_codes,
+                                         __u32 dimensions, __u32 vector_count,
+                                         const struct vexfs_pq_config *config,
+                                         const __u32 *codebooks_bits)
+{
+    __u32 v, s, k;
+    __u32 simd_caps;
+    int ret = 0;
+    
+    if (!input_bits || !output_codes || !config) {
+        return -EINVAL;
+    }
     
     if (config->subvector_count * config->subvector_dims != dimensions) {
         return -EINVAL;
     }
     
+    if (config->codebook_size > 256) {
+        return -EINVAL; /* PQ codes must fit in 8 bits */
+    }
+    
+    simd_caps = vexfs_detect_simd_capabilities();
+    
+    /* Use SIMD-accelerated version if available and beneficial */
+    if ((simd_caps & VEXFS_SIMD_AVX2) && dimensions >= 32 && codebooks_bits) {
+        ret = vexfs_product_quantize_avx2(input_bits, output_codes,
+                                        dimensions, vector_count,
+                                        config, codebooks_bits);
+        if (ret == 0) goto update_stats;
+    }
+    
+    /* Fallback to optimized scalar implementation */
     for (v = 0; v < vector_count; v++) {
         for (s = 0; s < config->subvector_count; s++) {
             __u32 subvector_start = s * config->subvector_dims;
             __u32 code_idx = v * config->subvector_count + s;
+            __u8 best_code = 0;
+            __u32 min_distance = UINT_MAX;
             
-            /* Simple quantization: use first element as representative */
-            __s32 representative = (__s32)vexfs_ieee754_to_fixed(
-                input_bits[v * dimensions + subvector_start]);
+            if (codebooks_bits) {
+                /* Find nearest codebook entry using proper distance calculation */
+                for (k = 0; k < config->codebook_size; k++) {
+                    __u32 distance = vexfs_compute_subvector_distance(
+                        &input_bits[v * dimensions + subvector_start],
+                        &codebooks_bits[s * config->codebook_size * config->subvector_dims +
+                                       k * config->subvector_dims],
+                        config->subvector_dims);
+                    
+                    if (distance < min_distance) {
+                        min_distance = distance;
+                        best_code = (__u8)k;
+                    }
+                }
+            } else {
+                /* Simplified quantization when no codebooks provided */
+                __s32 representative = (__s32)vexfs_ieee754_to_fixed(
+                    input_bits[v * dimensions + subvector_start]);
+                best_code = (__u8)(abs(representative) % config->codebook_size);
+            }
             
-            /* Map to codebook index (simplified) */
-            output_codes[code_idx] = (__u8)(abs(representative) % config->codebook_size);
+            output_codes[code_idx] = best_code;
         }
     }
-    
+
+update_stats:
     spin_lock(&proc_stats_lock);
     global_proc_stats.product_quantizations++;
     spin_unlock(&proc_stats_lock);
@@ -952,11 +1004,45 @@ int vexfs_train_pq_codebooks(const __u32 *training_data_bits,
                             const struct vexfs_pq_config *config,
                             __u32 *codebooks_bits)
 {
-    /* Simplified K-means training for product quantization */
-    __u32 s, k, iter;
+    return vexfs_train_pq_codebooks_kmeans(training_data_bits, dimensions,
+                                         training_count, config, codebooks_bits);
+}
+
+/*
+ * Enhanced K-means training for Product Quantization codebooks
+ */
+int vexfs_train_pq_codebooks_kmeans(const __u32 *training_data_bits,
+                                   __u32 dimensions, __u32 training_count,
+                                   const struct vexfs_pq_config *config,
+                                   __u32 *codebooks_bits)
+{
+    __u32 s, k, iter, v, d;
+    __u32 *assignments = NULL;
+    __u32 *cluster_counts = NULL;
+    __u32 *cluster_sums = NULL;
+    int ret = 0;
+    
+    if (!training_data_bits || !config || !codebooks_bits) {
+        return -EINVAL;
+    }
     
     if (config->subvector_count * config->subvector_dims != dimensions) {
         return -EINVAL;
+    }
+    
+    if (training_count < config->codebook_size) {
+        return -EINVAL; /* Need enough training data */
+    }
+    
+    /* Allocate temporary arrays for K-means */
+    assignments = kmalloc(training_count * config->subvector_count * sizeof(__u32), GFP_KERNEL);
+    cluster_counts = kmalloc(config->subvector_count * config->codebook_size * sizeof(__u32), GFP_KERNEL);
+    cluster_sums = kmalloc(config->subvector_count * config->codebook_size *
+                          config->subvector_dims * sizeof(__u32), GFP_KERNEL);
+    
+    if (!assignments || !cluster_counts || !cluster_sums) {
+        ret = -ENOMEM;
+        goto cleanup;
     }
     
     /* Initialize codebooks with random training vectors */
@@ -968,7 +1054,6 @@ int vexfs_train_pq_codebooks(const __u32 *training_data_bits,
             __u32 subvector_start = s * config->subvector_dims;
             
             /* Copy subvector from random training vector */
-            __u32 d;
             for (d = 0; d < config->subvector_dims; d++) {
                 codebooks_bits[codebook_offset + d] =
                     training_data_bits[random_vector * dimensions + subvector_start + d];
@@ -976,13 +1061,99 @@ int vexfs_train_pq_codebooks(const __u32 *training_data_bits,
         }
     }
     
-    /* Simplified training iterations */
+    /* K-means iterations */
     for (iter = 0; iter < config->training_iterations; iter++) {
-        /* In a full implementation, this would perform K-means clustering */
-        /* For now, we keep the initial random codebooks */
+        /* Assignment step: assign each subvector to nearest centroid */
+        for (v = 0; v < training_count; v++) {
+            for (s = 0; s < config->subvector_count; s++) {
+                __u32 subvector_start = s * config->subvector_dims;
+                __u32 best_cluster = 0;
+                __u32 min_distance = UINT_MAX;
+                
+                for (k = 0; k < config->codebook_size; k++) {
+                    __u32 codebook_offset = s * config->codebook_size * config->subvector_dims +
+                                           k * config->subvector_dims;
+                    __u32 distance = vexfs_compute_subvector_distance(
+                        &training_data_bits[v * dimensions + subvector_start],
+                        &codebooks_bits[codebook_offset],
+                        config->subvector_dims);
+                    
+                    if (distance < min_distance) {
+                        min_distance = distance;
+                        best_cluster = k;
+                    }
+                }
+                
+                assignments[v * config->subvector_count + s] = best_cluster;
+            }
+        }
+        
+        /* Update step: recalculate centroids */
+        memset(cluster_counts, 0, config->subvector_count * config->codebook_size * sizeof(__u32));
+        memset(cluster_sums, 0, config->subvector_count * config->codebook_size *
+               config->subvector_dims * sizeof(__u32));
+        
+        /* Accumulate sums for each cluster */
+        for (v = 0; v < training_count; v++) {
+            for (s = 0; s < config->subvector_count; s++) {
+                __u32 cluster = assignments[v * config->subvector_count + s];
+                __u32 subvector_start = s * config->subvector_dims;
+                __u32 sum_offset = s * config->codebook_size * config->subvector_dims +
+                                  cluster * config->subvector_dims;
+                
+                cluster_counts[s * config->codebook_size + cluster]++;
+                
+                for (d = 0; d < config->subvector_dims; d++) {
+                    __u32 value = vexfs_ieee754_to_fixed(
+                        training_data_bits[v * dimensions + subvector_start + d]);
+                    cluster_sums[sum_offset + d] += value;
+                }
+            }
+        }
+        
+        /* Update centroids */
+        for (s = 0; s < config->subvector_count; s++) {
+            for (k = 0; k < config->codebook_size; k++) {
+                __u32 count = cluster_counts[s * config->codebook_size + k];
+                if (count > 0) {
+                    __u32 codebook_offset = s * config->codebook_size * config->subvector_dims +
+                                           k * config->subvector_dims;
+                    __u32 sum_offset = s * config->codebook_size * config->subvector_dims +
+                                      k * config->subvector_dims;
+                    
+                    for (d = 0; d < config->subvector_dims; d++) {
+                        __u32 avg_fixed = cluster_sums[sum_offset + d] / count;
+                        codebooks_bits[codebook_offset + d] = vexfs_fixed_to_ieee754(avg_fixed);
+                    }
+                }
+            }
+        }
+    }
+
+cleanup:
+    kfree(assignments);
+    kfree(cluster_counts);
+    kfree(cluster_sums);
+    return ret;
+}
+
+/*
+ * Compute distance between two subvectors
+ */
+__u32 vexfs_compute_subvector_distance(const __u32 *vec1_bits, const __u32 *vec2_bits,
+                                      __u32 dimensions)
+{
+    __u32 i;
+    __u64 sum = 0;
+    
+    for (i = 0; i < dimensions; i++) {
+        __s32 v1 = (__s32)vexfs_ieee754_to_fixed(vec1_bits[i]);
+        __s32 v2 = (__s32)vexfs_ieee754_to_fixed(vec2_bits[i]);
+        __s32 diff = v1 - v2;
+        sum += (__u64)(diff * diff);
     }
     
-    return 0;
+    return (__u32)min(sum, (__u64)UINT_MAX);
 }
 
 /*
@@ -1018,3 +1189,171 @@ EXPORT_SYMBOL(vexfs_product_quantize);
 EXPORT_SYMBOL(vexfs_detect_simd_capabilities);
 EXPORT_SYMBOL(vexfs_get_vector_processing_stats);
 EXPORT_SYMBOL(vexfs_vector_processing_ioctl);
+/*
+ * SIMD-accelerated Product Quantization for AVX2
+ */
+#ifdef CONFIG_X86_64
+int vexfs_product_quantize_avx2(const __u32 *input_bits, __u8 *output_codes,
+                               __u32 dimensions, __u32 vector_count,
+                               const struct vexfs_pq_config *config,
+                               const __u32 *codebooks_bits)
+{
+    __u32 v, s, k;
+    
+    if (!boot_cpu_has(X86_FEATURE_AVX2)) {
+        return -ENODEV;
+    }
+    
+    kernel_fpu_begin();
+    
+    for (v = 0; v < vector_count; v++) {
+        for (s = 0; s < config->subvector_count; s++) {
+            __u32 subvector_start = s * config->subvector_dims;
+            __u32 code_idx = v * config->subvector_count + s;
+            __u8 best_code = 0;
+            __u32 min_distance = UINT_MAX;
+            
+            /* Use SIMD for distance computation when subvector is large enough */
+            if (config->subvector_dims >= 8) {
+                for (k = 0; k < config->codebook_size; k++) {
+                    __u32 codebook_offset = s * config->codebook_size * config->subvector_dims +
+                                           k * config->subvector_dims;
+                    __u32 distance = vexfs_compute_subvector_distance_avx2(
+                        &input_bits[v * dimensions + subvector_start],
+                        &codebooks_bits[codebook_offset],
+                        config->subvector_dims);
+                    
+                    if (distance < min_distance) {
+                        min_distance = distance;
+                        best_code = (__u8)k;
+                    }
+                }
+            } else {
+                /* Fall back to scalar for small subvectors */
+                for (k = 0; k < config->codebook_size; k++) {
+                    __u32 codebook_offset = s * config->codebook_size * config->subvector_dims +
+                                           k * config->subvector_dims;
+                    __u32 distance = vexfs_compute_subvector_distance(
+                        &input_bits[v * dimensions + subvector_start],
+                        &codebooks_bits[codebook_offset],
+                        config->subvector_dims);
+                    
+                    if (distance < min_distance) {
+                        min_distance = distance;
+                        best_code = (__u8)k;
+                    }
+                }
+            }
+            
+            output_codes[code_idx] = best_code;
+        }
+    }
+    
+    kernel_fpu_end();
+    return 0;
+}
+
+/*
+ * AVX2-accelerated subvector distance computation
+ */
+static __u32 vexfs_compute_subvector_distance_avx2(const __u32 *vec1_bits, const __u32 *vec2_bits,
+                                                   __u32 dimensions)
+{
+    __u32 i;
+    __u64 sum = 0;
+    
+    /* Process 8 elements at a time with AVX2 */
+    for (i = 0; i + 7 < dimensions; i += 8) {
+        /* Convert IEEE 754 to fixed point and compute squared differences */
+        __u32 j;
+        for (j = 0; j < 8; j++) {
+            __s32 v1 = (__s32)vexfs_ieee754_to_fixed(vec1_bits[i + j]);
+            __s32 v2 = (__s32)vexfs_ieee754_to_fixed(vec2_bits[i + j]);
+            __s32 diff = v1 - v2;
+            sum += (__u64)(diff * diff);
+        }
+    }
+    
+    /* Handle remaining elements */
+    for (; i < dimensions; i++) {
+        __s32 v1 = (__s32)vexfs_ieee754_to_fixed(vec1_bits[i]);
+        __s32 v2 = (__s32)vexfs_ieee754_to_fixed(vec2_bits[i]);
+        __s32 diff = v1 - v2;
+        sum += (__u64)(diff * diff);
+    }
+    
+    return (__u32)min(sum, (__u64)UINT_MAX);
+}
+#endif /* CONFIG_X86_64 */
+
+/*
+ * Product Quantization-based search
+ */
+int vexfs_pq_search_with_codes(const __u32 *query_bits, const __u8 *pq_codes,
+                              __u32 dimensions, __u32 vector_count,
+                              const struct vexfs_pq_config *config,
+                              const __u32 *codebooks_bits,
+                              __u32 *result_indices, __u32 k)
+{
+    __u32 v, s;
+    __u32 *distances = NULL;
+    int ret = 0;
+    
+    if (!query_bits || !pq_codes || !config || !codebooks_bits || !result_indices) {
+        return -EINVAL;
+    }
+    
+    if (k > vector_count) {
+        k = vector_count;
+    }
+    
+    distances = kmalloc(vector_count * sizeof(__u32), GFP_KERNEL);
+    if (!distances) {
+        return -ENOMEM;
+    }
+    
+    /* Compute approximate distances using PQ codes */
+    for (v = 0; v < vector_count; v++) {
+        __u64 total_distance = 0;
+        
+        for (s = 0; s < config->subvector_count; s++) {
+            __u32 subvector_start = s * config->subvector_dims;
+            __u8 code = pq_codes[v * config->subvector_count + s];
+            __u32 codebook_offset = s * config->codebook_size * config->subvector_dims +
+                                   code * config->subvector_dims;
+            
+            __u32 distance = vexfs_compute_subvector_distance(
+                &query_bits[subvector_start],
+                &codebooks_bits[codebook_offset],
+                config->subvector_dims);
+            
+            total_distance += distance;
+        }
+        
+        distances[v] = (__u32)min(total_distance, (__u64)UINT_MAX);
+    }
+    
+    /* Find k nearest neighbors using simple selection */
+    for (__u32 i = 0; i < k; i++) {
+        __u32 min_idx = i;
+        for (__u32 j = i + 1; j < vector_count; j++) {
+            if (distances[j] < distances[min_idx]) {
+                min_idx = j;
+            }
+        }
+        
+        /* Swap */
+        if (min_idx != i) {
+            __u32 temp_dist = distances[i];
+            distances[i] = distances[min_idx];
+            distances[min_idx] = temp_dist;
+            
+            result_indices[i] = min_idx;
+        } else {
+            result_indices[i] = i;
+        }
+    }
+    
+    kfree(distances);
+    return ret;
+}
