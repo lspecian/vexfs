@@ -25,8 +25,17 @@ linked_list_allocator = { version = "0.10", optional = true }
 fuse = { version = "0.3", optional = true }
 time = { version = "0.3", optional = true }
 time01 = { package = "time", version = "0.1", optional = true }
-clap = { version = "4.0", optional = true }
+clap = { version = "4.0", features = ["derive"], optional = true }
 libc = { version = "0.2", optional = true }
+
+# VexCTL dependencies (optional for command-line tool)
+nix = { version = "0.27", features = ["fs", "ioctl", "mount"], optional = true }
+console = { version = "0.15", optional = true }
+tabled = { version = "0.14", optional = true }
+indicatif = { version = "0.17", optional = true }
+thiserror = { version = "1.0", optional = true }
+url = { version = "2.5", optional = true }
+env_logger = { version = "0.10", optional = true }
 
 # Server dependencies (optional for ChromaDB-compatible API)
 axum = { version = "0.7", optional = true }
@@ -94,6 +103,7 @@ kernel = ["linked_list_allocator"]  # Mutually exclusive with std
 c_bindings = []  # New feature for current C FFI approach
 fuse_support = ["std", "fuse", "time", "time01", "clap", "libc"]  # FUSE userspace testing (requires std)
 server = ["std", "axum", "tokio", "tower", "tower-http", "tracing", "tracing-subscriber", "serde", "serde_json", "uuid", "chrono"]  # ChromaDB-compatible server (requires std)
+vexctl = ["std", "nix", "console", "tabled", "indicatif", "thiserror", "clap", "chrono", "serde", "serde_json", "url", "env_logger"]  # VexCTL command-line tool (requires std)
 
 [[bin]]
 name = "vexfs_fuse"
@@ -119,6 +129,11 @@ required-features = ["server"]
 name = "mkfs_vexfs"
 path = "rust/src/bin/mkfs_vexfs.rs"
 required-features = ["std"]
+
+[[bin]]
+name = "vexctl"
+path = "rust/src/bin/vexctl.rs"
+required-features = ["vexctl"]
 
 [[bin]]
 name = "comprehensive_test_runner"

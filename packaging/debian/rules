@@ -1,0 +1,97 @@
+#!/usr/bin/make -f
+
+# VexFS Debian Package Build Rules
+
+export DH_VERBOSE = 1
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+export DEB_CFLAGS_MAINT_APPEND = -Wall -pedantic
+export DEB_LDFLAGS_MAINT_APPEND = -Wl,--as-needed
+
+# Rust configuration
+export CARGO_HOME = $(CURDIR)/debian/cargo_home
+export RUSTUP_HOME = $(CURDIR)/debian/rustup_home
+
+# VexFS version
+VEXFS_VERSION := $(shell dpkg-parsechangelog -SVersion | cut -d- -f1)
+
+%:
+	dh $@ --with dkms
+
+override_dh_auto_clean:
+	# Clean Rust build artifacts
+	cd rust && cargo clean || true
+	# Clean kernel module build artifacts
+	cd kernel && $(MAKE) clean || true
+	# Clean packaging artifacts
+	rm -rf debian/cargo_home debian/rustup_home
+	rm -f debian/*.debhelper.log
+	dh_auto_clean
+
+override_dh_auto_configure:
+	# Create Rust environment
+	mkdir -p debian/cargo_home debian/rustup_home
+	# No additional configuration needed
+	dh_auto_configure
+
+override_dh_auto_build:
+	# Build Rust utilities (mkfs.vexfs, etc.)
+	cd rust && cargo build --release --bins
+	
+	# Build kernel module for current kernel (for testing)
+	cd kernel && $(MAKE) clean && $(MAKE) all || echo "Kernel build failed (expected in build environment)"
+	
+	# Prepare DKMS source
+	mkdir -p debian/tmp/usr/src/vexfs-$(VEXFS_VERSION)
+	cp -r kernel/src debian/tmp/usr/src/vexfs-$(VEXFS_VERSION)/
+	cp kernel/Kbuild debian/tmp/usr/src/vexfs-$(VEXFS_VERSION)/
+	cp kernel/Makefile debian/tmp/usr/src/vexfs-$(VEXFS_VERSION)/
+	
+	dh_auto_build
+
+override_dh_auto_install:
+	# Install DKMS configuration
+	mkdir -p debian/vexfs-dkms/usr/src/vexfs-$(VEXFS_VERSION)
+	cp -r kernel/src debian/vexfs-dkms/usr/src/vexfs-$(VEXFS_VERSION)/
+	cp kernel/Kbuild debian/vexfs-dkms/usr/src/vexfs-$(VEXFS_VERSION)/
+	cp kernel/Makefile debian/vexfs-dkms/usr/src/vexfs-$(VEXFS_VERSION)/
+	cp packaging/dkms.conf debian/vexfs-dkms/usr/src/vexfs-$(VEXFS_VERSION)/
+	
+	# Install utilities
+	mkdir -p debian/vexfs-utils/usr/bin
+	cp rust/target/release/mkfs_vexfs debian/vexfs-utils/usr/bin/mkfs.vexfs
+	
+	# Install development files
+	mkdir -p debian/vexfs-dev/usr/include/vexfs
+	cp kernel/src/include/*.h debian/vexfs-dev/usr/include/vexfs/
+	
+	# Install documentation
+	mkdir -p debian/vexfs-utils/usr/share/doc/vexfs-utils
+	mkdir -p debian/vexfs-dkms/usr/share/doc/vexfs-dkms
+	mkdir -p debian/vexfs-dev/usr/share/doc/vexfs-dev
+	cp docs/VEXFS_KERNEL_MODULE_GUIDE.md debian/vexfs-utils/usr/share/doc/vexfs-utils/
+	cp docs/VEXFS_KERNEL_MODULE_GUIDE.md debian/vexfs-dkms/usr/share/doc/vexfs-dkms/
+	cp docs/VEXFS_KERNEL_MODULE_GUIDE.md debian/vexfs-dev/usr/share/doc/vexfs-dev/
+	
+	# Install man pages
+	mkdir -p debian/vexfs-utils/usr/share/man/man8
+	cp packaging/man/mkfs.vexfs.8 debian/vexfs-utils/usr/share/man/man8/ || echo "Man page not found"
+	
+	# Install test utilities and benchmarks
+	mkdir -p debian/vexfs-dev/usr/bin
+	cp kernel/bin/vexfs_v2_performance_benchmark debian/vexfs-dev/usr/bin/ || echo "Benchmark not found"
+	cp kernel/bin/test_vector_search debian/vexfs-dev/usr/bin/ || echo "Test utility not found"
+	
+	dh_auto_install
+
+override_dh_dkms:
+	dh_dkms -V $(VEXFS_VERSION)
+
+override_dh_installsystemd:
+	# No systemd services for VexFS
+	
+override_dh_strip:
+	# Strip debugging symbols from utilities but not kernel module
+	dh_strip -pvexfs-utils
+	dh_strip -pvexfs-dev
+
+.PHONY: override_dh_auto_clean override_dh_auto_configure override_dh_auto_build override_dh_auto_install

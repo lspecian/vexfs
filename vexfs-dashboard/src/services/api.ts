@@ -61,7 +61,21 @@ class VexFSApiService {
   // Collections API
   async getCollections(): Promise<VexFSCollection[]> {
     const response = await this.api.get('/api/v1/collections');
-    // Handle VexFS server response format: { success: true, data: [...], error: null }
+    // Handle actual VexFS server response format: { collections: [...] }
+    if (response.data.collections) {
+      // Convert collection names to collection objects
+      return response.data.collections.map((name: string, index: number) => ({
+        id: `collection-${index + 1}`,
+        name: name,
+        description: `Collection ${name}`,
+        vectorSize: 384,
+        distance: 'cosine',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        pointsCount: 0,
+      }));
+    }
+    // Fallback for expected format: { success: true, data: [...], error: null }
     if (response.data.success) {
       return response.data.data || [];
     }
@@ -83,19 +97,30 @@ class VexFSApiService {
     vectorSize: number,
     distance: 'cosine' | 'euclidean' | 'dot' = 'cosine'
   ): Promise<VexFSCollection> {
-    const response: AxiosResponse<ApiResponse<VexFSCollection>> =
-      await this.api.post('/api/v1/collections', {
-        name,
-        metadata: {
-          distance,
-        },
-      });
-    return response.data.data!;
+    await this.api.post('/api/v1/collections', {
+      name,
+      metadata: {
+        distance,
+      },
+    });
+
+    // VexFS server doesn't return the collection object, so we create it
+    // This matches the format expected by the frontend
+    return {
+      id: `collection-${Date.now()}`, // Generate a unique ID
+      name: name,
+      description: `Collection ${name}`,
+      vectorSize: vectorSize,
+      distance: distance,
+      pointsCount: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
   }
 
   async deleteCollection(name: string): Promise<boolean> {
     try {
-      await this.api.delete(`/collections/${name}`);
+      await this.api.delete(`/api/v1/collections/${name}`);
       return true;
     } catch {
       return false;

@@ -28,6 +28,14 @@ time01 = { package = "time", version = "0.1", optional = true }
 clap = { version = "4.0", optional = true }
 libc = { version = "0.2", optional = true }
 
+# VexCtl dependencies (optional for CLI tool)
+nix = { version = "0.27", optional = true }
+console = { version = "0.15", optional = true }
+tabled = { version = "0.14", optional = true }
+indicatif = { version = "0.17", optional = true }
+thiserror = { version = "1.0", optional = true }
+url = { version = "2.0", optional = true }
+
 # Server dependencies (optional for ChromaDB-compatible API)
 axum = { version = "0.7", optional = true }
 tokio = { version = "1.0", features = ["full"], optional = true }
@@ -35,7 +43,7 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 serde_json = { version = "1.0", optional = true }
 uuid = { version = "1.0", features = ["v4"], optional = true }
 tower = { version = "0.4", optional = true }
-tower-http = { version = "0.5", features = ["cors"], optional = true }
+tower-http = { version = "0.5", features = ["cors", "fs", "set-header"], optional = true }
 tracing = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"], optional = true }
 chrono = { version = "0.4", features = ["serde"], optional = true }
@@ -48,63 +56,16 @@ chrono = { version = "0.4", features = ["serde"] }
 crate-type = ["lib", "staticlib"]
 path = "src/lib.rs"
 
-# Test binaries - temporarily disabled due to module access issues
-# These benchmarks need to be refactored to use the public API or moved to examples/
-# [[bin]]
-# name = "comprehensive_test_runner"
-# path = "src/bin/comprehensive_test_runner.rs"
-
-# [[bin]]
-# name = "vector_test_runner"
-# path = "src/bin/vector_test_runner.rs"
-
-# [[bin]]
-# name = "vector_cache_benchmark"
-# path = "src/bin/vector_cache_benchmark.rs"
-
-# [[bin]]
-# name = "cow_snapshot_benchmark"
-# path = "src/bin/cow_snapshot_benchmark.rs"
-
-# [[bin]]
-# name = "vector_benchmark"
-# path = "src/bin/vector_benchmark.rs"
-
-
-[profile.release]
-panic = "abort"
-opt-level = 2
-lto = true
-
-[profile.dev]
-panic = "abort"
-opt-level = 0
-
-# Target-specific configuration for kernel module is now in .cargo/config.toml
-
-# Features for conditional compilation
-[features]
-default = ["std"]
-std = ["serde", "serde_json", "uuid"]
-kernel = ["linked_list_allocator"]  # Keep for future RfL approach but disabled
-c_bindings = []  # New feature for current C FFI approach
-fuse_support = ["std", "fuse", "time", "time01", "clap", "libc"]  # FUSE userspace testing
-server = ["axum", "tokio", "tower", "tower-http", "tracing", "tracing-subscriber", "serde", "serde_json", "uuid", "chrono"]  # ChromaDB-compatible server
+# Binary targets
+[[bin]]
+name = "vexctl"
+path = "src/bin/vexctl.rs"
+required-features = ["vexctl"]
 
 [[bin]]
 name = "vexfs_fuse"
 path = "src/bin/vexfs_fuse.rs"
 required-features = ["fuse_support"]
-
-[[bin]]
-name = "vexfs_server"
-path = "src/bin/vexfs_server.rs"
-required-features = ["server"]
-
-[[bin]]
-name = "vexfs_server_enhanced"
-path = "src/bin/vexfs_server_enhanced.rs"
-required-features = ["server"]
 
 [[bin]]
 name = "vexfs_unified_server"
@@ -117,43 +78,33 @@ path = "src/bin/mkfs_vexfs.rs"
 required-features = ["std"]
 
 [[bin]]
+name = "anns_benchmark_test"
+path = "src/bin/anns_benchmark_test.rs"
+
+[[bin]]
 name = "comprehensive_test_runner"
 path = "src/bin/comprehensive_test_runner.rs"
-required-features = ["std"]
 
 [[bin]]
 name = "vector_test_runner"
 path = "src/bin/vector_test_runner.rs"
-required-features = ["std"]
 
-[[bin]]
-name = "anns_benchmark_test"
-path = "src/bin/anns_benchmark_test.rs"
-required-features = ["std"]
+[profile.dev]
+panic = "abort"
+opt-level = 0
 
-# Test configuration
-[package.metadata.test]
-# Test discovery patterns
-test_patterns = ["test_*.rs", "*_test.rs"]
-integration_patterns = ["integration_*.rs"]
-performance_patterns = ["perf_*.rs", "bench_*.rs"]
+[profile.release]
+panic = "abort"
+opt-level = 0
 
-# Test categories for selective execution
-[package.metadata.test.categories]
-unit = ["test_*"]
-integration = ["integration_*"]
-performance = ["perf_*", "bench_*"]
-security = ["security_*"]
+# Target-specific configuration for kernel module is now in .cargo/config.toml
 
-# Test tags for filtering
-[package.metadata.test.tags]
-quick = "Tests that run in < 10 seconds"
-slow = "Tests that run in > 30 seconds"
-vm_required = "Tests requiring VM environment"
-kernel_module = "Kernel module specific tests"
-filesystem = "Filesystem operation tests"
-vector_operations = "Vector storage and search tests"
-fuse = "FUSE implementation tests"
-safe = "Safe to run in any environment"
-risky = "May affect system stability"
-dangerous = "High risk, VM-only execution"
+# Features for conditional compilation
+[features]
+default = ["std"]
+std = ["serde", "serde_json", "uuid"]
+kernel = ["linked_list_allocator"]  # Keep for future RfL approach but disabled
+c_bindings = []  # New feature for current C FFI approach
+fuse_support = ["std", "fuse", "time", "time01", "clap", "libc"]  # FUSE userspace testing
+vexctl = ["std", "nix", "console", "tabled", "indicatif", "thiserror", "clap", "chrono", "serde", "serde_json", "url"]  # VexCtl CLI tool
+server = ["axum", "tokio", "tower", "tower-http", "tracing", "tracing-subscriber", "serde", "serde_json", "uuid", "chrono"]  # ChromaDB-compatible server

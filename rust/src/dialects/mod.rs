@@ -57,6 +57,16 @@ impl VexFSEngine {
         Ok(collections.keys().cloned().collect())
     }
     
+    pub fn delete_collection(&self, name: &str) -> VexfsResult<()> {
+        let mut collections = self.collections.lock().map_err(|_| VexfsError::LockError)?;
+        
+        if collections.remove(name).is_some() {
+            Ok(())
+        } else {
+            Err(VexfsError::NotFound)
+        }
+    }
+    
     pub fn add_documents(&self, collection_name: &str, documents: Vec<Document>) -> VexfsResult<()> {
         let mut collections = self.collections.lock().map_err(|_| VexfsError::LockError)?;
         if let Some(collection) = collections.get_mut(collection_name) {

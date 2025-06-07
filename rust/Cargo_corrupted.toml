@@ -1,0 +1,145 @@
+[package]
+name = "vexfs"
+version = "1.0.0"
+edition = "2021"
+authors = ["VexFS Contributors"]
+description = "Vector Extended File System - A filesystem optimized for vector embeddings and similarity search"
+repository = "https://github.com/vexfs/vexfs"
+license = "Apache-2.0"
+readme = "README.md"
+keywords = ["filesystem", "vector", "embeddings", "similarity-search", "kernel"]
+categories = ["filesystem", "science", "data-structures"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# Note: VexFS uses C FFI approach for kernel integration, not Rust-for-Linux
+
+# Dependencies for no_std compatibility
+hashbrown = { version = "0.14", default-features = false }
+libm = { version = "0.2", default-features = false }
+derivative = "2.2"
+linked_list_allocator = { version = "0.10", optional = true }
+
+# FUSE dependencies (optional for userspace testing)
+fuse = { version = "0.3", optional = true }
+time = { version = "0.3", optional = true }
+time01 = { package = "time", version = "0.1", optional = true }
+clap = { version = "4.0", optional = true }
+libc = { version = "0.2", optional = true }
+
+# Server dependencies (optional for ChromaDB-compatible API)
+axum = { version = "0.7", optional = true }
+tokio = { version = "1.0", features = ["full"], optional = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+uuid = { version = "1.0", features = ["v4"], optional = true }
+tower = { version = "0.4", optional = true }
+tower-http = { version = "0.5", features = ["cors"], optional = true }
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"], optional = true }
+chrono = { version = "0.4", features = ["serde"], optional = true }
+
+[dev-dependencies]
+fastrand = "2.0"
+chrono = { version = "0.4", features = ["serde"] }
+
+[lib]
+crate-type = ["lib", "staticlib"]
+path = "src/lib.rs"
+
+# Test binaries - temporarily disabled due to module access issues
+# These benchmarks need to be refactored to use the public API or moved to examples/
+# [[bin]]
+
+[[bin]]
+name = "vexctl"
+path = "src/bin/vexctl.rs"
+# name = "comprehensive_test_runner"
+# path = "src/bin/comprehensive_test_runner.rs"
+
+# [[bin]]
+
+[[bin]]
+name = "vexctl"
+path = "src/bin/vexctl.rs"
+# name = "vector_test_runner"
+# path = "src/bin/vector_test_runner.rs"
+
+# [[bin]]
+
+[[bin]]
+name = "vexctl"
+path = "src/bin/vexctl.rs"
+# name = "vector_cache_benchmark"
+# path = "src/bin/vector_cache_benchmark.rs"
+
+# [[bin]]
+
+[[bin]]
+name = "vexctl"
+path = "src/bin/vexctl.rs"
+# name = "cow_snapshot_benchmark"
+# path = "src/bin/cow_snapshot_benchmark.rs"
+
+# [[bin]]
+
+[[bin]]
+name = "vexctl"
+path = "src/bin/vexctl.rs"
+# name = "vector_benchmark"
+# path = "src/bin/vector_benchmark.rs"
+
+
+[profile.release]
+panic = "abort"
+opt-level = 2
+lto = true
+
+[profile.dev]
+panic = "abort"
+opt-level = 0
+
+# Target-specific configuration for kernel module is now in .cargo/config.toml
+
+# Features for conditional compilation
+[features]
+default = ["std"]
+std = ["serde", "serde_json", "uuid"]
+kernel = ["linked_list_allocator"]  # Keep for future RfL approach but disabled
+c_bindings = []  # New feature for current C FFI approach
+fuse_support = ["std", "fuse", "time", "time01", "clap", "libc"]  # FUSE userspace testing
+server = ["axum", "tokio", "tower", "tower-http", "tracing", "tracing-subscriber", "serde", "serde_json", "uuid", "chrono"]  # ChromaDB-compatible server
+
+
+# Binary targets
+[[bin]]
+name = "vexctl"
+path = "src/bin/vexctl.rs"
+
+[[bin]]
+name = "vexfs_fuse"
+path = "src/bin/vexfs_fuse.rs"
+required-features = ["fuse_support"]
+
+[[bin]]
+name = "vexfs_unified_server"
+path = "src/bin/vexfs_unified_server.rs"
+required-features = ["server"]
+
+[[bin]]
+name = "mkfs_vexfs"
+path = "src/bin/mkfs_vexfs.rs"
+required-features = ["std"]
+
+[[bin]]
+name = "anns_benchmark_test"
+path = "src/bin/anns_benchmark_test.rs"
+
+[[bin]]
+name = "comprehensive_test_runner"
+path = "src/bin/comprehensive_test_runner.rs"
+
+[[bin]]
+name = "vector_test_runner"
+path = "src/bin/vector_test_runner.rs"

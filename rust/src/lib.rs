@@ -231,3 +231,17 @@ pub fn test_vector_operations() -> core::result::Result<(), String> {
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}
 }
+
+// VexCtl modules (only available with vexctl feature)
+#[cfg(feature = "vexctl")]
+pub mod client;
+#[cfg(feature = "vexctl")]
+pub mod commands;
+#[cfg(feature = "vexctl")]
+pub mod output;
+#[cfg(feature = "vexctl")]
+pub mod error;
+
+// Re-export VexCtl components for easy access
+#[cfg(feature = "vexctl")]
+pub use error::{VexctlError, Result};

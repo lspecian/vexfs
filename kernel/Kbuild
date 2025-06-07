@@ -1,0 +1,16 @@
+# VexFS v2.0 Kernel Build Configuration - Organized Structure
+obj-m := vexfs_v2_phase3.o
+
+# Core module files from organized structure (minimal working set)
+vexfs_v2_phase3-objs := src/core/vexfs_v2_main.o \
+                        src/search/vexfs_v2_search.o \
+                        src/search/vexfs_v2_advanced_search.o \
+                        src/search/vexfs_v2_hnsw.o \
+                        src/search/vexfs_v2_lsh.o \
+                        src/search/vexfs_v2_multi_model.o \
+                        src/search/vexfs_v2_phase3_integration.o \
+                        src/utils/vexfs_v2_monitoring.o
+
+# Enable Phase 3 features and include paths
+ccflags-y += -DVEXFS_PHASE3_ENABLED -O2 -Wall -Wextra
+ccflags-y += -I$(src)/src/include -I$(src)/src/core -I$(src)/src/search -I$(src)/src/utils
