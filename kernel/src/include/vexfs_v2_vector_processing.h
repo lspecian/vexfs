@@ -257,6 +257,31 @@ __u32 vexfs_ieee754_reciprocal(__u32 input_bits);
 void vexfs_ieee754_vector_scale(const __u32 *input_bits, __u32 *output_bits,
                                __u32 count, __u32 scale_bits);
 
+/* PQ-HNSW Integration Functions */
+int vexfs_hybrid_pq_hnsw_search(const __u32 *query_bits, __u32 dimensions,
+                                const struct vexfs_pq_config *pq_config,
+                                const __u8 *pq_codes, const __u32 *codebooks_bits,
+                                __u32 vector_count, __u32 k,
+                                struct vexfs_search_result *results,
+                                __u32 *result_count);
+
+int vexfs_create_pq_enhanced_hnsw_node(__u64 vector_id, const __u32 *vector_bits,
+                                       __u32 dimensions, const struct vexfs_pq_config *pq_config,
+                                       const __u32 *codebooks_bits, __u8 *pq_codes_out);
+
+__u32 vexfs_pq_approximate_distance(const __u8 *pq_codes1, const __u8 *pq_codes2,
+                                   const struct vexfs_pq_config *pq_config,
+                                   const __u32 *codebooks_bits);
+
+int vexfs_batch_pq_encode_for_hnsw(const __u32 *vectors_bits, __u32 vector_count,
+                                  __u32 dimensions, const struct vexfs_pq_config *pq_config,
+                                  const __u32 *codebooks_bits, __u8 *pq_codes_out);
+
+int vexfs_pq_hnsw_integrated_search(const __u32 *query_vector, __u32 dimensions,
+                                    __u32 k, __u32 distance_metric,
+                                    struct vexfs_search_result *results,
+                                    __u32 *result_count);
+
 /* Statistics and Monitoring */
 void vexfs_get_vector_processing_stats(struct vexfs_vector_processing_stats *stats);
 void vexfs_reset_vector_processing_stats(void);
