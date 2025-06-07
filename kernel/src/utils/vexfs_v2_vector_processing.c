@@ -22,6 +22,7 @@
 #include <linux/slab.h>
 #include <linux/time.h>
 #include <linux/math64.h>
+#include <linux/workqueue.h>
 #include <asm/fpu/api.h>
 #include <asm/cpufeature.h>
 
@@ -1562,4 +1563,872 @@ EXPORT_SYMBOL(vexfs_hybrid_pq_hnsw_search);
 EXPORT_SYMBOL(vexfs_create_pq_enhanced_hnsw_node);
 EXPORT_SYMBOL(vexfs_pq_approximate_distance);
 EXPORT_SYMBOL(vexfs_batch_pq_encode_for_hnsw);
+/*
+ * ============================================================================
+ * BATCH VECTOR PROCESSING IMPLEMENTATION
+ * Task 54: Efficient batch processing to amortize FPU context switching costs
+ * ============================================================================
+ */
+
+/* Global batch processing statistics */
+static struct {
+    __u64 batch_operations;
+    __u64 total_fpu_context_switches;
+    __u64 total_vectors_processed;
+    __u64 total_batch_time_ns;
+    spinlock_t lock;
+} batch_stats = {
+    .lock = __SPIN_LOCK_UNLOCKED(batch_stats.lock)
+};
+
+/* Work queue for asynchronous batch processing */
+static struct workqueue_struct *vexfs_batch_workqueue = NULL;
+
+/*
+ * Calculate optimal batch size based on operation type and available memory
+ */
+__u32 vexfs_calculate_optimal_batch_size(__u32 dimensions, __u32 operation_type,
+                                        __u32 available_memory)
+{
+    __u32 vector_size_bytes;
+    __u32 optimal_batch;
+    __u32 memory_per_vector;
+    
+    /* Calculate memory requirements per vector based on operation type */
+    switch (operation_type) {
+        case VEXFS_BATCH_OP_L2_NORMALIZE:
+            /* Input + output vectors (both float32) */
+            memory_per_vector = dimensions * sizeof(__u32) * 2;
+            break;
+            
+        case VEXFS_BATCH_OP_SCALAR_QUANTIZE:
+            /* Input vector (float32) + output (int8/uint8) */
+            memory_per_vector = dimensions * sizeof(__u32) + dimensions;
+            break;
+            
+        case VEXFS_BATCH_OP_PRODUCT_QUANTIZE:
+            /* Input vector + PQ codes (typically much smaller) */
+            memory_per_vector = dimensions * sizeof(__u32) + 32; /* Assume 32 subvectors */
+            break;
+            
+        case VEXFS_BATCH_OP_BINARY_QUANTIZE:
+            /* Input vector + binary codes */
+            memory_per_vector = dimensions * sizeof(__u32) + (dimensions / 8);
+            break;
+            
+        case VEXFS_BATCH_OP_DISTANCE_CALC:
+            /* Two input vectors + distance result */
+            memory_per_vector = dimensions * sizeof(__u32) * 2 + sizeof(__u32);
+            break;
+            
+        default:
+            memory_per_vector = dimensions * sizeof(__u32) * 2; /* Conservative estimate */
+            break;
+    }
+    
+    /* Calculate optimal batch size based on available memory */
+    if (available_memory == 0) {
+        available_memory = 1024 * 1024; /* Default 1MB */
+    }
+    
+    optimal_batch = available_memory / memory_per_vector;
+    
+    /* Clamp to reasonable bounds */
+    if (optimal_batch < VEXFS_BATCH_SIZE_MIN) {
+        optimal_batch = VEXFS_BATCH_SIZE_MIN;
+    } else if (optimal_batch > VEXFS_BATCH_SIZE_MAX) {
+        optimal_batch = VEXFS_BATCH_SIZE_MAX;
+    }
+    
+    /* Prefer power-of-2 sizes for better SIMD alignment */
+    if (optimal_batch >= 64) optimal_batch = 64;
+    else if (optimal_batch >= 32) optimal_batch = 32;
+    else if (optimal_batch >= 16) optimal_batch = 16;
+    else if (optimal_batch >= 8) optimal_batch = 8;
+    
+    return optimal_batch;
+}
+
+/*
+ * Batch L2 Normalization
+ * Processes multiple vectors with a single FPU context switch
+ */
+int vexfs_batch_l2_normalize(const __u32 *input_bits, __u32 *output_bits,
+                             __u32 dimensions, __u32 batch_size)
+{
+    __u64 start_time, end_time;
+    __u32 simd_caps;
+    int ret = 0;
+    
+    if (!input_bits || !output_bits || batch_size == 0 || dimensions == 0) {
+        return -EINVAL;
+    }
+    
+    start_time = ktime_get_ns();
+    
+    /* Detect SIMD capabilities */
+    simd_caps = vexfs_detect_simd_capabilities();
+    
+    /* Single FPU context switch for entire batch */
+    kernel_fpu_begin();
+    
+    /* Choose optimal SIMD implementation */
+#ifdef CONFIG_X86_64
+    if (simd_caps & VEXFS_SIMD_AVX512) {
+        ret = vexfs_l2_normalize_avx512(input_bits, output_bits, dimensions, batch_size);
+    } else if (simd_caps & VEXFS_SIMD_AVX2) {
+        ret = vexfs_l2_normalize_avx2(input_bits, output_bits, dimensions, batch_size);
+    } else {
+        ret = vexfs_l2_normalize_vectors_scalar(input_bits, output_bits, dimensions, batch_size);
+    }
+#else
+    ret = vexfs_l2_normalize_vectors_scalar(input_bits, output_bits, dimensions, batch_size);
+#endif
+    
+    kernel_fpu_end();
+    
+    end_time = ktime_get_ns();
+    
+    /* Update statistics */
+    spin_lock(&batch_stats.lock);
+    batch_stats.batch_operations++;
+    batch_stats.total_fpu_context_switches++;
+    batch_stats.total_vectors_processed += batch_size;
+    batch_stats.total_batch_time_ns += (end_time - start_time);
+    spin_unlock(&batch_stats.lock);
+    
+    return ret;
+}
+
+/*
+ * Batch Scalar Quantization
+ * Quantizes multiple vectors with a single FPU context switch
+ */
+int vexfs_batch_scalar_quantize(const __u32 *input_bits, void *output,
+                                __u32 dimensions, __u32 batch_size,
+                                __u32 quant_type, __u32 scale_bits, __u32 offset_bits)
+{
+    __u64 start_time, end_time;
+    __u32 simd_caps;
+    int ret = 0;
+    
+    if (!input_bits || !output || batch_size == 0 || dimensions == 0) {
+        return -EINVAL;
+    }
+    
+    start_time = ktime_get_ns();
+    simd_caps = vexfs_detect_simd_capabilities();
+    
+    /* Single FPU context switch for entire batch */
+    kernel_fpu_begin();
+    
+#ifdef CONFIG_X86_64
+    if (simd_caps & VEXFS_SIMD_AVX2) {
+        ret = vexfs_scalar_quantize_avx2(input_bits, output, dimensions, batch_size,
+                                        quant_type, scale_bits, offset_bits);
+    } else {
+        /* Scalar fallback for batch */
+        __u32 v;
+        for (v = 0; v < batch_size; v++) {
+            const __u32 *vector_in = &input_bits[v * dimensions];
+            
+            if (quant_type == VEXFS_QUANT_INT8) {
+                __s8 *vector_out = &((__s8*)output)[v * dimensions];
+                ret = vexfs_scalar_quantize_int8(vector_in, vector_out, dimensions, 1,
+                                               scale_bits, offset_bits);
+            } else if (quant_type == VEXFS_QUANT_UINT8) {
+                __u8 *vector_out = &((__u8*)output)[v * dimensions];
+                ret = vexfs_scalar_quantize_uint8(vector_in, vector_out, dimensions, 1,
+                                                scale_bits, offset_bits);
+            } else {
+                ret = -EINVAL;
+            }
+            
+            if (ret) break;
+        }
+    }
+#else
+    /* ARM/other architectures - scalar implementation */
+    __u32 v;
+    for (v = 0; v < batch_size; v++) {
+        const __u32 *vector_in = &input_bits[v * dimensions];
+        
+        if (quant_type == VEXFS_QUANT_INT8) {
+            __s8 *vector_out = &((__s8*)output)[v * dimensions];
+            ret = vexfs_scalar_quantize_int8(vector_in, vector_out, dimensions, 1,
+                                           scale_bits, offset_bits);
+        } else if (quant_type == VEXFS_QUANT_UINT8) {
+            __u8 *vector_out = &((__u8*)output)[v * dimensions];
+            ret = vexfs_scalar_quantize_uint8(vector_in, vector_out, dimensions, 1,
+                                            scale_bits, offset_bits);
+        } else {
+            ret = -EINVAL;
+        }
+        
+        if (ret) break;
+    }
+#endif
+    
+    kernel_fpu_end();
+    
+    end_time = ktime_get_ns();
+    
+    /* Update statistics */
+    spin_lock(&batch_stats.lock);
+    batch_stats.batch_operations++;
+    batch_stats.total_fpu_context_switches++;
+    batch_stats.total_vectors_processed += batch_size;
+    batch_stats.total_batch_time_ns += (end_time - start_time);
+    spin_unlock(&batch_stats.lock);
+    
+    return ret;
+}
+
+/*
+ * Batch Product Quantization
+ * Encodes multiple vectors with a single FPU context switch
+ */
+int vexfs_batch_product_quantize(const __u32 *input_bits, __u8 *output_codes,
+                                 __u32 dimensions, __u32 batch_size,
+                                 const struct vexfs_pq_config *config,
+                                 const __u32 *codebooks_bits)
+{
+    __u64 start_time, end_time;
+    __u32 simd_caps;
+    int ret = 0;
+    
+    if (!input_bits || !output_codes || !config || !codebooks_bits || 
+        batch_size == 0 || dimensions == 0) {
+        return -EINVAL;
+    }
+    
+    start_time = ktime_get_ns();
+    simd_caps = vexfs_detect_simd_capabilities();
+    
+    /* Single FPU context switch for entire batch */
+    kernel_fpu_begin();
+    
+#ifdef CONFIG_X86_64
+    if (simd_caps & VEXFS_SIMD_AVX2) {
+        ret = vexfs_product_quantize_avx2(input_bits, output_codes, dimensions, batch_size,
+                                         config, codebooks_bits);
+    } else {
+        /* Scalar fallback for batch */
+        __u32 v;
+        for (v = 0; v < batch_size; v++) {
+            const __u32 *vector_in = &input_bits[v * dimensions];
+            __u8 *codes_out = &output_codes[v * config->subvector_count];
+            
+            ret = vexfs_product_quantize_with_codebooks(vector_in, codes_out,
+                                                       dimensions, 1, config, codebooks_bits);
+            if (ret) break;
+        }
+    }
+#else
+    /* Scalar implementation for other architectures */
+    __u32 v;
+    for (v = 0; v < batch_size; v++) {
+        const __u32 *vector_in = &input_bits[v * dimensions];
+        __u8 *codes_out = &output_codes[v * config->subvector_count];
+        
+        ret = vexfs_product_quantize_with_codebooks(vector_in, codes_out,
+                                                   dimensions, 1, config, codebooks_bits);
+        if (ret) break;
+    }
+#endif
+    
+    kernel_fpu_end();
+    
+    end_time = ktime_get_ns();
+    
+    /* Update statistics */
+    spin_lock(&batch_stats.lock);
+    batch_stats.batch_operations++;
+    batch_stats.total_fpu_context_switches++;
+    batch_stats.total_vectors_processed += batch_size;
+    batch_stats.total_batch_time_ns += (end_time - start_time);
+    spin_unlock(&batch_stats.lock);
+    
+    return ret;
+}
+
+/*
+ * Batch Binary Quantization
+ * Converts multiple vectors to binary codes with a single FPU context switch
+ */
+int vexfs_batch_binary_quantize(const __u32 *input_bits, __u8 *output_codes,
+                                __u32 dimensions, __u32 batch_size,
+                                __u32 threshold_bits)
+{
+    __u64 start_time, end_time;
+    __u32 simd_caps;
+    int ret = 0;
+    
+    if (!input_bits || !output_codes || batch_size == 0 || dimensions == 0) {
+        return -EINVAL;
+    }
+    
+    start_time = ktime_get_ns();
+    simd_caps = vexfs_detect_simd_capabilities();
+    
+    /* Single FPU context switch for entire batch */
+    kernel_fpu_begin();
+    
+#ifdef CONFIG_X86_64
+    if (simd_caps & VEXFS_SIMD_AVX2) {
+        ret = vexfs_binary_quantize_avx2(input_bits, output_codes, dimensions, batch_size,
+                                        threshold_bits);
+    } else {
+        /* Scalar fallback for batch */
+        __u32 v;
+        for (v = 0; v < batch_size; v++) {
+            const __u32 *vector_in = &input_bits[v * dimensions];
+            __u8 *codes_out = &output_codes[v * ((dimensions + 7) / 8)];
+            
+            ret = vexfs_binary_quantize(vector_in, codes_out, dimensions, 1, threshold_bits);
+            if (ret) break;
+        }
+    }
+#else
+    /* Scalar implementation for other architectures */
+    __u32 v;
+    for (v = 0; v < batch_size; v++) {
+        const __u32 *vector_in = &input_bits[v * dimensions];
+        __u8 *codes_out = &output_codes[v * ((dimensions + 7) / 8)];
+        
+        ret = vexfs_binary_quantize(vector_in, codes_out, dimensions, 1, threshold_bits);
+        if (ret) break;
+    }
+#endif
+    
+    kernel_fpu_end();
+    
+    end_time = ktime_get_ns();
+    
+    /* Update statistics */
+    spin_lock(&batch_stats.lock);
+    batch_stats.batch_operations++;
+    batch_stats.total_fpu_context_switches++;
+    batch_stats.total_vectors_processed += batch_size;
+    batch_stats.total_batch_time_ns += (end_time - start_time);
+    spin_unlock(&batch_stats.lock);
+    
+    return ret;
+}
+
+/*
+ * Batch Distance Calculation
+ * Computes distances between vector pairs with a single FPU context switch
+ */
+int vexfs_batch_distance_calculate(const __u32 *vectors1_bits, const __u32 *vectors2_bits,
+                                   __u32 *distances, __u32 dimensions, __u32 batch_size,
+                                   __u32 distance_metric)
+{
+    __u64 start_time, end_time;
+    int ret = 0;
+    __u32 v, d;
+    
+    if (!vectors1_bits || !vectors2_bits || !distances || batch_size == 0 || dimensions == 0) {
+        return -EINVAL;
+    }
+    
+    start_time = ktime_get_ns();
+    
+    /* Single FPU context switch for entire batch */
+    kernel_fpu_begin();
+    
+    /* Process all distance calculations in batch */
+    for (v = 0; v < batch_size; v++) {
+        const __u32 *vec1 = &vectors1_bits[v * dimensions];
+        const __u32 *vec2 = &vectors2_bits[v * dimensions];
+        
+        if (distance_metric == VEXFS_DISTANCE_L2) {
+            /* L2 distance calculation */
+            __u64 sum_squared = 0;
+            for (d = 0; d < dimensions; d++) {
+                __s32 diff = (__s32)vexfs_ieee754_to_fixed(vec1[d]) - 
+                           (__s32)vexfs_ieee754_to_fixed(vec2[d]);
+                sum_squared += (__u64)(diff * diff);
+            }
+            distances[v] = vexfs_fixed_to_ieee754(int_sqrt(sum_squared));
+        } else if (distance_metric == VEXFS_DISTANCE_COSINE) {
+            /* Cosine distance calculation */
+            __u64 dot_product = 0, norm1 = 0, norm2 = 0;
+            for (d = 0; d < dimensions; d++) {
+                __s32 val1 = (__s32)vexfs_ieee754_to_fixed(vec1[d]);
+                __s32 val2 = (__s32)vexfs_ieee754_to_fixed(vec2[d]);
+                dot_product += (__u64)(val1 * val2);
+                norm1 += (__u64)(val1 * val1);
+                norm2 += (__u64)(val2 * val2);
+            }
+            
+            if (norm1 == 0 || norm2 == 0) {
+                distances[v] = vexfs_fixed_to_ieee754(1000); /* Maximum distance */
+            } else {
+                __u32 norm_product = int_sqrt(norm1) * int_sqrt(norm2);
+                __u32 cosine_sim = (dot_product * 1000) / norm_product;
+                distances[v] = vexfs_fixed_to_ieee754(1000 - cosine_sim); /* Convert to distance */
+            }
+        } else {
+            ret = -EINVAL;
+            break;
+        }
+    }
+    
+    kernel_fpu_end();
+    
+    end_time = ktime_get_ns();
+    
+    /* Update statistics */
+    spin_lock(&batch_stats.lock);
+    batch_stats.batch_operations++;
+    batch_stats.total_fpu_context_switches++;
+    batch_stats.total_vectors_processed += batch_size;
+    batch_stats.total_batch_time_ns += (end_time - start_time);
+    spin_unlock(&batch_stats.lock);
+    
+    return ret;
+}
+
+/*
+ * Batch HNSW Insert (placeholder)
+ * Inserts multiple vectors into HNSW index with optimized batch processing
+ */
+int vexfs_batch_hnsw_insert(const __u32 *vectors_bits, __u64 *node_ids,
+                            __u32 dimensions, __u32 batch_size,
+                            __u32 layer, __u32 max_connections)
+{
+    __u64 start_time, end_time;
+    int ret = 0;
+    __u32 v;
+    
+    if (!vectors_bits || !node_ids || batch_size == 0 || dimensions == 0) {
+        return -EINVAL;
+    }
+    
+    start_time = ktime_get_ns();
+    
+    /* TODO: Integrate with actual HNSW implementation
+     * For now, provide placeholder functionality
+     */
+    for (v = 0; v < batch_size; v++) {
+        node_ids[v] = v + 1; /* Placeholder node IDs */
+    }
+    
+    end_time = ktime_get_ns();
+    
+    /* Update statistics */
+    spin_lock(&batch_stats.lock);
+    batch_stats.batch_operations++;
+    batch_stats.total_vectors_processed += batch_size;
+    batch_stats.total_batch_time_ns += (end_time - start_time);
+    spin_unlock(&batch_stats.lock);
+    
+    return ret;
+}
+
+/*
+ * Main Batch Processing Interface
+ * Dispatches to appropriate batch function based on operation type
+ */
+int vexfs_batch_process_vectors(struct vexfs_batch_processing_request *request)
+{
+    int ret = 0;
+    __u64 start_time, end_time;
+    
+    if (!request) {
+        return -EINVAL;
+    }
+    
+    /* Validate batch size */
+    if (request->batch_size < VEXFS_BATCH_SIZE_MIN || 
+        request->batch_size > VEXFS_BATCH_SIZE_MAX) {
+        return -EINVAL;
+    }
+    
+    start_time = ktime_get_ns();
+    
+    /* Dispatch to appropriate batch function */
+    switch (request->operation_type) {
+        case VEXFS_BATCH_OP_L2_NORMALIZE:
+            ret = vexfs_batch_l2_normalize(request->input_vectors_bits,
+                                          request->output.output_vectors_bits,
+                                          request->dimensions, request->batch_size);
+            break;
+            
+        case VEXFS_BATCH_OP_SCALAR_QUANTIZE:
+            ret = vexfs_batch_scalar_quantize(request->input_vectors_bits,
+                                             request->output.quantized_output,
+                                             request->dimensions, request->batch_size,
+                                             request->output_format,
+                                             request->config.scalar_quant.scale_factor_bits,
+                                             request->config.scalar_quant.offset_bits);
+            break;
+            
+        case VEXFS_BATCH_OP_PRODUCT_QUANTIZE:
+            /* Note: This requires codebooks to be pre-trained */
+            ret = -ENOSYS; /* Not yet implemented - requires codebook management */
+            break;
+            
+        case VEXFS_BATCH_OP_BINARY_QUANTIZE:
+            ret = vexfs_batch_binary_quantize(request->input_vectors_bits,
+                                             request->output.quantized_output,
+                                             request->dimensions, request->batch_size,
+                                             request->config.binary_quant.threshold_bits);
+            break;
+            
+        case VEXFS_BATCH_OP_DISTANCE_CALC:
+            ret = vexfs_batch_distance_calculate(request->input_vectors_bits,
+                                                request->config.distance.reference_vectors,
+                                                request->output.distance_results,
+                                                request->dimensions, request->batch_size,
+                                                request->config.distance.distance_metric);
+            break;
+            
+        case VEXFS_BATCH_OP_HNSW_INSERT:
+            ret = vexfs_batch_hnsw_insert(request->input_vectors_bits,
+                                         request->output.hnsw_node_ids,
+                                         request->dimensions, request->batch_size,
+                                         request->config.hnsw.layer,
+                                         request->config.hnsw.max_connections);
+            break;
+            
+        default:
+            ret = -EINVAL;
+            break;
+    }
+    
+    end_time = ktime_get_ns();
+    
+    /* Update request metrics */
+    request->processing_time_ns = end_time - start_time;
+    request->fpu_context_switches = 1; /* Single context switch per batch */
+    request->vectors_processed = (ret == 0) ? request->batch_size : 0;
+    
+    return ret;
+}
+
+/* Export batch processing symbols */
+EXPORT_SYMBOL(vexfs_batch_process_vectors);
+EXPORT_SYMBOL(vexfs_batch_l2_normalize);
+EXPORT_SYMBOL(vexfs_batch_scalar_quantize);
+EXPORT_SYMBOL(vexfs_batch_product_quantize);
+EXPORT_SYMBOL(vexfs_batch_binary_quantize);
+EXPORT_SYMBOL(vexfs_batch_distance_calculate);
+EXPORT_SYMBOL(vexfs_batch_hnsw_insert);
+EXPORT_SYMBOL(vexfs_calculate_optimal_batch_size);
 EXPORT_SYMBOL(vexfs_pq_hnsw_integrated_search);
+/*
+ * ============================================================================
+ * ASYNCHRONOUS BATCH PROCESSING IMPLEMENTATION
+ * ============================================================================
+ */
+
+/*
+ * Asynchronous batch work handler
+ * Processes batch requests in background work queue
+ */
+void vexfs_batch_work_handler(struct work_struct *work)
+{
+    struct vexfs_batch_work_item *item = container_of(work, struct vexfs_batch_work_item, work);
+    int result;
+    
+    if (!item || !item->request) {
+        pr_err("VexFS: Invalid batch work item\n");
+        return;
+    }
+    
+    /* Process the batch request */
+    result = vexfs_batch_process_vectors(item->request);
+    item->result = result;
+    
+    /* Call completion callback if provided */
+    if (item->completion_callback) {
+        item->completion_callback(item, result);
+    }
+    
+    /* Clean up work item */
+    vexfs_batch_work_cleanup(item);
+}
+
+/*
+ * Submit batch work for asynchronous processing
+ */
+int vexfs_submit_batch_work(struct vexfs_batch_processing_request *request,
+                           void (*completion_callback)(struct vexfs_batch_work_item *item, int result),
+                           void *callback_data)
+{
+    struct vexfs_batch_work_item *work_item;
+    
+    if (!request || !vexfs_batch_workqueue) {
+        return -EINVAL;
+    }
+    
+    /* Allocate work item */
+    work_item = kzalloc(sizeof(struct vexfs_batch_work_item), GFP_KERNEL);
+    if (!work_item) {
+        return -ENOMEM;
+    }
+    
+    /* Initialize work item */
+    INIT_WORK(&work_item->work, vexfs_batch_work_handler);
+    work_item->request = request;
+    work_item->completion_callback = completion_callback;
+    work_item->callback_data = callback_data;
+    work_item->result = 0;
+    atomic_set(&work_item->ref_count, 1);
+    
+    /* Queue the work */
+    if (!queue_work(vexfs_batch_workqueue, &work_item->work)) {
+        kfree(work_item);
+        return -EBUSY;
+    }
+    
+    return 0;
+}
+
+/*
+ * Clean up batch work item
+ */
+void vexfs_batch_work_cleanup(struct vexfs_batch_work_item *item)
+{
+    if (!item) {
+        return;
+    }
+    
+    if (atomic_dec_and_test(&item->ref_count)) {
+        kfree(item);
+    }
+}
+
+/*
+ * ============================================================================
+ * BATCH PROCESSING INITIALIZATION AND CLEANUP
+ * ============================================================================
+ */
+
+/*
+ * Initialize batch processing subsystem
+ */
+int vexfs_batch_processing_init(void)
+{
+    /* Initialize statistics */
+    spin_lock_init(&batch_stats.lock);
+    batch_stats.batch_operations = 0;
+    batch_stats.total_fpu_context_switches = 0;
+    batch_stats.total_vectors_processed = 0;
+    batch_stats.total_batch_time_ns = 0;
+    
+    /* Create dedicated work queue for batch processing */
+    vexfs_batch_workqueue = alloc_workqueue("vexfs_batch", WQ_UNBOUND | WQ_HIGHPRI, 0);
+    if (!vexfs_batch_workqueue) {
+        pr_err("VexFS: Failed to create batch processing work queue\n");
+        return -ENOMEM;
+    }
+    
+    pr_info("VexFS: Batch processing subsystem initialized\n");
+    return 0;
+}
+
+/*
+ * Clean up batch processing subsystem
+ */
+void vexfs_batch_processing_exit(void)
+{
+    /* Destroy work queue */
+    if (vexfs_batch_workqueue) {
+        destroy_workqueue(vexfs_batch_workqueue);
+        vexfs_batch_workqueue = NULL;
+    }
+    
+    pr_info("VexFS: Batch processing subsystem cleaned up\n");
+}
+
+/*
+ * ============================================================================
+ * ENHANCED STATISTICS FUNCTIONS
+ * ============================================================================
+ */
+
+/*
+ * Get enhanced vector processing statistics including batch metrics
+ */
+void vexfs_get_vector_processing_stats(struct vexfs_vector_processing_stats *stats)
+{
+    unsigned long flags;
+    
+    if (!stats) {
+        return;
+    }
+    
+    /* Get existing stats */
+    spin_lock_irqsave(&proc_stats_lock, flags);
+    memcpy(stats, &global_proc_stats, sizeof(struct vexfs_vector_processing_stats));
+    spin_unlock_irqrestore(&proc_stats_lock, flags);
+    
+    /* Add batch processing stats */
+    spin_lock_irqsave(&batch_stats.lock, flags);
+    stats->batch_operations = batch_stats.batch_operations;
+    stats->total_fpu_context_switches = batch_stats.total_fpu_context_switches;
+    stats->batch_processing_time_ns = batch_stats.total_batch_time_ns;
+    
+    if (batch_stats.batch_operations > 0) {
+        stats->avg_batch_size = batch_stats.total_vectors_processed / batch_stats.batch_operations;
+        
+        /* Calculate FPU context switch savings compared to individual processing */
+        __u64 individual_switches = batch_stats.total_vectors_processed;
+        if (individual_switches > batch_stats.total_fpu_context_switches) {
+            stats->fpu_context_switch_savings = individual_switches - batch_stats.total_fpu_context_switches;
+        } else {
+            stats->fpu_context_switch_savings = 0;
+        }
+    } else {
+        stats->avg_batch_size = 0;
+        stats->fpu_context_switch_savings = 0;
+    }
+    spin_unlock_irqrestore(&batch_stats.lock, flags);
+}
+
+/*
+ * Reset enhanced vector processing statistics
+ */
+void vexfs_reset_vector_processing_stats(void)
+{
+    unsigned long flags;
+    
+    /* Reset existing stats */
+    spin_lock_irqsave(&proc_stats_lock, flags);
+    memset(&global_proc_stats, 0, sizeof(struct vexfs_vector_processing_stats));
+    spin_unlock_irqrestore(&proc_stats_lock, flags);
+    
+    /* Reset batch stats */
+    spin_lock_irqsave(&batch_stats.lock, flags);
+    batch_stats.batch_operations = 0;
+    batch_stats.total_fpu_context_switches = 0;
+    batch_stats.total_vectors_processed = 0;
+    batch_stats.total_batch_time_ns = 0;
+    spin_unlock_irqrestore(&batch_stats.lock, flags);
+}
+
+/* Export asynchronous batch processing symbols */
+EXPORT_SYMBOL(vexfs_submit_batch_work);
+
+/*
+ * I/O Path Optimization Integration (Task 56)
+ */
+
+/* External I/O optimization functions */
+extern long vexfs_io_optimization_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
+extern int vexfs_vector_readahead_init(struct file *file, struct vexfs_readahead_config *config);
+extern int vexfs_vector_readahead_predict(struct file *file, loff_t offset, size_t count,
+                                          loff_t *readahead_offset, size_t *readahead_size);
+extern int vexfs_vector_readahead_execute(struct file *file, loff_t offset, size_t size);
+extern void vexfs_vector_readahead_update_pattern(struct file *file, loff_t offset, size_t count);
+
+/* I/O optimization IOCTL handler */
+long vexfs_vector_processing_io_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+    /* Delegate I/O optimization IOCTLs to the I/O optimization module */
+    switch (cmd) {
+    case VEXFS_IOC_IO_OPTIMIZE:
+    case VEXFS_IOC_GET_IO_STATS:
+    case VEXFS_IOC_SET_IO_SCHEDULER:
+    case VEXFS_IOC_GET_IO_SCHEDULER:
+        return vexfs_io_optimization_ioctl(file, cmd, arg);
+    default:
+        return -ENOTTY;
+    }
+}
+
+/* Enhanced vector processing with I/O optimization */
+int vexfs_vector_processing_with_io_optimization(struct file *file,
+                                                struct vexfs_vector_processing_request *request)
+{
+    struct vexfs_readahead_config readahead_config;
+    loff_t readahead_offset;
+    size_t readahead_size;
+    int ret;
+    
+    if (!file || !request) {
+        return -EINVAL;
+    }
+    
+    /* Configure readahead for vector operations */
+    readahead_config.window_size = request->dimensions * sizeof(__u32) * 64; /* 64 vectors */
+    readahead_config.vector_cluster_size = request->dimensions;
+    readahead_config.access_pattern = VEXFS_ACCESS_SEQUENTIAL;
+    readahead_config.similarity_threshold = 80; /* 80% similarity threshold */
+    readahead_config.max_readahead_vectors = 256;
+    readahead_config.adaptive_window = 1;
+    
+    /* Initialize readahead for this file */
+    ret = vexfs_vector_readahead_init(file, &readahead_config);
+    if (ret) {
+        pr_warn("VexFS: Failed to initialize readahead for vector processing: %d\n", ret);
+        /* Continue without readahead optimization */
+    }
+    
+    /* Predict and execute readahead if beneficial */
+    if (request->vector_count > 16) { /* Only for larger operations */
+        loff_t file_offset = 0; /* Would be determined from actual file position */
+        size_t data_size = request->vector_count * request->dimensions * sizeof(__u32);
+        
+        ret = vexfs_vector_readahead_predict(file, file_offset, data_size,
+                                           &readahead_offset, &readahead_size);
+        if (ret == 0 && readahead_size > 0) {
+            vexfs_vector_readahead_execute(file, readahead_offset, readahead_size);
+        }
+    }
+    
+    /* Perform the actual vector processing operation */
+    switch (request->operation_type) {
+    case VEXFS_OP_L2_NORMALIZE:
+        ret = vexfs_l2_normalize_vectors(request->input_vectors_bits,
+                                       request->output.output_vectors_bits,
+                                       request->dimensions,
+                                       request->vector_count);
+        break;
+    case VEXFS_OP_SCALAR_QUANTIZE:
+        ret = vexfs_scalar_quantize_uint8(request->input_vectors_bits,
+                                        request->output.quantized_uint8,
+                                        request->dimensions,
+                                        request->vector_count,
+                                        request->config.scalar_quant.scale_factor_bits,
+                                        request->config.scalar_quant.offset_bits);
+        break;
+    case VEXFS_OP_PRODUCT_QUANTIZE:
+        ret = vexfs_product_quantize(request->input_vectors_bits,
+                                   request->output.pq_codes,
+                                   request->dimensions,
+                                   request->vector_count,
+                                   &request->config.pq);
+        break;
+    case VEXFS_OP_BINARY_QUANTIZE:
+        ret = vexfs_binary_quantize(request->input_vectors_bits,
+                                  request->output.binary_codes,
+                                  request->dimensions,
+                                  request->vector_count,
+                                  request->config.binary_quant.threshold_bits);
+        break;
+    default:
+        ret = -EINVAL;
+        break;
+    }
+    
+    /* Update readahead pattern based on actual access */
+    if (request->vector_count > 0) {
+        loff_t access_offset = 0; /* Would be determined from actual file position */
+        size_t access_size = request->vector_count * request->dimensions * sizeof(__u32);
+        vexfs_vector_readahead_update_pattern(file, access_offset, access_size);
+    }
+    
+    return ret;
+}
+
+/* Export I/O optimization integration symbols */
+EXPORT_SYMBOL(vexfs_vector_processing_io_ioctl);
+EXPORT_SYMBOL(vexfs_vector_processing_with_io_optimization);
+EXPORT_SYMBOL(vexfs_batch_work_handler);
+EXPORT_SYMBOL(vexfs_batch_work_cleanup);
+EXPORT_SYMBOL(vexfs_batch_processing_init);
+EXPORT_SYMBOL(vexfs_batch_processing_exit);

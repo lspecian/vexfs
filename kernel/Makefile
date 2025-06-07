@@ -28,6 +28,8 @@ $(MODULE_NAME)-objs := $(SRC_CORE)/vexfs_v2_main.o \
                        $(SRC_UTILS)/vexfs_v2_memory_manager.o \
                        $(SRC_UTILS)/vexfs_v2_vector_cache.o \
                        $(SRC_UTILS)/vexfs_v2_vector_processing.o \
+                       $(SRC_UTILS)/vexfs_v2_io_optimization.o \
+                       $(SRC_UTILS)/vexfs_v2_comprehensive_monitoring.o \
                        $(SRC_UTILS)/vexfs_v2_ann_index_cache.o \
                        $(SRC_UTILS)/vexfs_v2_enhanced_file_ops.o \
                        $(SRC_UTILS)/vexfs_v2_enhanced_file_ops_part2.o \
