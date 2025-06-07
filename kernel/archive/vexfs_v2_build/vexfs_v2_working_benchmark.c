@@ -357,7 +357,7 @@ int main() {
            (results.batch_errors * 100.0) / iterations, results.batch_errors, iterations);
     
     printf("\n=== PERFORMANCE TARGETS ===\n");
-    printf("Target: 100,000+ ops/sec for all operations\n");
+    printf("Target: Optimized performance for all operations\n");
     
     // Check if targets are met
     int targets_met = 0;

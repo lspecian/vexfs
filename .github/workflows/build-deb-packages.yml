@@ -171,7 +171,6 @@ jobs:
           ```
           
           ### Features
-          - 🚀 **100,000+ ops/sec** vector operations
           - 🧠 **SIMD optimization** with AVX2/AVX-512 support
           - 🔍 **HNSW & LSH algorithms** for efficient similarity search
           - 📊 **1-4096 dimensional vectors** supported

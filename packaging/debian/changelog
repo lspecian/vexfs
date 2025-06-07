@@ -2,7 +2,7 @@ vexfs (2.0.0-1) unstable; urgency=medium
 
   * Initial release of VexFS 2.0
   * Kernel-native vector database filesystem
-  * SIMD-optimized vector operations (100,000+ ops/sec target)
+  * SIMD-optimized vector operations
   * HNSW and LSH algorithms for efficient similarity search
   * Support for 1-4096 dimensional vectors
   * Crash-consistent journaling

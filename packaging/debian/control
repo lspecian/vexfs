@@ -30,7 +30,7 @@ Description: VexFS kernel module (DKMS)
  Module Support), which automatically rebuilds the module for new kernels.
  .
  Key features:
-  - SIMD-optimized vector operations (100,000+ ops/sec)
+  - SIMD-optimized vector operations
   - HNSW and LSH algorithms for efficient similarity search
   - Direct kernel-space implementation for maximum performance
   - Support for 1-4096 dimensional vectors
