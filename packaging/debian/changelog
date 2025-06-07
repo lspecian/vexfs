@@ -1,0 +1,20 @@
+vexfs (2.0.0-1) unstable; urgency=medium
+
+  * Initial release of VexFS 2.0
+  * Kernel-native vector database filesystem
+  * SIMD-optimized vector operations (100,000+ ops/sec target)
+  * HNSW and LSH algorithms for efficient similarity search
+  * Support for 1-4096 dimensional vectors
+  * Crash-consistent journaling
+  * DKMS support for automatic kernel module rebuilding
+  * Complete utilities package with mkfs.vexfs
+
+ -- VexFS Development Team <dev@vexfs.org>  Fri, 07 Jun 2025 13:27:00 +0200
+
+vexfs (1.0.0-1) experimental; urgency=low
+
+  * Experimental release
+  * Basic filesystem functionality
+  * FUSE implementation for development
+
+ -- VexFS Development Team <dev@vexfs.org>  Mon, 01 Jun 2025 10:00:00 +0200

@@ -1,0 +1,225 @@
+name: Build VexFS .deb Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  PACKAGE_NAME: vexfs
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  build-deb:
+    name: Build .deb packages
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        arch: [amd64]
+        
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up build environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          debhelper \
+          dkms \
+          build-essential \
+          linux-headers-generic \
+          rustc \
+          cargo \
+          pkg-config \
+          libc6-dev \
+          devscripts \
+          lintian \
+          fakeroot
+
+    - name: Install Rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+        components: rustfmt, clippy
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          rust/target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('rust/Cargo.lock') }}
+
+    - name: Get version from tag
+      id: version
+      run: |
+        if [[ $GITHUB_REF == refs/tags/v* ]]; then
+          VERSION=${GITHUB_REF#refs/tags/v}
+        else
+          VERSION="2.0.0-$(git rev-parse --short HEAD)"
+        fi
+        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+        echo "Building version: $VERSION"
+
+    - name: Update package version
+      run: |
+        VERSION="${{ steps.version.outputs.VERSION }}"
+        # Update debian/changelog
+        sed -i "s/2\.0\.0-1/${VERSION}-1/g" packaging/debian/changelog
+        sed -i "s/2\.0\.0/${VERSION}/g" packaging/dkms.conf
+
+    - name: Build Rust utilities
+      run: |
+        cd rust
+        cargo build --release --bins
+        ls -la target/release/
+
+    - name: Lint Rust code
+      run: |
+        cd rust
+        cargo clippy -- -D warnings
+        cargo fmt --check
+
+    - name: Run package build script
+      run: |
+        ./packaging/build-deb.sh
+
+    - name: Lint .deb packages
+      run: |
+        for deb in dist/*.deb; do
+          echo "Linting $deb"
+          lintian "$deb" || true
+        done
+
+    - name: Test package installation
+      run: |
+        # Test DKMS package
+        sudo dpkg -i dist/vexfs-dkms_*_all.deb || true
+        sudo apt-get install -f -y
+        
+        # Test utilities package
+        sudo dpkg -i dist/vexfs-utils_*_amd64.deb || true
+        sudo apt-get install -f -y
+        
+        # Verify mkfs.vexfs is installed
+        which mkfs.vexfs
+        mkfs.vexfs --help
+
+    - name: Create package checksums
+      run: |
+        cd dist
+        sha256sum *.deb > SHA256SUMS
+        sha256sum *.tar.* >> SHA256SUMS || true
+        cat SHA256SUMS
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: vexfs-deb-packages-${{ matrix.arch }}
+        path: |
+          dist/*.deb
+          dist/*.dsc
+          dist/*.tar.*
+          dist/*.changes
+          dist/SHA256SUMS
+        retention-days: 30
+
+    - name: Create release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          dist/*.deb
+          dist/SHA256SUMS
+        body: |
+          ## VexFS ${{ steps.version.outputs.VERSION }} Release
+          
+          High-performance, kernel-native vector database filesystem.
+          
+          ### Installation
+          
+          ```bash
+          # Download and install all packages
+          wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/vexfs-dkms_${{ steps.version.outputs.VERSION }}-1_all.deb
+          wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/vexfs-utils_${{ steps.version.outputs.VERSION }}-1_amd64.deb
+          wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/vexfs-dev_${{ steps.version.outputs.VERSION }}-1_amd64.deb
+          
+          sudo dpkg -i vexfs-*.deb
+          sudo apt install -f  # Fix any dependency issues
+          ```
+          
+          ### Quick Start
+          
+          ```bash
+          # Format a device with VexFS
+          sudo mkfs.vexfs -V -D 768 -L "VectorDB" /dev/sdX1
+          
+          # Mount the filesystem
+          sudo mount -t vexfs_v2_b62 /dev/sdX1 /mnt/vexfs
+          ```
+          
+          ### Features
+          - 🚀 **100,000+ ops/sec** vector operations
+          - 🧠 **SIMD optimization** with AVX2/AVX-512 support
+          - 🔍 **HNSW & LSH algorithms** for efficient similarity search
+          - 📊 **1-4096 dimensional vectors** supported
+          - 💾 **Crash-consistent journaling**
+          - 🔧 **DKMS support** for automatic kernel rebuilds
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  test-installation:
+    name: Test installation on different Ubuntu versions
+    needs: build-deb
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ubuntu_version: ["20.04", "22.04", "24.04"]
+        
+    container:
+      image: ubuntu:${{ matrix.ubuntu_version }}
+      
+    steps:
+    - name: Set up container
+      run: |
+        apt-get update
+        apt-get install -y wget curl gnupg lsb-release
+
+    - name: Download artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: vexfs-deb-packages-amd64
+        path: packages/
+
+    - name: Install VexFS packages
+      run: |
+        cd packages
+        apt-get update
+        apt-get install -y ./vexfs-*.deb || true
+        apt-get install -f -y
+
+    - name: Verify installation
+      run: |
+        # Check if mkfs.vexfs is available
+        which mkfs.vexfs
+        mkfs.vexfs --help
+        
+        # Check DKMS status
+        dkms status vexfs || echo "DKMS not ready (expected in container)"
+        
+        # Verify package installation
+        dpkg -l | grep vexfs

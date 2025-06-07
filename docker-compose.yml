@@ -7,17 +7,15 @@ services:
       dockerfile: Dockerfile
     image: ghcr.io/your-org/vexfs:latest
     ports:
-      - "8080:8080"  # VexFS Unified Server (ChromaDB + Qdrant + Native APIs)
-      - "3000:3000"  # VexFS Dashboard
+      - "7680:7680"  # VexFS Unified Server (ChromaDB + Qdrant + Native APIs)
     environment:
       - RUST_LOG=info
-      - PORT=8080
-      - DASHBOARD_PORT=3000
+      - VEXFS_PORT=7680
       - VEXFS_DATA_DIR=/app/data
     volumes:
       - vexfs_data:/app/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/version"]
+      test: ["CMD", "curl", "-f", "http://localhost:7680/api/v1/version"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -31,6 +29,7 @@ services:
       - "80:80"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./vexfs-dashboard/dist:/usr/share/nginx/html:ro
     depends_on:
       - vexfs
     restart: unless-stopped

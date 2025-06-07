@@ -102,6 +102,15 @@ impl ApiDialect for ChromaDBDialect {
                 
                 Err(VexfsError::InvalidArgument("Invalid input".to_string()))
             }
+            ("DELETE", path) if path.starts_with("/api/v1/collections/") => {
+                let collection_name = path.strip_prefix("/api/v1/collections/")
+                    .ok_or(VexfsError::InvalidArgument("Invalid collection path".to_string()))?;
+                
+                self.engine.delete_collection(collection_name)?;
+                
+                // ChromaDB returns empty response on successful deletion
+                Ok(Vec::new())
+            }
             _ => Err(VexfsError::NotFound),
         }
     }

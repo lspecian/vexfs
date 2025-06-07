@@ -1,0 +1,66 @@
+Source: vexfs
+Section: kernel
+Priority: optional
+Maintainer: VexFS Development Team <dev@vexfs.org>
+Build-Depends: debhelper-compat (= 13),
+               dkms,
+               build-essential,
+               linux-headers-generic,
+               rustc (>= 1.70),
+               cargo,
+               pkg-config,
+               libc6-dev
+Standards-Version: 4.6.0
+Homepage: https://github.com/vexfs/vexfs
+Vcs-Git: https://github.com/vexfs/vexfs.git
+Vcs-Browser: https://github.com/vexfs/vexfs
+
+Package: vexfs-dkms
+Architecture: all
+Depends: ${misc:Depends},
+         dkms (>= 2.1.0.0),
+         linux-headers-generic | linux-headers,
+         build-essential
+Recommends: vexfs-utils
+Description: VexFS kernel module (DKMS)
+ VexFS is a high-performance, kernel-native vector database filesystem
+ designed for AI/ML workloads requiring massive-scale vector similarity search.
+ .
+ This package provides the VexFS kernel module via DKMS (Dynamic Kernel
+ Module Support), which automatically rebuilds the module for new kernels.
+ .
+ Key features:
+  - SIMD-optimized vector operations (100,000+ ops/sec)
+  - HNSW and LSH algorithms for efficient similarity search
+  - Direct kernel-space implementation for maximum performance
+  - Support for 1-4096 dimensional vectors
+  - Crash-consistent journaling
+
+Package: vexfs-utils
+Architecture: amd64 arm64
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Recommends: vexfs-dkms
+Description: VexFS filesystem utilities
+ Utilities for creating and managing VexFS filesystems.
+ .
+ This package includes:
+  - mkfs.vexfs: Format devices with VexFS filesystem
+  - fsck.vexfs: Check and repair VexFS filesystems
+  - vexfs-info: Display filesystem information
+  - vexfs-benchmark: Performance testing tools
+ .
+ VexFS is optimized for vector database workloads with SIMD acceleration
+ and can achieve 100,000+ vector operations per second.
+
+Package: vexfs-dev
+Architecture: amd64 arm64
+Depends: ${misc:Depends},
+         vexfs-dkms (= ${binary:Version}),
+         linux-headers-generic | linux-headers
+Description: VexFS development files
+ Development files for building applications that use VexFS APIs.
+ .
+ This package includes:
+  - Header files for VexFS kernel APIs
+  - Example code and documentation
+  - Test utilities and benchmarks

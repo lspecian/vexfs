@@ -13,7 +13,7 @@ use axum::{
     extract::{Path, State},
     http::{Method, StatusCode, Uri},
     response::{Json, Redirect},
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
     Router,
 };
 use tower_http::services::ServeDir;
@@ -55,6 +55,7 @@ pub fn create_router() -> Router {
         // ChromaDB API routes (/api/v1/*)
         .route("/api/v1/version", get(api_version))
         .route("/api/v1/collections", get(chromadb_handler).post(chromadb_handler))
+        .route("/api/v1/collections/:collection", delete(chromadb_handler))
         .route("/api/v1/collections/:collection/add", post(chromadb_handler))
         .route("/api/v1/collections/:collection/query", post(chromadb_handler))
         .route("/api/v1/collections/:collection/vectors", get(chromadb_handler).post(chromadb_handler))

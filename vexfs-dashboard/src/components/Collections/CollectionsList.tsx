@@ -60,11 +60,13 @@ const CollectionsList: React.FC<CollectionsListProps> = ({
   const filteredAndSortedCollections = useMemo(() => {
     const filtered = collections.filter(
       collection =>
-        collection.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (collection.description &&
-          collection.description
-            .toLowerCase()
-            .includes(searchTerm.toLowerCase()))
+        collection &&
+        collection.name &&
+        (collection.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (collection.description &&
+            collection.description
+              .toLowerCase()
+              .includes(searchTerm.toLowerCase())))
     );
 
     // Sort collections
