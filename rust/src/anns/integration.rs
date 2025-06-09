@@ -50,6 +50,7 @@ pub enum AnnsError {
     InvalidMemoryBlock,
     WalCorrupted,
     WalFull,
+    StackOverflow,
     // Integration with fs_core errors
     VexfsError(VexfsError),
 }
@@ -77,6 +78,7 @@ impl From<AnnsError> for VexfsError {
             AnnsError::InvalidMemoryBlock => VexfsError::VectorError(crate::shared::errors::VectorErrorKind::CorruptedData),
             AnnsError::WalCorrupted => VexfsError::JournalError(crate::shared::errors::JournalErrorKind::JournalCorrupted),
             AnnsError::WalFull => VexfsError::JournalError(crate::shared::errors::JournalErrorKind::JournalFull),
+            AnnsError::StackOverflow => VexfsError::StackOverflow,
             AnnsError::VexfsError(vexfs_err) => vexfs_err,
         }
     }
@@ -119,6 +121,9 @@ pub struct HnswParams {
     pub ef_search: u16,      // Size of dynamic candidate list during search
     pub max_layers: u8,      // Maximum number of layers
     pub ml: f64,             // Level generation factor
+    pub max_m: u16,          // Maximum M value for layer 0
+    pub max_m0: u16,         // Maximum M value for higher layers
+    pub seed: u64,           // Random seed for reproducible results
 }
 
 impl Default for HnswParams {
@@ -129,6 +134,9 @@ impl Default for HnswParams {
             ef_search: 50,
             max_layers: 16,
             ml: 1.0 / 2.0_f64.ln(),
+            max_m: 16,
+            max_m0: 32,
+            seed: 42,
         }
     }
 }
@@ -563,6 +571,9 @@ impl AnnsConfig {
                 ef_search: 50,
                 max_layers: 8,
                 ml: 1.0 / 2.0_f64.ln(),
+                max_m: 8,
+                max_m0: 16,
+                seed: 42,
             },
             max_vectors: 10_000,
         }
@@ -579,6 +590,9 @@ impl AnnsConfig {
                 ef_search: 100,
                 max_layers: 16,
                 ml: 1.0 / 2.0_f64.ln(),
+                max_m: 32,
+                max_m0: 64,
+                seed: 42,
             },
             max_vectors: 10_000_000,
         }
@@ -595,6 +609,9 @@ impl AnnsConfig {
                 ef_search: 25,
                 max_layers: 6,
                 ml: 1.0 / 2.0_f64.ln(),
+                max_m: 4,
+                max_m0: 8,
+                seed: 42,
             },
             max_vectors: 1_000,
         }

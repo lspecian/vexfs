@@ -21,6 +21,27 @@ libm = { version = "0.2", default-features = false }
 derivative = "2.2"
 linked_list_allocator = { version = "0.10", optional = true }
 
+# Cross-Layer Integration Framework dependencies (Task 21)
+crossbeam = { version = "0.8", optional = true }
+im = { version = "15.1", optional = true }
+nom = { version = "7.1", optional = true }
+rayon = { version = "1.8", optional = true }
+
+# Advanced Graph Algorithms and Semantic Reasoning dependencies (Task 20)
+petgraph = { version = "0.6.4", optional = true }
+rug = { version = "1.19.2", optional = true }
+memmap2 = { version = "0.5.10", optional = true }
+dashmap = { version = "5.5", optional = true }
+parking_lot = { version = "0.12", optional = true }
+
+# Semantic Search Integration dependencies (Task 11)
+faiss = { version = "0.12", optional = true }
+candle-core = { version = "0.3", optional = true }
+candle-nn = { version = "0.3", optional = true }
+candle-transformers = { version = "0.3", optional = true }
+hf-hub = { version = "0.3", optional = true }
+tokenizers = { version = "0.15", optional = true }
+
 # FUSE dependencies (optional for userspace testing)
 fuse = { version = "0.3", optional = true }
 time = { version = "0.3", optional = true }
@@ -37,14 +58,19 @@ thiserror = { version = "1.0", optional = true }
 url = { version = "2.5", optional = true }
 env_logger = { version = "0.10", optional = true }
 
+# Semantic API dependencies
+reqwest = { version = "0.11", features = ["json"], optional = true }
+tokio-tungstenite = { version = "0.20", optional = true }
+serde_cbor = { version = "0.11", optional = true }
+
 # Server dependencies (optional for ChromaDB-compatible API)
-axum = { version = "0.7", optional = true }
+axum = { version = "0.7", features = ["ws"], optional = true }
 tokio = { version = "1.0", features = ["full"], optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde_json = { version = "1.0", optional = true }
-uuid = { version = "1.0", features = ["v4"], optional = true }
+uuid = { version = "1.0", features = ["v4", "serde"], optional = true }
 tower = { version = "0.4", optional = true }
-tower-http = { version = "0.5", features = ["cors", "fs"], optional = true }
+tower-http = { version = "0.5", features = ["cors", "fs", "trace"], optional = true }
 tracing = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"], optional = true }
 chrono = { version = "0.4", features = ["serde"], optional = true }
@@ -52,6 +78,9 @@ chrono = { version = "0.4", features = ["serde"], optional = true }
 [dev-dependencies]
 fastrand = "2.0"
 chrono = { version = "0.4", features = ["serde"] }
+proptest = "1.4"
+criterion = { version = "0.5", features = ["html_reports"] }
+loom = "0.7"
 
 [lib]
 crate-type = ["lib", "staticlib"]
@@ -89,6 +118,16 @@ lto = true
 panic = "abort"
 opt-level = 0
 
+# NEW: Profiling profile for Task 23.1 FUSE stack overflow analysis
+[profile.profiling]
+inherits = "release"
+debug = true          # Enable debug symbols for accurate profiling
+opt-level = 1         # Light optimization to preserve stack frames
+lto = false          # Disable LTO to preserve function boundaries
+codegen-units = 1    # Single codegen unit for better profiling accuracy
+panic = "unwind"     # Enable unwinding for better stack traces
+overflow-checks = true # Enable overflow checks for debugging
+
 # Target-specific configuration for kernel module is now in .cargo/config.toml
 
 # Features for conditional compilation
@@ -98,12 +137,18 @@ default = ["std"]
 # Mutually exclusive feature groups
 std = ["serde", "serde_json", "uuid"]
 kernel = ["linked_list_allocator"]  # Mutually exclusive with std
+kernel-minimal = []  # Minimal kernel feature set
 
 # Additional feature groups
 c_bindings = []  # New feature for current C FFI approach
+cross_layer_integration = ["std", "crossbeam", "im", "nom", "rayon", "tokio", "tracing", "serde", "serde_json", "uuid"]  # Cross-Layer Integration Framework (Task 21)
 fuse_support = ["std", "fuse", "time", "time01", "clap", "libc"]  # FUSE userspace testing (requires std)
 server = ["std", "axum", "tokio", "tower", "tower-http", "tracing", "tracing-subscriber", "serde", "serde_json", "uuid", "chrono"]  # ChromaDB-compatible server (requires std)
 vexctl = ["std", "nix", "console", "tabled", "indicatif", "thiserror", "clap", "chrono", "serde", "serde_json", "url", "env_logger"]  # VexCTL command-line tool (requires std)
+semantic_api = ["std", "axum", "tokio", "tower", "tower-http", "tracing", "serde", "serde_json", "uuid", "chrono", "reqwest", "tokio-tungstenite", "serde_cbor", "url", "crossbeam"]  # Semantic API for agent integration
+semantic_search = ["std", "faiss", "candle-core", "candle-nn", "candle-transformers", "hf-hub", "tokenizers", "serde", "serde_json", "uuid", "chrono", "tokio", "tracing", "crossbeam", "rayon"]  # Semantic Search Integration for VexGraph (Task 11)
+advanced_graph_algorithms = ["std", "petgraph", "rug", "memmap2", "dashmap", "parking_lot", "rayon", "serde", "serde_json", "uuid", "chrono", "tokio", "tracing", "thiserror"]  # Advanced Graph Algorithms and Semantic Reasoning (Task 20)
+vexgraph = ["std", "petgraph", "dashmap", "rayon", "parking_lot", "crossbeam", "axum", "tokio", "tower", "tower-http", "tracing", "tracing-subscriber", "serde", "serde_json", "uuid", "chrono"]  # VexGraph Native Graph Representation and API (Task 17)
 
 [[bin]]
 name = "vexfs_fuse"
@@ -124,6 +169,12 @@ required-features = ["server"]
 name = "vexfs_unified_server"
 path = "rust/src/bin/vexfs_unified_server.rs"
 required-features = ["server"]
+
+# Task 22: Comprehensive AI-Native Semantic Substrate Testing Framework
+[[bin]]
+name = "task_22_comprehensive_testing"
+path = "tests/task_22_comprehensive_testing.rs"
+required-features = ["std", "tokio"]
 
 [[bin]]
 name = "mkfs_vexfs"
@@ -176,3 +227,9 @@ fuse = "FUSE implementation tests"
 safe = "Safe to run in any environment"
 risky = "May affect system stability"
 dangerous = "High risk, VM-only execution"
+
+# Examples
+[[example]]
+name = "semantic_event_hooks_example"
+path = "examples/semantic_event_hooks_example.rs"
+required-features = ["semantic_api"]

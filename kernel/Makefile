@@ -40,7 +40,14 @@ $(MODULE_NAME)-objs := $(SRC_CORE)/vexfs_v2_main.o \
                        $(SRC_UTILS)/vexfs_v2_enhanced_registration_part2.o \
                        $(SRC_UTILS)/vexfs_v2_locking.o \
                        $(SRC_UTILS)/vexfs_v2_locking_deadlock.o \
-                       $(SRC_UTILS)/vexfs_v2_locking_rcu.o
+                       $(SRC_UTILS)/vexfs_v2_locking_rcu.o \
+                       $(SRC_UTILS)/vexfs_v2_journal.o \
+                       $(SRC_UTILS)/vexfs_v2_atomic.o \
+                       $(SRC_UTILS)/vexfs_v2_metadata_journal.o \
+                       $(SRC_UTILS)/vexfs_v2_metadata_journal_part2.o \
+                       $(SRC_UTILS)/vexfs_v2_allocation_journal.o \
+                       $(SRC_UTILS)/vexfs_v2_allocation_operations.o \
+                       $(SRC_UTILS)/vexfs_v2_orphan_detection.o
 
 # Build flags for optimization and Phase 3 features
 ccflags-y := -O2 -Wall -Wextra -DVEXFS_PHASE3_ENABLED

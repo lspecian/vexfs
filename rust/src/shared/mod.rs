@@ -119,7 +119,7 @@ pub use utils::{
 pub use config::{
     VexfsConfig, VexfsConfigBuilder,
     FilesystemConfig, VectorConfig, CacheConfig, IoConfig,
-    JournalConfig, MemoryConfig, DebugConfig, HnswConfig,
+    JournalConfig, DataJournalingConfig, DataJournalingMode, MemoryConfig, DebugConfig, HnswConfig,
     CacheReplacementPolicy, CacheWritePolicy, JournalFlushPolicy, LogLevel,
 };
 

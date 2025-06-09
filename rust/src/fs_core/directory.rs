@@ -6,18 +6,17 @@
 
 use crate::shared::errors::VexfsError;
 use crate::shared::types::{
-    InodeNumber, FileType, Result, Timestamp, FileMode
+    InodeNumber, FileType, Result, FileMode
 };
 use crate::shared::constants::{VEXFS_ROOT_INO, VEXFS_MAX_NAME_LENGTH};
 use crate::fs_core::inode::{Inode, InodeManager, get_inode, put_inode, create_inode, delete_inode};
 use crate::fs_core::permissions::{
     UserContext, can_access_directory, can_list_directory,
     can_create_in_directory, can_delete_from_directory,
-    permission_bits, check_read_permission, check_write_permission, check_create_permission, check_delete_permission
+    check_read_permission, check_create_permission, check_delete_permission
 };
 use crate::fs_core::locking::{
-    acquire_inode_lock, acquire_read_lock_guard, acquire_write_lock_guard,
-    LockType, LockManager
+    acquire_read_lock_guard, acquire_write_lock_guard
 };
 use crate::fs_core::operations::OperationContext;
 

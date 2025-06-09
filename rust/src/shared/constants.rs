@@ -303,9 +303,44 @@ pub const VEXFS_JOURNAL_BUFFER_SIZE: usize = 4096;
 /// Journal record types
 pub const JOURNAL_RECORD_COMMIT: u32 = 1;
 pub const JOURNAL_RECORD_OPERATION: u32 = 2;
+pub const JOURNAL_RECORD_DATA: u32 = 3;
+pub const JOURNAL_RECORD_COW: u32 = 4;
 
 /// Journal states
 pub const JOURNAL_STATE_CLEAN: u32 = 0;
+pub const JOURNAL_STATE_DIRTY: u32 = 1;
+
+// =======================
+// Data Journaling Constants
+// =======================
+
+/// Default maximum data journal size (64MB)
+pub const VEXFS_DEFAULT_MAX_DATA_JOURNAL_SIZE: u64 = 64 * 1024 * 1024;
+
+/// Default large write threshold (1MB)
+pub const VEXFS_DEFAULT_LARGE_WRITE_THRESHOLD: u64 = 1024 * 1024;
+
+/// Maximum pending ordered writes
+pub const VEXFS_MAX_PENDING_ORDERED_WRITES: usize = 64;
+
+/// COW block allocation start
+pub const VEXFS_COW_BLOCK_START: u64 = 1000000;
+
+/// Data journaling mode flags
+pub const VEXFS_DATA_JOURNAL_METADATA_ONLY: u32 = 0;
+pub const VEXFS_DATA_JOURNAL_ORDERED: u32 = 1;
+pub const VEXFS_DATA_JOURNAL_FULL: u32 = 2;
+
+/// Data journaling features
+pub const VEXFS_DATA_JOURNAL_FEATURE_COW: u32 = 1 << 0;
+pub const VEXFS_DATA_JOURNAL_FEATURE_MMAP: u32 = 1 << 1;
+pub const VEXFS_DATA_JOURNAL_FEATURE_COMPRESSION: u32 = 1 << 2;
+pub const VEXFS_DATA_JOURNAL_FEATURE_OPTIMIZATION: u32 = 1 << 3;
+pub const VEXFS_DATA_JOURNAL_FEATURE_DYNAMIC_SWITCH: u32 = 1 << 4;
+
+/// COW block reference count limits
+pub const VEXFS_COW_MAX_REF_COUNT: u32 = 65535;
+pub const VEXFS_COW_CLEANUP_THRESHOLD: usize = 1024;
 
 // =======================
 // Cache and Performance Constants

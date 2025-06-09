@@ -17,6 +17,7 @@ import {
   Dashboard as DashboardIcon,
   Storage as CollectionsIcon,
   Search as SearchIcon,
+  AccountTree as GraphIcon,
   Monitor as MonitoringIcon,
   Settings as SettingsIcon,
 } from '@mui/icons-material';
@@ -49,6 +50,12 @@ const navigationItems: NavigationItem[] = [
     icon: 'search',
   },
   {
+    id: 'graph',
+    label: 'Graph',
+    path: '/graph',
+    icon: 'graph',
+  },
+  {
     id: 'monitoring',
     label: 'Monitoring',
     path: '/monitoring',
@@ -70,6 +77,8 @@ const getIcon = (iconName: string) => {
       return <CollectionsIcon />;
     case 'search':
       return <SearchIcon />;
+    case 'graph':
+      return <GraphIcon />;
     case 'monitoring':
       return <MonitoringIcon />;
     case 'settings':
@@ -132,6 +141,9 @@ const Sidebar: React.FC<SidebarProps> = ({
               <ListItem key={item.id} disablePadding sx={{ px: 2 }}>
                 <ListItemButton
                   onClick={() => handleNavigation(item.path)}
+                  data-testid={`nav-${item.id}`}
+                  aria-label={`Navigate to ${item.label}`}
+                  aria-current={isActive ? 'page' : undefined}
                   sx={{
                     borderRadius: 2,
                     mb: 0.5,

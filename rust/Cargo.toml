@@ -37,16 +37,46 @@ thiserror = { version = "1.0", optional = true }
 url = { version = "2.0", optional = true }
 
 # Server dependencies (optional for ChromaDB-compatible API)
-axum = { version = "0.7", optional = true }
-tokio = { version = "1.0", features = ["full"], optional = true }
+axum = { version = "0.7", features = ["ws"], optional = true }
+tokio = { version = "1.28.2", features = ["full"], optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde_json = { version = "1.0", optional = true }
-uuid = { version = "1.0", features = ["v4"], optional = true }
-tower = { version = "0.4", optional = true }
-tower-http = { version = "0.5", features = ["cors", "fs", "set-header"], optional = true }
+uuid = { version = "1.0", features = ["v4", "serde"], optional = true }
+tower = { version = "0.4", features = ["util"], optional = true }
+tower-http = { version = "0.5", features = ["cors", "fs", "set-header", "trace"], optional = true }
 tracing = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"], optional = true }
 chrono = { version = "0.4", features = ["serde"], optional = true }
+
+# VexGraph dependencies (Task 17)
+petgraph = { version = "0.6", optional = true }
+dashmap = { version = "5.5", optional = true }
+rayon = { version = "1.8", optional = true }
+parking_lot = { version = "0.12", optional = true }
+crossbeam = { version = "0.8", optional = true }
+async-trait = { version = "0.1", optional = true }
+reqwest = { version = "0.11", features = ["json"], optional = true }
+
+# Semantic Event API dependencies
+tokio-stream = { version = "0.1", optional = true }
+futures = { version = "0.3", optional = true }
+governor = { version = "0.6", optional = true }
+jsonwebtoken = { version = "9.2", optional = true }
+ring = { version = "0.17", optional = true }
+base64 = { version = "0.21", optional = true }
+lz4 = { version = "1.24", optional = true }
+flate2 = { version = "1.0", optional = true }
+
+# Additional serialization formats for semantic API
+rmp-serde = { version = "1.1", optional = true }
+serde_cbor = { version = "0.11", optional = true }
+bincode = { version = "1.3", optional = true }
+
+# Utilities for semantic API
+md5 = { version = "0.7", optional = true }
+lru = { version = "0.12", optional = true }
+async-stream = { version = "0.3", optional = true }
+im = { version = "15.1", optional = true, features = ["serde"] }
 
 [dev-dependencies]
 fastrand = "2.0"
@@ -108,3 +138,198 @@ c_bindings = []  # New feature for current C FFI approach
 fuse_support = ["std", "fuse", "time", "time01", "clap", "libc"]  # FUSE userspace testing
 vexctl = ["std", "nix", "console", "tabled", "indicatif", "thiserror", "clap", "chrono", "serde", "serde_json", "url"]  # VexCtl CLI tool
 server = ["axum", "tokio", "tower", "tower-http", "tracing", "tracing-subscriber", "serde", "serde_json", "uuid", "chrono"]  # ChromaDB-compatible server
+semantic_api = [
+    "tokio", "tokio-stream", "futures", "dashmap", "governor",
+    "jsonwebtoken", "ring", "base64", "lz4", "flate2",
+    "rmp-serde", "serde_cbor", "bincode", "md5", "lru", "async-stream",
+    "axum", "serde", "serde_json", "uuid", "tower", "tower-http",
+    "tracing", "tracing-subscriber", "chrono", "crossbeam", "rayon", "im", "std"
+]  # Agent-Facing Semantic Event API (Task 13)
+vexgraph = [
+    "petgraph", "dashmap", "rayon", "parking_lot", "crossbeam",
+    "axum", "tokio", "tower", "tower-http", "tracing", "tracing-subscriber",
+    "serde", "serde_json", "uuid", "chrono", "dep:async-trait", "dep:reqwest", "std"
+]  # VexGraph Native Graph Representation and API (Task 17)
+crossbeam = ["dep:crossbeam"]
+tokio = ["dep:tokio"]
+tracing = ["dep:tracing"]
+cross_layer_integration = ["semantic_api"]
+encryption = []
+compression = []
+
+# Example configurations
+[[example]]
+name = "task_23_2_fuse_vector_storage_test"
+path = "../examples/task_23_2_fuse_vector_storage_test.rs"
+required-features = ["fuse_support", "std"]
+
+[[example]]
+name = "task_23_7_comprehensive_testing_example"
+path = "../examples/task_23_7_comprehensive_testing_example.rs"
+required-features = ["std"]
+
+[[example]]
+name = "semantic_api_rest_example"
+path = "../examples/semantic_api_rest_example.rs"
+required-features = ["semantic_api", "server", "std"]
+
+[[example]]
+name = "fuse_vector_operations_example"
+path = "../examples/fuse_vector_operations_example.rs"
+required-features = ["fuse_support", "std"]
+
+[[example]]
+name = "task_23_2_2_real_vector_search_test"
+path = "../examples/task_23_2_2_real_vector_search_test.rs"
+required-features = ["fuse_support", "std"]
+
+[[example]]
+name = "task_23_3_2_real_vector_integration_test"
+path = "../examples/task_23_3_2_real_vector_integration_test.rs"
+required-features = ["fuse_support", "std"]
+
+[[example]]
+name = "task_23_3_3_complete_hnsw_construction_test"
+path = "../examples/task_23_3_3_complete_hnsw_construction_test.rs"
+required-features = ["fuse_support", "std"]
+
+[[example]]
+name = "task_23_3_4_advanced_graph_analytics_test"
+path = "../examples/task_23_3_4_advanced_graph_analytics_test.rs"
+required-features = ["vexgraph", "std"]
+
+[[example]]
+name = "task_23_5_graph_journal_integration_example"
+path = "../examples/task_23_5_graph_journal_integration_example.rs"
+required-features = ["vexgraph", "semantic_api", "std"]
+
+[[example]]
+name = "task_23_5_phase_1_graph_journal_integration_example"
+path = "../examples/task_23_5_phase_1_graph_journal_integration_example.rs"
+required-features = ["vexgraph", "std"]
+
+[[example]]
+name = "task_23_5_phase_2_fuse_graph_integration_example"
+path = "../examples/task_23_5_phase_2_fuse_graph_integration_example.rs"
+required-features = ["vexgraph", "fuse_support", "std"]
+
+[[example]]
+name = "task_23_5_phase_3_advanced_graph_analytics_example"
+path = "../examples/task_23_5_phase_3_advanced_graph_analytics_example.rs"
+required-features = ["vexgraph", "std"]
+
+[[example]]
+name = "task_23_5_phase_4_semantic_reasoning_example"
+path = "../examples/task_23_5_phase_4_semantic_reasoning_example.rs"
+required-features = ["vexgraph", "semantic_api", "std"]
+
+[[example]]
+name = "task_23_5_phase_5_comprehensive_integration_example"
+path = "../examples/task_23_5_phase_5_comprehensive_integration_example.rs"
+required-features = ["vexgraph", "semantic_api", "fuse_support", "std"]
+
+[[example]]
+name = "task_23_6_complete_integration_test"
+path = "../examples/task_23_6_complete_integration_test.rs"
+required-features = ["vexgraph", "semantic_api", "fuse_support", "std"]
+
+[[example]]
+name = "task_23_6_phase_2_complete_example"
+path = "../examples/task_23_6_phase_2_complete_example.rs"
+required-features = ["vexgraph", "semantic_api", "std"]
+
+[[example]]
+name = "task_23_6_phase_3_complete_example"
+path = "../examples/task_23_6_phase_3_complete_example.rs"
+required-features = ["vexgraph", "semantic_api", "std"]
+
+[[example]]
+name = "task_23_6_phase_4_complete_example"
+path = "../examples/task_23_6_phase_4_complete_example.rs"
+required-features = ["vexgraph", "semantic_api", "std"]
+
+[[example]]
+name = "task_23_6_phase_4_distributed_coordination_example"
+path = "../examples/task_23_6_phase_4_distributed_coordination_example.rs"
+required-features = ["vexgraph", "semantic_api", "server", "std"]
+
+[[example]]
+name = "task_23_6_phase_5_reactive_automation_example"
+path = "../examples/task_23_6_phase_5_reactive_automation_example.rs"
+required-features = ["vexgraph", "semantic_api", "server", "std"]
+
+[[example]]
+name = "task_23_6_phase_6_complete_example"
+path = "../examples/task_23_6_phase_6_complete_example.rs"
+required-features = ["vexgraph", "semantic_api", "fuse_support", "server", "std"]
+
+[[example]]
+name = "task_23_8_performance_optimization_example"
+path = "../examples/task_23_8_performance_optimization_example.rs"
+required-features = ["vexgraph", "semantic_api", "fuse_support", "std"]
+
+[[example]]
+name = "advanced_graph_algorithms_example"
+path = "../examples/advanced_graph_algorithms_example.rs"
+required-features = ["vexgraph", "std"]
+
+[[example]]
+name = "bridge_integration_test"
+path = "../examples/bridge_integration_test.rs"
+required-features = ["fuse_support", "std"]
+
+[[example]]
+name = "fuse_journal_integration_example"
+path = "../examples/fuse_journal_integration_example.rs"
+required-features = ["fuse_support", "semantic_api", "std"]
+
+[[example]]
+name = "fuse_stack_profiling_example"
+path = "../examples/fuse_stack_profiling_example.rs"
+required-features = ["fuse_support", "std"]
+
+[[example]]
+name = "semantic_event_hooks_example"
+path = "../examples/semantic_event_hooks_example.rs"
+required-features = ["semantic_api", "std"]
+
+[[example]]
+name = "semantic_search_integration_example"
+path = "../examples/semantic_search_integration_example.rs"
+required-features = ["semantic_api", "fuse_support", "std"]
+
+[[example]]
+name = "simple_hnsw_fuse_test"
+path = "../examples/simple_hnsw_fuse_test.rs"
+required-features = ["fuse_support", "std"]
+
+[[example]]
+name = "userspace_semantic_journal_example"
+path = "../examples/userspace_semantic_journal_example.rs"
+required-features = ["semantic_api", "std"]
+
+[[example]]
+name = "vector_performance_benchmarks"
+path = "../examples/vector_performance_benchmarks.rs"
+required-features = ["fuse_support", "std"]
+
+[[example]]
+name = "vexfs_vector_integration_tests"
+path = "../examples/vexfs_vector_integration_tests.rs"
+required-features = ["fuse_support", "std"]
+
+# Benchmark examples
+[[example]]
+name = "cow_snapshot_benchmark"
+path = "../examples/benchmarks/cow_snapshot_benchmark.rs"
+required-features = ["fuse_support", "std"]
+
+[[example]]
+name = "vector_benchmark"
+path = "../examples/benchmarks/vector_benchmark.rs"
+required-features = ["fuse_support", "std"]
+
+[[example]]
+name = "vector_cache_benchmark"
+path = "../examples/benchmarks/vector_cache_benchmark.rs"
+required-features = ["fuse_support", "std"]

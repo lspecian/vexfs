@@ -1,0 +1,252 @@
+# eBPF Configuration for VexFS FUSE Stack Overflow Analysis
+# Task 23.1: FUSE-specific tracing and stack monitoring
+# Extends existing eBPF infrastructure in tests/ebpf_tracing/
+
+# General settings
+general:
+  # Tracing duration (seconds)
+  duration: 300
+  # Output directory
+  output_dir: "profiling/results/ebpf"
+  # Log level (debug, info, warn, error)
+  log_level: "info"
+  # Enable real-time monitoring
+  real_time_monitoring: true
+  # Sampling rate (events per second)
+  sampling_rate: 1000
+
+# FUSE-specific tracing
+fuse_tracing:
+  # Enable FUSE operation tracing
+  enabled: true
+  # Track FUSE filesystem operations
+  track_filesystem_ops: true
+  # Track FUSE memory operations
+  track_memory_ops: true
+  # Track FUSE stack usage
+  track_stack_usage: true
+  # FUSE operation filters
+  operation_filters:
+    - "fuse_*"
+    - "vexfs_fuse_*"
+    - "VexFSFuse::*"
+  # Stack depth threshold for alerts
+  stack_depth_threshold: 1000
+  # Memory allocation threshold (bytes)
+  memory_threshold: 1048576  # 1MB
+
+# Stack overflow detection
+stack_overflow:
+  # Enable stack overflow detection
+  enabled: true
+  # Stack size limit (bytes)
+  stack_size_limit: 8388608  # 8MB
+  # Stack usage warning threshold (percentage)
+  warning_threshold: 75
+  # Stack usage critical threshold (percentage)
+  critical_threshold: 90
+  # Track recursive function calls
+  track_recursion: true
+  # Maximum recursion depth before alert
+  max_recursion_depth: 500
+  # Functions to monitor for deep recursion
+  recursion_functions:
+    - "vexfs_*"
+    - "fuse_*"
+    - "VexFSFuse::*"
+
+# Memory allocation tracking
+memory_tracking:
+  # Enable memory allocation tracking
+  enabled: true
+  # Track large allocations
+  track_large_allocs: true
+  # Large allocation threshold (bytes)
+  large_alloc_threshold: 1048576  # 1MB
+  # Track allocation patterns
+  track_patterns: true
+  # Track memory leaks
+  track_leaks: true
+  # Memory leak detection timeout (seconds)
+  leak_timeout: 60
+  # Track stack allocations
+  track_stack_allocs: true
+
+# Performance monitoring
+performance:
+  # Enable performance monitoring
+  enabled: true
+  # Track operation latencies
+  track_latencies: true
+  # Latency threshold for slow operations (microseconds)
+  slow_operation_threshold: 10000  # 10ms
+  # Track CPU usage
+  track_cpu_usage: true
+  # Track memory bandwidth
+  track_memory_bandwidth: true
+  # Track cache performance
+  track_cache_performance: true
+
+# Kernel tracing integration
+kernel_integration:
+  # Use existing eBPF infrastructure
+  use_existing_infrastructure: true
+  # Path to existing eBPF tools
+  ebpf_tools_path: "tests/ebpf_tracing"
+  # Integrate with vexfs_trace_manager.sh
+  use_trace_manager: true
+  # Additional kernel events to track
+  additional_events:
+    - "do_page_fault"
+    - "expand_stack"
+    - "handle_mm_fault"
+    - "alloc_pages"
+    - "free_pages"
+
+# Output configuration
+output:
+  # Output format (json, csv, text)
+  format: "json"
+  # Enable real-time output
+  real_time: true
+  # Output file prefix
+  file_prefix: "vexfs_fuse_stack_trace"
+  # Include timestamps
+  include_timestamps: true
+  # Include process information
+  include_process_info: true
+  # Include stack traces
+  include_stack_traces: true
+  # Maximum stack trace depth
+  max_stack_trace_depth: 50
+
+# Alerting configuration
+alerting:
+  # Enable real-time alerts
+  enabled: true
+  # Alert on stack overflow risk
+  stack_overflow_alerts: true
+  # Alert on memory leaks
+  memory_leak_alerts: true
+  # Alert on performance degradation
+  performance_alerts: true
+  # Alert delivery methods
+  delivery_methods:
+    - "console"
+    - "log_file"
+    - "syslog"
+  # Alert thresholds
+  thresholds:
+    stack_usage_warning: 75
+    stack_usage_critical: 90
+    memory_leak_size: 10485760  # 10MB
+    operation_latency: 50000    # 50ms
+
+# Filtering configuration
+filtering:
+  # Process filters
+  process_filters:
+    include:
+      - "vexfs_fuse"
+      - "fuse"
+    exclude:
+      - "systemd"
+      - "kernel"
+  # Function filters
+  function_filters:
+    include:
+      - "vexfs_*"
+      - "fuse_*"
+      - "VexFSFuse::*"
+    exclude:
+      - "*debug*"
+      - "*test*"
+  # Event filters
+  event_filters:
+    include:
+      - "stack_*"
+      - "memory_*"
+      - "fuse_*"
+    exclude:
+      - "*noise*"
+
+# Advanced eBPF settings
+ebpf:
+  # Maximum number of events in eBPF maps
+  max_events: 1000000
+  # eBPF map size (entries)
+  map_size: 65536
+  # eBPF program timeout (seconds)
+  program_timeout: 600
+  # Enable eBPF JIT compilation
+  jit_enabled: true
+  # eBPF verification level
+  verification_level: "strict"
+  # Enable eBPF statistics
+  enable_stats: true
+  # eBPF buffer size (pages)
+  buffer_size: 1024
+  # eBPF polling interval (milliseconds)
+  polling_interval: 100
+
+# Integration with existing tools
+tool_integration:
+  # Integrate with valgrind
+  valgrind_integration: true
+  # Integrate with perf
+  perf_integration: true
+  # Correlate with system logs
+  syslog_correlation: true
+  # Export to external tools
+  export_formats:
+    - "prometheus"
+    - "grafana"
+    - "json"
+    - "csv"
+
+# Environment-specific overrides
+environments:
+  development:
+    log_level: "debug"
+    real_time_monitoring: true
+    sampling_rate: 2000
+    stack_depth_threshold: 500
+  testing:
+    duration: 60
+    sampling_rate: 500
+    output_format: "json"
+  production:
+    log_level: "warn"
+    sampling_rate: 100
+    real_time_monitoring: false
+
+# Custom bpftrace scripts
+custom_scripts:
+  # FUSE stack monitoring script
+  fuse_stack_monitor:
+    enabled: true
+    script_path: "profiling/scripts/bpftrace/fuse_stack_monitor.bt"
+    description: "Monitor FUSE operation stack usage"
+  
+  # Memory allocation pattern analysis
+  memory_pattern_analysis:
+    enabled: true
+    script_path: "profiling/scripts/bpftrace/memory_pattern_analysis.bt"
+    description: "Analyze memory allocation patterns in FUSE operations"
+  
+  # Stack overflow prediction
+  stack_overflow_prediction:
+    enabled: true
+    script_path: "profiling/scripts/bpftrace/stack_overflow_prediction.bt"
+    description: "Predict potential stack overflow conditions"
+
+# Validation and testing
+validation:
+  # Enable configuration validation
+  enabled: true
+  # Validate eBPF program syntax
+  validate_syntax: true
+  # Test eBPF programs before deployment
+  test_programs: true
+  # Dry run mode
+  dry_run: false

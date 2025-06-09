@@ -1,0 +1,260 @@
+# HNSW Graph Traversal Test Configuration
+# Tests deep graph traversal scenarios that may cause stack overflow in VectorSearchEngine
+
+test_scenarios:
+  # HNSW Graph Construction Tests
+  graph_construction:
+    - name: "small_graph_default_params"
+      vector_count: 1000
+      dimensions: 128
+      M: 16
+      efConstruction: 200
+      description: "Small graph with default HNSW parameters"
+      expected_stack_depth: "low"
+      
+    - name: "medium_graph_increased_M"
+      vector_count: 5000
+      dimensions: 256
+      M: 32
+      efConstruction: 400
+      description: "Medium graph with increased connectivity"
+      expected_stack_depth: "medium"
+      
+    - name: "large_graph_high_connectivity"
+      vector_count: 20000
+      dimensions: 512
+      M: 64
+      efConstruction: 800
+      description: "Large graph with high connectivity (stack overflow risk)"
+      expected_stack_depth: "high"
+      
+    - name: "xlarge_graph_max_params"
+      vector_count: 50000
+      dimensions: 1024
+      M: 128
+      efConstruction: 1600
+      description: "Extra large graph with maximum parameters"
+      expected_stack_depth: "critical"
+
+  # Deep Graph Traversal Tests
+  deep_traversal:
+    - name: "deep_search_low_ef"
+      vector_count: 10000
+      dimensions: 256
+      M: 16
+      efConstruction: 200
+      search_ef: 50
+      search_k: 10
+      description: "Deep search with low ef parameter"
+      
+    - name: "deep_search_medium_ef"
+      vector_count: 10000
+      dimensions: 256
+      M: 32
+      efConstruction: 400
+      search_ef: 200
+      search_k: 50
+      description: "Deep search with medium ef parameter"
+      
+    - name: "deep_search_high_ef"
+      vector_count: 10000
+      dimensions: 512
+      M: 64
+      efConstruction: 800
+      search_ef: 800
+      search_k: 100
+      description: "Deep search with high ef parameter (stack risk)"
+      
+    - name: "deep_search_extreme_ef"
+      vector_count: 15000
+      dimensions: 1024
+      M: 64
+      efConstruction: 1000
+      search_ef: 2000
+      search_k: 200
+      description: "Extreme deep search parameters"
+
+  # Graph Connectivity Patterns
+  connectivity_patterns:
+    - name: "sparse_connectivity"
+      vector_count: 8000
+      dimensions: 256
+      M: 8
+      efConstruction: 100
+      connectivity_pattern: "sparse"
+      description: "Sparse graph connectivity pattern"
+      
+    - name: "dense_connectivity"
+      vector_count: 8000
+      dimensions: 256
+      M: 64
+      efConstruction: 800
+      connectivity_pattern: "dense"
+      description: "Dense graph connectivity pattern"
+      
+    - name: "clustered_connectivity"
+      vector_count: 10000
+      dimensions: 512
+      M: 32
+      efConstruction: 400
+      connectivity_pattern: "clustered"
+      description: "Clustered graph connectivity pattern"
+      
+    - name: "hierarchical_connectivity"
+      vector_count: 12000
+      dimensions: 256
+      M: 48
+      efConstruction: 600
+      connectivity_pattern: "hierarchical"
+      description: "Hierarchical graph connectivity pattern"
+
+  # Memory-Intensive Graph Operations
+  memory_intensive:
+    - name: "large_batch_insertion"
+      vector_count: 25000
+      dimensions: 512
+      M: 32
+      efConstruction: 400
+      batch_size: 5000
+      operation: "batch_insert"
+      description: "Large batch vector insertion"
+      
+    - name: "graph_reconstruction"
+      vector_count: 15000
+      dimensions: 256
+      M: 24
+      efConstruction: 300
+      operation: "reconstruct"
+      description: "Complete graph reconstruction"
+      
+    - name: "concurrent_graph_updates"
+      vector_count: 10000
+      dimensions: 256
+      M: 16
+      efConstruction: 200
+      threads: 4
+      operation: "concurrent_update"
+      description: "Concurrent graph updates"
+      
+    - name: "graph_compaction"
+      vector_count: 20000
+      dimensions: 512
+      M: 32
+      efConstruction: 400
+      operation: "compact"
+      description: "Graph compaction and optimization"
+
+  # Recursive Algorithm Tests
+  recursive_algorithms:
+    - name: "recursive_search_shallow"
+      vector_count: 5000
+      dimensions: 256
+      M: 16
+      efConstruction: 200
+      max_recursion_depth: 10
+      description: "Recursive search with shallow depth limit"
+      
+    - name: "recursive_search_medium"
+      vector_count: 8000
+      dimensions: 512
+      M: 32
+      efConstruction: 400
+      max_recursion_depth: 50
+      description: "Recursive search with medium depth limit"
+      
+    - name: "recursive_search_deep"
+      vector_count: 10000
+      dimensions: 256
+      M: 48
+      efConstruction: 600
+      max_recursion_depth: 200
+      description: "Recursive search with deep recursion (stack risk)"
+      
+    - name: "recursive_search_unlimited"
+      vector_count: 12000
+      dimensions: 512
+      M: 64
+      efConstruction: 800
+      max_recursion_depth: -1
+      description: "Recursive search without depth limit"
+
+# HNSW-Specific Configuration
+hnsw_config:
+  distance_metrics:
+    - "euclidean"
+    - "cosine"
+    - "manhattan"
+    - "dot_product"
+    
+  layer_generation:
+    ml: 1.0  # Level generation factor
+    max_layers: 16
+    
+  search_optimization:
+    dynamic_ef: true
+    early_termination: true
+    beam_search: false
+    
+  memory_management:
+    node_pool_size: 100000
+    connection_pool_size: 1000000
+    lazy_deletion: true
+
+# Profiling Configuration
+profiling:
+  tools:
+    - valgrind
+    - perf
+    - ebpf
+    
+  stack_monitoring:
+    enabled: true
+    depth_limit: 200
+    sample_frequency: 500
+    recursion_tracking: true
+    
+  memory_tracking:
+    enabled: true
+    allocation_tracking: true
+    graph_memory_tracking: true
+    node_lifecycle_tracking: true
+    
+  performance_metrics:
+    enabled: true
+    search_latency: true
+    construction_time: true
+    memory_usage: true
+    
+  graph_analysis:
+    enabled: true
+    connectivity_analysis: true
+    layer_distribution: true
+    search_path_analysis: true
+
+# Success Criteria
+success_criteria:
+  stack_usage:
+    warning_threshold: "80%"
+    critical_threshold: "95%"
+    max_recursion_depth: 100
+    
+  memory_usage:
+    max_graph_memory: "1GB"
+    max_node_memory: "100MB"
+    max_connection_memory: "500MB"
+    
+  performance:
+    max_construction_time: "300s"
+    max_search_time: "10s"
+    min_search_accuracy: 0.9
+    
+  graph_quality:
+    min_connectivity: 0.8
+    max_layer_imbalance: 0.3
+    min_search_efficiency: 0.7
+    
+  stability:
+    no_stack_overflows: true
+    no_infinite_recursion: true
+    no_memory_leaks: true
+    no_graph_corruption: true

@@ -1,451 +1,310 @@
-# VexFS v2.0 Installation Guide
+# VexFS Installation Guide
 
-This comprehensive guide covers all installation methods for VexFS v2.0, the world's first production-ready vector-extended filesystem.
+This guide covers installing VexFS in various environments and deployment scenarios.
 
-## 📋 System Requirements
+## System Requirements
 
 ### Minimum Requirements
+- **OS**: Linux 5.4+ (Ubuntu 20.04+, RHEL 8+, SUSE 15+)
+- **Memory**: 4GB RAM minimum, 8GB recommended
+- **Storage**: 10GB free space for installation
+- **CPU**: x86_64 architecture with SSE4.2 support
 
-| Component | Requirement |
-|-----------|-------------|
-| **Operating System** | Linux (Ubuntu 20.04+, CentOS 8+, or equivalent) |
-| **Kernel Version** | 5.4+ (for kernel module) |
-| **Memory** | 8GB RAM minimum, 16GB+ recommended |
-| **Storage** | SSD recommended for optimal performance |
-| **CPU** | Multi-core processor (4+ cores recommended) |
-| **Rust** | 1.70+ (for building from source) |
-| **Docker** | 20.10+ (for containerized deployment) |
+### Recommended Requirements
+- **Memory**: 16GB+ RAM for production workloads
+- **Storage**: SSD storage for optimal performance
+- **CPU**: AVX2 support for SIMD optimizations
+- **Network**: Gigabit Ethernet for distributed deployments
 
-### Recommended Production Setup
+### Development Requirements
+- **Rust**: 1.70+ with cargo
+- **Build Tools**: gcc, make, pkg-config
+- **Kernel Headers**: linux-headers package for kernel module compilation
 
-| Component | Recommendation |
-|-----------|----------------|
-| **Memory** | 32GB+ RAM for large datasets |
-| **Storage** | NVMe SSD with 2TB+ capacity |
-| **CPU** | 16+ cores, 3.0GHz+ |
-| **Network** | 10Gbps for distributed setups |
+## Installation Methods
 
-## 🚀 Installation Methods
+### 1. Binary Installation (Recommended)
 
-### Method 1: Kernel Module Installation (Recommended for Production)
-
-VexFS v2.0 provides a true kernel-level filesystem for maximum performance:
-
+#### Ubuntu/Debian
 ```bash
-# Clone the repository
-git clone https://github.com/lspecian/vexfs.git
-cd vexfs
+# Add VexFS repository
+curl -fsSL https://packages.vexfs.io/gpg | sudo apt-key add -
+echo "deb https://packages.vexfs.io/ubuntu $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/vexfs.list
 
-# Build the kernel module
-cd kernel/vexfs_v2_build
-make
-
-# Load the kernel module
-sudo insmod vexfs_v2.ko
-
-# Verify module is loaded
-lsmod | grep vexfs
-cat /proc/filesystems | grep vexfs
+# Install VexFS
+sudo apt update
+sudo apt install vexfs-fuse vexfs-tools vexfs-dev
 ```
 
-### Method 2: FUSE Implementation (Development/Testing)
-
-For development and cross-platform compatibility:
-
+#### RHEL/CentOS/Fedora
 ```bash
-# Build FUSE implementation
-cd rust
-cargo build --release --bin vexfs_fuse
+# Add VexFS repository
+sudo rpm --import https://packages.vexfs.io/gpg
+sudo tee /etc/yum.repos.d/vexfs.repo << EOF
+[vexfs]
+name=VexFS Repository
+baseurl=https://packages.vexfs.io/rhel/\$releasever/\$basearch/
+enabled=1
+gpgcheck=1
+gpgkey=https://packages.vexfs.io/gpg
+EOF
 
-# Create mount point
-mkdir /tmp/vexfs_mount
-
-# Mount FUSE filesystem
-./target/release/vexfs_fuse /tmp/vexfs_mount
-
-# Verify mount
-mount | grep vexfs
-ls /tmp/vexfs_mount
+# Install VexFS
+sudo dnf install vexfs-fuse vexfs-tools vexfs-dev
 ```
 
-### Method 3: Docker Deployment
-
-Containerized deployment for easy setup:
-
+#### SUSE/openSUSE
 ```bash
-# Start VexFS with Docker Compose
-docker-compose -f deployment/docker/docker-compose.production.yml up -d
+# Add VexFS repository
+sudo zypper addrepo https://packages.vexfs.io/suse/vexfs.repo
+sudo zypper refresh
 
-# Verify installation
-curl http://localhost:8000/api/v2/version
+# Install VexFS
+sudo zypper install vexfs-fuse vexfs-tools vexfs-dev
 ```
 
-## 🔧 Kernel Module Setup
+### 2. Container Installation
 
-### Prerequisites
+#### Docker
+```bash
+# Pull VexFS container
+docker pull vexfs/vexfs:latest
 
+# Run VexFS container
+docker run -d \
+  --name vexfs \
+  --privileged \
+  --device /dev/fuse \
+  -v /mnt/vexfs:/mnt/vexfs:shared \
+  vexfs/vexfs:latest
+```
+
+#### Kubernetes
+```yaml
+# Apply VexFS DaemonSet
+kubectl apply -f https://raw.githubusercontent.com/vexfs/vexfs/main/deployment/kubernetes/vexfs-daemonset.yaml
+```
+
+### 3. Source Installation
+
+#### Prerequisites
 ```bash
 # Ubuntu/Debian
-sudo apt update
-sudo apt install -y build-essential linux-headers-$(uname -r) pkg-config
+sudo apt install build-essential pkg-config libfuse3-dev linux-headers-$(uname -r)
 
-# CentOS/RHEL
-sudo yum groupinstall -y "Development Tools"
-sudo yum install -y kernel-devel kernel-headers
+# RHEL/CentOS/Fedora
+sudo dnf groupinstall "Development Tools"
+sudo dnf install pkgconfig fuse3-devel kernel-devel
 
-# Install Rust (if building from source)
+# Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source ~/.cargo/env
 ```
 
-### Build and Install
-
+#### Build and Install
 ```bash
-# Navigate to kernel module directory
-cd kernel/vexfs_v2_build
+# Clone repository
+git clone https://github.com/vexfs/vexfs.git
+cd vexfs
 
-# Build the kernel module
-make clean
+# Build VexFS
+cargo build --release
+
+# Install binaries
+sudo cp target/release/vexfs_fuse /usr/local/bin/
+sudo cp target/release/vexctl /usr/local/bin/
+sudo cp target/release/mkfs.vexfs /usr/local/sbin/
+
+# Install FUSE helper
+sudo cp scripts/mount.vexfs /sbin/
+sudo chmod +x /sbin/mount.vexfs
+
+# Create configuration directory
+sudo mkdir -p /etc/vexfs
+sudo cp config/vexfs.conf.example /etc/vexfs/vexfs.conf
+```
+
+#### Kernel Module Installation (Optional)
+```bash
+# Build kernel module
+cd kernel
 make
 
-# Load the module
-sudo insmod vexfs_v2.ko
+# Install kernel module
+sudo make install
+sudo depmod -a
 
-# Verify module loaded successfully
-dmesg | tail -20
-lsmod | grep vexfs_v2
+# Load kernel module
+sudo modprobe vexfs
 ```
 
-### Format and Mount a Partition
+## Post-Installation Setup
 
+### 1. User and Group Setup
 ```bash
-# Format a partition with VexFS v2.0
-sudo mkfs.vexfs /dev/sdb1
+# Create vexfs user and group
+sudo groupadd vexfs
+sudo useradd -r -g vexfs -s /bin/false vexfs
 
-# Create mount point
-sudo mkdir -p /mnt/vexfs
-
-# Mount the filesystem
-sudo mount -t vexfs_v2 /dev/sdb1 /mnt/vexfs
-
-# Verify mount
-mount | grep vexfs
-df -h /mnt/vexfs
+# Add your user to vexfs group
+sudo usermod -a -G vexfs $USER
 ```
 
-## 🐍 Python SDK Installation
-
-### From PyPI
-
+### 2. Directory Structure
 ```bash
-pip install vexfs-v2
+# Create standard directories
+sudo mkdir -p /var/lib/vexfs
+sudo mkdir -p /var/log/vexfs
+sudo mkdir -p /etc/vexfs/conf.d
+
+# Set permissions
+sudo chown -R vexfs:vexfs /var/lib/vexfs
+sudo chown -R vexfs:vexfs /var/log/vexfs
+sudo chmod 755 /var/lib/vexfs
+sudo chmod 755 /var/log/vexfs
 ```
 
-### From Source
-
+### 3. Service Configuration
 ```bash
-cd bindings/python
+# Enable and start VexFS service
+sudo systemctl enable vexfs
+sudo systemctl start vexfs
 
-# Install build dependencies
-pip install maturin
-
-# Build and install
-maturin develop --release
-
-# Verify installation
-python -c "import vexfs; print(vexfs.__version__)"
+# Check service status
+sudo systemctl status vexfs
 ```
 
-### Virtual Environment Setup
-
+### 4. Firewall Configuration
 ```bash
-# Create virtual environment
-python -m venv vexfs-env
-source vexfs-env/bin/activate
-
-# Install VexFS v2.0
-pip install vexfs-v2
-
-# Install ML dependencies
-pip install numpy pandas sentence-transformers scikit-learn
+# Open required ports (if using remote API)
+sudo firewall-cmd --permanent --add-port=8080/tcp  # REST API
+sudo firewall-cmd --permanent --add-port=8081/tcp  # WebSocket API
+sudo firewall-cmd --reload
 ```
 
-## 🔷 TypeScript SDK Installation
+## Verification
 
-### From npm
-
+### 1. Basic Functionality Test
 ```bash
-npm install @vexfs/sdk-v2
-```
+# Check VexFS version
+vexfs_fuse --version
 
-### From Source
-
-```bash
-cd bindings/typescript
-
-# Install dependencies
-npm install
-
-# Build TypeScript
-npm run build
-
-# Link for local development
-npm link
-```
-
-## ⚙️ Configuration
-
-### Kernel Module Configuration
-
-Create `/etc/vexfs/vexfs.conf`:
-
-```ini
-# VexFS v2.0 Kernel Module Configuration
-
-[filesystem]
-# Default vector dimension
-default_dimension = 384
-
-# Cache settings
-vector_cache_size = 2GB
-metadata_cache_size = 512MB
-
-# Performance tuning
-max_concurrent_operations = 1000
-batch_insert_size = 10000
-
-[indexing]
-# ANNS algorithm (hnsw, lsh)
-default_algorithm = hnsw
-
-# HNSW parameters
-hnsw_m = 16
-hnsw_ef_construction = 200
-hnsw_ef_search = 100
-
-# LSH parameters
-lsh_num_tables = 10
-lsh_num_functions = 20
-
-[security]
-# Access control
-enable_acl = true
-default_permissions = 644
-
-# Encryption (if enabled)
-enable_encryption = false
-encryption_algorithm = aes256
-```
-
-### Environment Variables
-
-```bash
-# Kernel module settings
-export VEXFS_DEFAULT_DIMENSION=384
-export VEXFS_CACHE_SIZE=2GB
-export VEXFS_MAX_OPERATIONS=1000
-
-# Logging
-export VEXFS_LOG_LEVEL=info
-export VEXFS_LOG_FILE=/var/log/vexfs/vexfs.log
-
-# Performance tuning
-export VEXFS_BATCH_SIZE=10000
-export VEXFS_WORKER_THREADS=8
-```
-
-## ✅ Verification
-
-### Kernel Module Verification
-
-```bash
-# Check module status
-lsmod | grep vexfs_v2
-
-# Check filesystem registration
-cat /proc/filesystems | grep vexfs
-
-# Check kernel logs
-dmesg | grep vexfs
-
-# Test basic functionality
-sudo mkfs.vexfs /dev/loop0  # Using loop device for testing
-sudo mount -t vexfs_v2 /dev/loop0 /mnt/test
-echo "Hello VexFS v2.0" | sudo tee /mnt/test/hello.txt
-cat /mnt/test/hello.txt
-```
-
-### FUSE Verification
-
-```bash
-# Check FUSE mount
-mount | grep vexfs_fuse
+# Test FUSE mount
+mkdir /tmp/vexfs_test
+vexfs_fuse /tmp/vexfs_test
 
 # Test basic operations
-echo "Test data" > /tmp/vexfs_mount/test.txt
-cat /tmp/vexfs_mount/test.txt
+echo "Hello VexFS" > /tmp/vexfs_test/test.txt
+cat /tmp/vexfs_test/test.txt
 
-# Test vector operations (if supported)
-python3 -c "
-import vexfs
-client = vexfs.Client('/tmp/vexfs_mount')
-print('VexFS v2.0 FUSE working!')
-"
+# Unmount
+fusermount3 -u /tmp/vexfs_test
 ```
 
-### Performance Benchmark
-
+### 2. Performance Test
 ```bash
-# Run kernel module benchmarks
-cd kernel/vexfs_v2_build
-./test_hnsw_functionality
+# Run performance benchmark
+cargo run --bin performance_benchmark
 
-# Run comprehensive tests
-./standalone_phase3_test
-
-# Expected output:
-# ✅ HNSW indexing: PASSED
-# ✅ Vector search: PASSED
-# ✅ Batch operations: PASSED
-# ✅ Performance: >100k ops/sec
+# Check results
+cat performance_analysis_report.md
 ```
 
-## 🔒 Security Setup
-
-### Kernel Module Security
-
+### 3. API Test
 ```bash
-# Set up proper permissions
-sudo chown root:root /lib/modules/$(uname -r)/extra/vexfs_v2.ko
-sudo chmod 644 /lib/modules/$(uname -r)/extra/vexfs_v2.ko
+# Test REST API (if enabled)
+curl -X GET http://localhost:8080/api/v1/status
 
-# Configure module signing (if required)
-sudo /usr/src/linux-headers-$(uname -r)/scripts/sign-file \
-  sha256 /path/to/signing_key.priv /path/to/signing_key.x509 vexfs_v2.ko
+# Test vector search
+curl -X POST http://localhost:8080/api/v1/search \
+  -H "Content-Type: application/json" \
+  -d '{"vector": [0.1, 0.2, 0.3], "k": 10}'
 ```
 
-### Access Control
+## Configuration
 
+### Basic Configuration
+Edit `/etc/vexfs/vexfs.conf`:
+
+```toml
+[general]
+log_level = "info"
+data_dir = "/var/lib/vexfs"
+cache_size = "1GB"
+
+[fuse]
+mount_options = "allow_other,default_permissions"
+max_background = 12
+congestion_threshold = 10
+
+[performance]
+memory_pool_size = "512MB"
+enable_simd = true
+enable_compression = true
+
+[api]
+enable_rest = true
+rest_port = 8080
+enable_websocket = true
+websocket_port = 8081
+```
+
+### Advanced Configuration
+See [Configuration Reference](config-reference.md) for complete options.
+
+## Troubleshooting
+
+### Common Issues
+
+#### FUSE Mount Fails
 ```bash
-# Create VexFS group
-sudo groupadd vexfs
+# Check FUSE availability
+ls -l /dev/fuse
 
-# Add users to VexFS group
-sudo usermod -a -G vexfs $USER
+# Check user permissions
+groups $USER
 
-# Set filesystem permissions
-sudo chmod 755 /mnt/vexfs
-sudo chgrp vexfs /mnt/vexfs
+# Check mount point permissions
+ls -ld /mnt/vexfs
 ```
 
-## 🐛 Troubleshooting
-
-### Common Kernel Module Issues
-
-**Module fails to load:**
+#### Performance Issues
 ```bash
-# Check kernel compatibility
-uname -r
-modinfo vexfs_v2.ko
+# Check system resources
+htop
+iostat -x 1
 
-# Check for missing symbols
-dmesg | grep vexfs | grep "Unknown symbol"
+# Check VexFS logs
+sudo journalctl -u vexfs -f
 
-# Rebuild for current kernel
-make clean && make
+# Run performance analysis
+cargo run --bin performance_benchmark
 ```
 
-**Permission denied:**
+#### API Connection Issues
 ```bash
-# Check module permissions
-ls -la vexfs_v2.ko
+# Check service status
+sudo systemctl status vexfs
 
-# Load with proper privileges
-sudo insmod vexfs_v2.ko
+# Check port availability
+sudo netstat -tlnp | grep :8080
+
+# Check firewall rules
+sudo firewall-cmd --list-all
 ```
 
-**Mount fails:**
-```bash
-# Check filesystem type registration
-cat /proc/filesystems | grep vexfs
+### Getting Help
 
-# Check device permissions
-ls -la /dev/sdb1
-sudo chmod 666 /dev/sdb1  # Temporary for testing
-```
+- **Documentation**: [docs.vexfs.io](https://docs.vexfs.io)
+- **Community**: [community.vexfs.io](https://community.vexfs.io)
+- **Issues**: [github.com/vexfs/vexfs/issues](https://github.com/vexfs/vexfs/issues)
+- **Support**: [support@vexfs.io](mailto:support@vexfs.io)
 
-### FUSE Issues
+## Next Steps
 
-**Mount point busy:**
-```bash
-# Unmount existing mount
-fusermount -u /tmp/vexfs_mount
+After successful installation:
 
-# Kill any hanging processes
-sudo pkill -f vexfs_fuse
-```
-
-**Permission errors:**
-```bash
-# Check FUSE permissions
-ls -la /dev/fuse
-sudo chmod 666 /dev/fuse
-
-# Add user to fuse group
-sudo usermod -a -G fuse $USER
-```
-
-## 🔄 Upgrading
-
-### Kernel Module Upgrade
-
-```bash
-# Backup current configuration
-sudo cp /etc/vexfs/vexfs.conf /etc/vexfs/vexfs.conf.backup
-
-# Unmount filesystems
-sudo umount /mnt/vexfs
-
-# Remove old module
-sudo rmmod vexfs_v2
-
-# Install new module
-cd kernel/vexfs_v2_build
-git pull
-make clean && make
-sudo insmod vexfs_v2.ko
-
-# Remount filesystems
-sudo mount -t vexfs_v2 /dev/sdb1 /mnt/vexfs
-```
-
-### FUSE Upgrade
-
-```bash
-# Stop FUSE daemon
-fusermount -u /tmp/vexfs_mount
-
-# Update and rebuild
-git pull
-cd rust
-cargo build --release --bin vexfs_fuse
-
-# Restart FUSE
-./target/release/vexfs_fuse /tmp/vexfs_mount
-```
-
-## 🎉 Next Steps
-
-Now that VexFS v2.0 is installed:
-
-1. **[Quick Start Guide](quick-start.md)** - Get familiar with basic operations
-2. **[Basic Usage](usage.md)** - Learn core filesystem concepts
-3. **[Vector Search Tutorial](../tutorials/vector-search.md)** - Explore vector capabilities
-4. **[API Reference](../developer-guide/api-reference.md)** - Complete API documentation
-5. **[Performance Tuning](../reference/performance.md)** - Optimize for your workload
-
-**Need help?** Check our [troubleshooting guide](troubleshooting.md) or [open an issue](https://github.com/lspecian/vexfs/issues).
-
----
-
-**VexFS v2.0** - The world's first production-ready vector-extended filesystem! 🚀
+1. [Basic Usage Guide](basic-usage.md) - Learn essential operations
+2. [Configuration Guide](configuration.md) - Customize your setup
+3. [Performance Tuning](performance-tuning.md) - Optimize for your workload
+4. [API Integration](api-integration.md) - Integrate with applications

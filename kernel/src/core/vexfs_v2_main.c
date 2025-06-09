@@ -44,6 +44,14 @@
 #include "vexfs_v2_phase3.h"
 #endif
 
+/* Include Full FS Journal for AI-Native Semantic Substrate */
+#include "vexfs_v2_journal.h"
+
+/* Include Atomic Operations for FS Journal (Task 2) */
+#ifdef VEXFS_ATOMIC_ENABLED
+#include "vexfs_v2_atomic.h"
+#endif
+
 /* Define maximum distance value for kernel space (no floating-point) */
 #define VEXFS_MAX_UINT32 0xFFFFFFFF
 
@@ -144,8 +152,82 @@ struct vexfs_v2_sb_info {
     __u32 numa_node_count;      /* Number of NUMA nodes available */
     __u32 preferred_numa_node;  /* Preferred NUMA node for allocations */
     
+    /* 🔥 NEW: Full FS Journal Support (AI-Native Semantic Substrate Phase 1) 🔥 */
+    __u64 journal_start_block;  /* First block of journal area */
+    __u64 journal_total_blocks; /* Total blocks allocated to journal */
+    __u32 journal_flags;        /* Journal configuration flags */
+    __u32 journal_version;      /* Journal format version */
+    
     /* Reserved for future extensions */
-    __u32 reserved[16];         /* Reserved fields for future use */
+    __u32 reserved[12];         /* Reserved fields for future use (reduced for journal) */
+};
+
+/* 🚀 ENHANCED VexFS v2.0 In-Memory Superblock Structure 🚀 */
+struct vexfs_v2_sb_info {
+    struct super_block *sb;
+    
+    /* Basic filesystem info (from v1.0) */
+    unsigned long block_count;
+    unsigned long free_blocks;
+    unsigned long inode_count;
+    unsigned long free_inodes;
+    spinlock_t lock;
+    
+    /* 🔥 NEW: VexFS v2.0 Vector Database Extensions 🔥 */
+    
+    /* Version and compatibility */
+    __u32 fs_version_major;     /* Filesystem major version (2) */
+    __u32 fs_version_minor;     /* Filesystem minor version (0) */
+    __u32 fs_version_patch;     /* Filesystem patch version (0) */
+    __u32 compatibility_flags;  /* Backward compatibility flags */
+    
+    /* Global vector parameters */
+    __u16 default_vector_dim;   /* Default vector dimensionality */
+    __u8  default_element_type; /* Default element type (float32, etc.) */
+    __u8  vector_alignment;     /* Required SIMD alignment (16, 32, 64 bytes) */
+    
+    /* ANN index metadata */
+    __u64 hnsw_index_block;     /* Block address of HNSW index root */
+    __u64 pq_index_block;       /* Block address of PQ codebook */
+    __u64 ivf_index_block;      /* Block address of IVF cluster centers */
+    __u64 vector_meta_block;    /* Block address of vector metadata table */
+    
+    /* SIMD capabilities (detected at mount time) */
+    __u32 simd_capabilities;    /* Available SIMD instruction sets */
+    __u32 simd_vector_width;    /* Optimal SIMD vector width (128, 256, 512 bits) */
+    
+    /* Vector storage optimization settings */
+    __u32 optimization_flags;   /* Storage and processing optimizations */
+    __u32 batch_size;          /* Optimal batch size for vector operations */
+    __u32 cache_line_size;     /* CPU cache line size for alignment */
+    
+    /* Performance counters */
+    atomic64_t vector_ops_count;    /* Total vector operations performed */
+    atomic64_t simd_ops_count;      /* Total SIMD operations performed */
+    atomic64_t cache_hits;          /* Vector cache hits */
+    atomic64_t cache_misses;        /* Vector cache misses */
+    atomic64_t vector_search_count; /* Total vector searches performed */
+    atomic64_t vectors_processed;   /* Total vectors processed */
+    
+    /* Vector collection management */
+    __u32 max_collections;      /* Maximum number of vector collections */
+    __u32 active_collections;   /* Currently active collections */
+    __u64 collection_table_block; /* Block address of collection metadata */
+    
+    /* Memory management for vectors */
+    __u32 vector_page_order;    /* Page allocation order for vector data */
+    __u32 numa_node_count;      /* Number of NUMA nodes available */
+    __u32 preferred_numa_node;  /* Preferred NUMA node for allocations */
+    
+    /* 🔥 NEW: Full FS Journal Support (AI-Native Semantic Substrate Phase 1) 🔥 */
+    struct vexfs_journal *journal;  /* Journal instance */
+    __u64 journal_start_block;      /* First block of journal area */
+    __u64 journal_total_blocks;     /* Total blocks allocated to journal */
+    __u32 journal_flags;            /* Journal configuration flags */
+    __u32 journal_version;          /* Journal format version */
+    
+    /* Reserved for future extensions */
+    __u32 reserved[8];              /* Reserved fields for future use (reduced for journal) */
 };
 
 /* 🚀 ENHANCED VexFS v2.0 Inode Structure 🚀 */

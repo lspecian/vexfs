@@ -37,10 +37,17 @@
 pub mod block;
 pub mod allocation;
 pub mod journal;
+pub mod data_journaling;
+pub mod data_journaling_config;
 pub mod persistence;
 pub mod superblock;
 pub mod layout;
 pub mod cache;
+pub mod acid_transaction_manager;
+pub mod mvcc;
+pub mod deadlock_detector;
+pub mod durability_manager;
+pub mod vector_hnsw_bridge;
 
 // Public exports for external use - only export what exists
 pub use block::{
@@ -54,6 +61,30 @@ pub use allocation::{
 
 pub use journal::{
     TransactionManager, TransactionState, VexfsJournal,
+};
+
+pub use data_journaling::{
+    DataJournalingManager, DataJournalingStats, CowBlock, DataJournalOperation, DataJournalOpType,
+};
+pub use crate::shared::config::DataJournalingMode;
+
+pub use acid_transaction_manager::{
+    AcidTransactionManager, AcidTransaction, AcidTransactionState, IsolationLevel,
+    AcidTransactionStats, MvccVersion,
+};
+
+pub use mvcc::{
+    MvccManager, VersionChain, VersionChainEntry, MvccStats,
+};
+
+pub use deadlock_detector::{
+    DeadlockDetector, DeadlockDetectionStrategy, DeadlockResolutionStrategy,
+    WaitForGraph, WaitForEdge, DeadlockStats,
+};
+
+pub use durability_manager::{
+    DurabilityManager, DurabilityPolicy, SyncOperation, SyncRequest, SyncPriority,
+    DurabilityCheckpoint, DurabilityStats, WriteBarrier,
 };
 
 pub use persistence::{
@@ -151,6 +182,54 @@ impl StorageManager {
         storage.allocator.borrow_mut().initialize()?;
         
         Ok(storage)
+    }
+
+    /// Create a mock storage manager for testing purposes
+    pub fn new_for_testing() -> Self {
+        // Create minimal mock components for testing
+        let block_size = 4096u32;
+        let total_blocks = 1024u64;
+        let device_size = total_blocks * block_size as u64;
+        
+        let device = BlockDevice::new(
+            device_size,
+            block_size,
+            false,
+            "test_device".to_string()
+        ).expect("Failed to create test block device");
+        
+        let layout = VexfsLayout {
+            total_blocks,
+            block_size,
+            blocks_per_group: 128,
+            inodes_per_group: 256,
+            group_count: 8,
+            inode_size: 256,
+            journal_blocks: 64,
+            vector_blocks: 128,
+        };
+        
+        let block_manager = BlockManager::new(device).expect("Failed to create test block manager");
+        let allocator = SpaceAllocator::new(total_blocks, block_size, 128).expect("Failed to create test allocator");
+        let journal = VexfsJournal::new(block_size, 64);
+        let persistence = PersistenceManager::new(block_size, true);
+        let superblock = SuperblockManager::new().expect("Failed to create test superblock manager");
+        let cache = BlockCacheManager::new(
+            256, // cache_blocks
+            256 * block_size as usize, // cache_size
+            block_size,
+            false, // write_back
+        );
+
+        Self {
+            block_manager: RefCell::new(block_manager),
+            allocator: RefCell::new(allocator),
+            journal: RefCell::new(journal),
+            persistence: RefCell::new(persistence),
+            superblock: RefCell::new(superblock),
+            cache: RefCell::new(cache),
+            layout,
+        }
     }
 
     /// Mount filesystem

@@ -1508,6 +1508,9 @@ impl RealisticAnnsBenchmark {
             ef_search: 50,
             max_layers: 16,
             ml: 1.0 / 2.0_f64.ln(),
+            max_m: 16,
+            max_m0: 32,
+            seed: 42,
         };
         let mut hnsw_index = HnswGraph::new(128, hnsw_params).map_err(|e| VexfsError::from(e))?;
         

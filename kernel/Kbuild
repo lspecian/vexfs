@@ -1,16 +1,101 @@
-# VexFS v2.0 Kernel Build Configuration - Organized Structure
-obj-m := vexfs_v2_phase3.o
+# VexFS v2.0 Kernel Module Build Configuration
+# 
+# This Kbuild file defines the compilation units for the VexFS v2.0 kernel module
+# including the new VexGraph Phase 2 implementation (Task 8).
+#
+# Build order is important for proper symbol resolution and dependency management.
 
-# Core module files from organized structure (minimal working set)
-vexfs_v2_phase3-objs := src/core/vexfs_v2_main.o \
-                        src/search/vexfs_v2_search.o \
-                        src/search/vexfs_v2_advanced_search.o \
-                        src/search/vexfs_v2_hnsw.o \
-                        src/search/vexfs_v2_lsh.o \
-                        src/search/vexfs_v2_multi_model.o \
-                        src/search/vexfs_v2_phase3_integration.o \
-                        src/utils/vexfs_v2_monitoring.o
+# Module name
+obj-m := vexfs.o
 
-# Enable Phase 3 features and include paths
-ccflags-y += -DVEXFS_PHASE3_ENABLED -O2 -Wall -Wextra
-ccflags-y += -I$(src)/src/include -I$(src)/src/core -I$(src)/src/search -I$(src)/src/utils
+# Core VexFS v2.0 components
+vexfs-y := src/core/vexfs_v2_main.o
+
+# Phase 1 Foundation Components (Tasks 1-7)
+vexfs-y += src/utils/vexfs_v2_journal.o
+vexfs-y += src/utils/vexfs_v2_atomic.o
+vexfs-y += src/utils/vexfs_v2_metadata_journal.o
+vexfs-y += src/utils/vexfs_v2_allocation_journal.o
+vexfs-y += src/utils/vexfs_v2_fast_recovery.o
+vexfs-y += src/utils/vexfs_v2_fast_recovery_integration.o
+
+# VexFS v2.0 utility components
+vexfs-y += src/utils/vexfs_v2_memory_manager.o
+vexfs-y += src/utils/vexfs_v2_locking.o
+vexfs-y += src/utils/vexfs_v2_locking_rcu.o
+vexfs-y += src/utils/vexfs_v2_locking_deadlock.o
+vexfs-y += src/utils/vexfs_v2_monitoring.o
+vexfs-y += src/utils/vexfs_v2_comprehensive_monitoring.o
+
+# Enhanced file operations
+vexfs-y += src/utils/vexfs_v2_enhanced_file_ops.o
+vexfs-y += src/utils/vexfs_v2_enhanced_file_ops_part2.o
+vexfs-y += src/utils/vexfs_v2_enhanced_ioctl.o
+vexfs-y += src/utils/vexfs_v2_enhanced_ioctl_part2.o
+vexfs-y += src/utils/vexfs_v2_enhanced_ioctl_utils.o
+vexfs-y += src/utils/vexfs_v2_enhanced_registration.o
+vexfs-y += src/utils/vexfs_v2_enhanced_registration_part2.o
+
+# Vector processing and caching
+vexfs-y += src/utils/vexfs_v2_vector_processing.o
+vexfs-y += src/utils/vexfs_v2_vector_cache.o
+vexfs-y += src/utils/vexfs_v2_ann_index_cache.o
+
+# I/O optimization
+vexfs-y += src/utils/vexfs_v2_io_optimization.o
+vexfs-y += src/utils/vexfs_v2_allocation_operations.o
+vexfs-y += src/utils/vexfs_v2_orphan_detection.o
+
+# 🚀 NEW: Phase 2 VexGraph Components (Task 8) 🚀
+# These components implement the native graph representation layer
+vexfs-y += src/utils/vexfs_v2_vexgraph_core.o
+vexfs-y += src/utils/vexfs_v2_vexgraph_edges.o
+vexfs-y += src/utils/vexfs_v2_vexgraph_index.o
+vexfs-y += src/utils/vexfs_v2_vexgraph_integration.o
+
+# Search and indexing components
+vexfs-y += src/search/vexfs_v2_search.o
+vexfs-y += src/search/vexfs_v2_hnsw.o
+vexfs-y += src/search/vexfs_v2_lsh.o
+vexfs-y += src/search/vexfs_v2_advanced_search.o
+vexfs-y += src/search/vexfs_v2_multi_model.o
+
+# Phase 3 components (when enabled)
+ifdef CONFIG_VEXFS_PHASE3
+vexfs-y += src/search/vexfs_v2_phase3_integration.o
+endif
+
+# Compiler flags for VexFS v2.0
+ccflags-y := -DVEXFS_V2_ENABLED
+ccflags-y += -DVEXFS_JOURNAL_ENABLED
+ccflags-y += -DVEXFS_ATOMIC_ENABLED
+ccflags-y += -DVEXFS_VEXGRAPH_ENABLED
+
+# Phase 3 flags (when enabled)
+ifdef CONFIG_VEXFS_PHASE3
+ccflags-y += -DVEXFS_PHASE3_ENABLED
+endif
+
+# Optimization flags
+ccflags-y += -O2
+ccflags-y += -fno-strict-aliasing
+ccflags-y += -Wno-unused-function
+
+# SIMD support flags
+ccflags-y += -mavx2
+ccflags-y += -mfma
+
+# Debug flags (when enabled)
+ifdef CONFIG_VEXFS_DEBUG
+ccflags-y += -DVEXFS_DEBUG
+ccflags-y += -g
+endif
+
+# Include paths
+ccflags-y += -I$(src)/src/include
+
+# Module information
+MODULE_LICENSE := "GPL v2"
+MODULE_AUTHOR := "VexFS Development Team"
+MODULE_DESCRIPTION := "VexFS v2.0 - AI-Native Semantic Substrate with VexGraph"
+MODULE_VERSION := "2.0.0"

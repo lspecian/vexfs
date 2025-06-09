@@ -1,0 +1,282 @@
+# Component Initialization Test Configuration
+# Tests isolated and combined component initialization to identify stack overflow sources
+
+test_scenarios:
+  # Isolated Component Initialization Tests
+  isolated_initialization:
+    - name: "vector_storage_manager_only"
+      components: ["vector_storage_manager"]
+      vector_count: 10000
+      dimensions: 256
+      description: "Initialize only VectorStorageManager"
+      expected_stack_usage: "low"
+      
+    - name: "vector_search_engine_only"
+      components: ["vector_search_engine"]
+      vector_count: 10000
+      dimensions: 256
+      hnsw_M: 16
+      hnsw_efConstruction: 200
+      description: "Initialize only VectorSearchEngine"
+      expected_stack_usage: "medium"
+      
+    - name: "metadata_manager_only"
+      components: ["metadata_manager"]
+      metadata_entries: 5000
+      description: "Initialize only MetadataManager"
+      expected_stack_usage: "low"
+      
+    - name: "cache_manager_only"
+      components: ["cache_manager"]
+      cache_size: "100MB"
+      description: "Initialize only CacheManager"
+      expected_stack_usage: "low"
+      
+    - name: "transaction_manager_only"
+      components: ["transaction_manager"]
+      max_transactions: 1000
+      description: "Initialize only TransactionManager"
+      expected_stack_usage: "low"
+
+  # Combined Component Initialization Tests
+  combined_initialization:
+    - name: "storage_plus_search"
+      components: ["vector_storage_manager", "vector_search_engine"]
+      vector_count: 10000
+      dimensions: 256
+      hnsw_M: 16
+      hnsw_efConstruction: 200
+      description: "Initialize VectorStorageManager + VectorSearchEngine (problematic case)"
+      expected_stack_usage: "critical"
+      
+    - name: "storage_plus_metadata"
+      components: ["vector_storage_manager", "metadata_manager"]
+      vector_count: 8000
+      dimensions: 256
+      metadata_entries: 3000
+      description: "Initialize VectorStorageManager + MetadataManager"
+      expected_stack_usage: "medium"
+      
+    - name: "search_plus_cache"
+      components: ["vector_search_engine", "cache_manager"]
+      vector_count: 8000
+      dimensions: 256
+      hnsw_M: 16
+      hnsw_efConstruction: 200
+      cache_size: "50MB"
+      description: "Initialize VectorSearchEngine + CacheManager"
+      expected_stack_usage: "medium"
+      
+    - name: "all_core_components"
+      components: ["vector_storage_manager", "vector_search_engine", "metadata_manager"]
+      vector_count: 5000
+      dimensions: 256
+      hnsw_M: 16
+      hnsw_efConstruction: 200
+      metadata_entries: 2000
+      description: "Initialize all core vector components"
+      expected_stack_usage: "critical"
+      
+    - name: "full_system_initialization"
+      components: ["vector_storage_manager", "vector_search_engine", "metadata_manager", "cache_manager", "transaction_manager"]
+      vector_count: 5000
+      dimensions: 256
+      hnsw_M: 16
+      hnsw_efConstruction: 200
+      metadata_entries: 2000
+      cache_size: "50MB"
+      max_transactions: 500
+      description: "Full VexFS system initialization"
+      expected_stack_usage: "critical"
+
+  # Memory Configuration Tests
+  memory_configurations:
+    - name: "low_memory_config"
+      components: ["vector_storage_manager", "vector_search_engine"]
+      vector_count: 1000
+      dimensions: 128
+      memory_limit: "50MB"
+      description: "Initialization with low memory configuration"
+      
+    - name: "medium_memory_config"
+      components: ["vector_storage_manager", "vector_search_engine"]
+      vector_count: 5000
+      dimensions: 256
+      memory_limit: "200MB"
+      description: "Initialization with medium memory configuration"
+      
+    - name: "high_memory_config"
+      components: ["vector_storage_manager", "vector_search_engine"]
+      vector_count: 20000
+      dimensions: 512
+      memory_limit: "1GB"
+      description: "Initialization with high memory configuration"
+      
+    - name: "unlimited_memory_config"
+      components: ["vector_storage_manager", "vector_search_engine"]
+      vector_count: 50000
+      dimensions: 1024
+      memory_limit: "unlimited"
+      description: "Initialization without memory limits"
+
+  # Initialization Order Tests
+  initialization_order:
+    - name: "storage_first_order"
+      components: ["vector_storage_manager", "vector_search_engine", "metadata_manager"]
+      initialization_order: ["vector_storage_manager", "metadata_manager", "vector_search_engine"]
+      description: "Initialize storage components first"
+      
+    - name: "search_first_order"
+      components: ["vector_storage_manager", "vector_search_engine", "metadata_manager"]
+      initialization_order: ["vector_search_engine", "vector_storage_manager", "metadata_manager"]
+      description: "Initialize search engine first"
+      
+    - name: "metadata_first_order"
+      components: ["vector_storage_manager", "vector_search_engine", "metadata_manager"]
+      initialization_order: ["metadata_manager", "vector_storage_manager", "vector_search_engine"]
+      description: "Initialize metadata manager first"
+      
+    - name: "reverse_dependency_order"
+      components: ["vector_storage_manager", "vector_search_engine", "metadata_manager"]
+      initialization_order: ["vector_search_engine", "metadata_manager", "vector_storage_manager"]
+      description: "Initialize in reverse dependency order"
+
+  # Error Recovery Tests
+  error_recovery:
+    - name: "storage_init_failure"
+      components: ["vector_storage_manager", "vector_search_engine"]
+      inject_failure: "vector_storage_manager"
+      failure_point: "initialization"
+      description: "Test recovery from storage manager initialization failure"
+      
+    - name: "search_init_failure"
+      components: ["vector_storage_manager", "vector_search_engine"]
+      inject_failure: "vector_search_engine"
+      failure_point: "initialization"
+      description: "Test recovery from search engine initialization failure"
+      
+    - name: "partial_init_failure"
+      components: ["vector_storage_manager", "vector_search_engine", "metadata_manager"]
+      inject_failure: "metadata_manager"
+      failure_point: "mid_initialization"
+      description: "Test recovery from partial initialization failure"
+      
+    - name: "memory_exhaustion_failure"
+      components: ["vector_storage_manager", "vector_search_engine"]
+      inject_failure: "memory_exhaustion"
+      failure_point: "allocation"
+      description: "Test recovery from memory exhaustion during initialization"
+
+  # Rapid Initialization/Deinitialization Tests
+  rapid_cycles:
+    - name: "rapid_init_deinit_storage"
+      components: ["vector_storage_manager"]
+      cycles: 100
+      cycle_delay: "10ms"
+      description: "Rapid initialization/deinitialization of storage manager"
+      
+    - name: "rapid_init_deinit_search"
+      components: ["vector_search_engine"]
+      cycles: 50
+      cycle_delay: "50ms"
+      description: "Rapid initialization/deinitialization of search engine"
+      
+    - name: "rapid_init_deinit_combined"
+      components: ["vector_storage_manager", "vector_search_engine"]
+      cycles: 25
+      cycle_delay: "100ms"
+      description: "Rapid initialization/deinitialization of combined components"
+      
+    - name: "stress_init_deinit"
+      components: ["vector_storage_manager", "vector_search_engine", "metadata_manager"]
+      cycles: 10
+      cycle_delay: "1s"
+      description: "Stress test with full component cycles"
+
+# Component Configuration
+component_config:
+  vector_storage_manager:
+    block_size: 4096
+    cache_size: "50MB"
+    compression: "none"
+    allocation_strategy: "sequential"
+    
+  vector_search_engine:
+    index_type: "hnsw"
+    distance_metric: "euclidean"
+    parallel_construction: true
+    optimization_level: "balanced"
+    
+  metadata_manager:
+    index_type: "btree"
+    cache_size: "10MB"
+    persistence: true
+    
+  cache_manager:
+    eviction_policy: "lru"
+    write_policy: "write_back"
+    consistency: "eventual"
+    
+  transaction_manager:
+    isolation_level: "read_committed"
+    durability: "sync"
+    timeout: "30s"
+
+# Profiling Configuration
+profiling:
+  tools:
+    - valgrind
+    - perf
+    - ebpf
+    
+  stack_monitoring:
+    enabled: true
+    depth_limit: 150
+    sample_frequency: 1000
+    initialization_tracking: true
+    
+  memory_tracking:
+    enabled: true
+    allocation_tracking: true
+    component_memory_tracking: true
+    initialization_memory_tracking: true
+    
+  performance_metrics:
+    enabled: true
+    initialization_time: true
+    component_startup_time: true
+    memory_allocation_rate: true
+    
+  component_analysis:
+    enabled: true
+    dependency_analysis: true
+    initialization_order_analysis: true
+    failure_recovery_analysis: true
+
+# Success Criteria
+success_criteria:
+  stack_usage:
+    warning_threshold: "70%"
+    critical_threshold: "90%"
+    max_initialization_depth: 50
+    
+  memory_usage:
+    max_initialization_memory: "500MB"
+    max_component_memory: "100MB"
+    max_allocation_rate: "50MB/s"
+    
+  performance:
+    max_initialization_time: "60s"
+    max_component_startup_time: "10s"
+    min_initialization_success_rate: 0.95
+    
+  stability:
+    no_initialization_failures: true
+    no_memory_leaks: true
+    no_stack_overflows: true
+    proper_cleanup: true
+    
+  recovery:
+    graceful_failure_handling: true
+    proper_resource_cleanup: true
+    no_resource_leaks: true

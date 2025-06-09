@@ -25,7 +25,6 @@
 
 use crate::shared::errors::{VexfsError, VexfsResult};
 use crate::shared::types::*;
-use crate::shared::constants::*;
 use crate::shared::utils::*;
 
 #[cfg(not(feature = "kernel"))]

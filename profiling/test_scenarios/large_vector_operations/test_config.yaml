@@ -1,0 +1,161 @@
+# Large Vector Operations Test Configuration
+# Tests progressively larger vector datasets to identify stack overflow thresholds
+
+test_scenarios:
+  # Progressive Dataset Size Tests
+  dataset_size_progression:
+    - name: "small_dataset"
+      vector_count: 1000
+      dimensions: 128
+      description: "Baseline small dataset test"
+      expected_stack_usage: "low"
+      
+    - name: "medium_dataset"
+      vector_count: 10000
+      dimensions: 256
+      description: "Medium dataset to identify scaling issues"
+      expected_stack_usage: "medium"
+      
+    - name: "large_dataset"
+      vector_count: 100000
+      dimensions: 512
+      description: "Large dataset likely to trigger stack issues"
+      expected_stack_usage: "high"
+      
+    - name: "xlarge_dataset"
+      vector_count: 1000000
+      dimensions: 1024
+      description: "Extra large dataset for stress testing"
+      expected_stack_usage: "critical"
+
+  # Dimension Scaling Tests
+  dimension_scaling:
+    - name: "low_dim_high_count"
+      vector_count: 50000
+      dimensions: 128
+      description: "High vector count with low dimensions"
+      
+    - name: "medium_dim_medium_count"
+      vector_count: 25000
+      dimensions: 512
+      description: "Balanced dimensions and count"
+      
+    - name: "high_dim_low_count"
+      vector_count: 10000
+      dimensions: 2048
+      description: "High dimensions with lower count"
+      
+    - name: "max_dim_test"
+      vector_count: 5000
+      dimensions: 4096
+      description: "Maximum supported dimensions test"
+
+  # Bulk Operations Tests
+  bulk_operations:
+    - name: "bulk_insert_small_batches"
+      vector_count: 10000
+      batch_size: 100
+      dimensions: 256
+      operation: "insert"
+      description: "Small batch bulk insertions"
+      
+    - name: "bulk_insert_large_batches"
+      vector_count: 10000
+      batch_size: 1000
+      dimensions: 256
+      operation: "insert"
+      description: "Large batch bulk insertions"
+      
+    - name: "bulk_update_operations"
+      vector_count: 5000
+      batch_size: 500
+      dimensions: 512
+      operation: "update"
+      description: "Bulk vector updates"
+      
+    - name: "bulk_delete_operations"
+      vector_count: 5000
+      batch_size: 500
+      dimensions: 256
+      operation: "delete"
+      description: "Bulk vector deletions"
+
+  # Concurrent Operations Tests
+  concurrent_operations:
+    - name: "concurrent_inserts_2_threads"
+      vector_count: 5000
+      threads: 2
+      dimensions: 256
+      operation: "insert"
+      description: "Concurrent insertions with 2 threads"
+      
+    - name: "concurrent_inserts_4_threads"
+      vector_count: 10000
+      threads: 4
+      dimensions: 512
+      operation: "insert"
+      description: "Concurrent insertions with 4 threads"
+      
+    - name: "concurrent_mixed_operations"
+      vector_count: 8000
+      threads: 3
+      dimensions: 256
+      operations: ["insert", "search", "update"]
+      description: "Mixed concurrent operations"
+
+  # Vector Metadata Operations
+  metadata_operations:
+    - name: "metadata_heavy_vectors"
+      vector_count: 5000
+      dimensions: 256
+      metadata_fields: 20
+      metadata_size: "large"
+      description: "Vectors with extensive metadata"
+      
+    - name: "metadata_search_operations"
+      vector_count: 10000
+      dimensions: 512
+      metadata_filters: 5
+      description: "Metadata-filtered vector searches"
+
+# Profiling Configuration
+profiling:
+  tools:
+    - valgrind
+    - perf
+    - ebpf
+  
+  stack_monitoring:
+    enabled: true
+    depth_limit: 100
+    sample_frequency: 1000
+    
+  memory_tracking:
+    enabled: true
+    allocation_tracking: true
+    leak_detection: true
+    
+  performance_metrics:
+    enabled: true
+    cpu_profiling: true
+    memory_profiling: true
+    io_profiling: true
+
+# Success Criteria
+success_criteria:
+  stack_usage:
+    warning_threshold: "75%"
+    critical_threshold: "90%"
+    
+  memory_usage:
+    max_heap_growth: "500MB"
+    max_allocation_rate: "100MB/s"
+    
+  performance:
+    max_operation_time: "30s"
+    min_throughput: "1000 ops/s"
+    
+  stability:
+    no_crashes: true
+    no_memory_leaks: true
+    no_stack_overflows: true

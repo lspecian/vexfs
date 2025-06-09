@@ -5,6 +5,8 @@
 //! and crash recovery mechanisms.
 
 pub mod hnsw;
+pub mod hnsw_optimized;
+pub mod stack_safety_monitor;
 pub mod indexing;
 pub mod advanced_indexing;
 pub mod advanced_strategies;
@@ -20,6 +22,7 @@ pub mod integration;
 
 // Re-export key types and functions
 pub use hnsw::*;
+pub use stack_safety_monitor::*;
 pub use indexing::*;
 pub use advanced_indexing::*;
 pub use advanced_strategies::*;

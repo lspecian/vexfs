@@ -28,7 +28,6 @@ use crate::shared::types::*;
 use crate::shared::constants::*;
 use crate::shared::utils::*;
 use crate::shared::types::{BlockNumber, InodeNumber};
-use core::mem;
 
 #[cfg(not(feature = "kernel"))]
 use std::collections::BTreeMap;

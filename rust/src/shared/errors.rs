@@ -68,6 +68,7 @@ pub enum VexfsError {
     // Memory and Resource Errors
     OutOfMemory,
     OutOfSpace,
+    StackOverflow,
     ResourceBusy,
     Busy,
     TooManyOpenFiles,
@@ -128,6 +129,7 @@ pub enum VexfsError {
     // Internal Errors
     InternalError(String),
     NotImplemented(String),
+    InitializationFailed,
     
     // Generic errors with context
     Other(String),
@@ -298,6 +300,7 @@ impl fmt::Display for VexfsError {
             VexfsError::VectorError(kind) => write!(f, "Vector error: {}", kind),
             VexfsError::OutOfMemory => write!(f, "Out of memory"),
             VexfsError::OutOfSpace => write!(f, "No space left on device"),
+            VexfsError::StackOverflow => write!(f, "Stack overflow detected"),
             VexfsError::ResourceBusy => write!(f, "Resource busy"),
             VexfsError::Busy => write!(f, "Resource busy"),
             VexfsError::TooManyOpenFiles => write!(f, "Too many open files"),
@@ -335,6 +338,7 @@ impl fmt::Display for VexfsError {
             VexfsError::Internal(msg) => write!(f, "Internal: {}", msg),
             VexfsError::InternalError(msg) => write!(f, "Internal error: {}", msg),
             VexfsError::NotImplemented(msg) => write!(f, "Not implemented: {}", msg),
+            VexfsError::InitializationFailed => write!(f, "Initialization failed"),
             VexfsError::Other(msg) => write!(f, "{}", msg),
             VexfsError::LockError => write!(f, "Lock error"),
             VexfsError::LockConflict(msg) => write!(f, "Lock conflict: {}", msg),
@@ -498,6 +502,7 @@ impl VexfsError {
             VexfsError::PermissionDenied(_) => -13,  // EACCES
             VexfsError::OutOfMemory => -12,       // ENOMEM
             VexfsError::OutOfSpace => -28,        // ENOSPC
+            VexfsError::StackOverflow => -12,     // ENOMEM (closest equivalent)
             VexfsError::InvalidArgument(_) => -22, // EINVAL
             VexfsError::InvalidParameter(_) => -22, // EINVAL
             VexfsError::FileTooLarge => -27,      // EFBIG
@@ -535,6 +540,7 @@ impl VexfsError {
             VexfsError::Timeout(_) => -110,       // ETIMEDOUT
             VexfsError::ResourceLimit(_) => -12,  // ENOMEM
             VexfsError::OperationCancelled(_) => -125, // ECANCELED
+            VexfsError::InitializationFailed => -22, // EINVAL
             _ => -22,                             // EINVAL (generic)
         }
     }

@@ -411,6 +411,69 @@ pub struct JournalConfig {
     
     /// Journal flush policy
     pub flush_policy: JournalFlushPolicy,
+    
+    /// Data journaling configuration
+    pub data_journaling: DataJournalingConfig,
+}
+
+/// Data journaling configuration
+#[derive(Debug, Clone)]
+pub struct DataJournalingConfig {
+    /// Data journaling mode
+    pub mode: DataJournalingMode,
+    
+    /// Enable Copy-on-Write for data blocks in full journaling mode
+    pub cow_enabled: bool,
+    
+    /// Maximum data size to journal in full mode (bytes)
+    pub max_data_journal_size: u64,
+    
+    /// Enable memory mapping for efficient data journaling
+    pub mmap_enabled: bool,
+    
+    /// Large write threshold for optimization (bytes)
+    pub large_write_threshold: u64,
+    
+    /// Enable compression for data journal entries
+    pub data_compression_enabled: bool,
+    
+    /// Journal space optimization enabled
+    pub space_optimization_enabled: bool,
+    
+    /// Allow dynamic mode switching
+    pub dynamic_switching_enabled: bool,
+}
+
+/// Data journaling modes
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataJournalingMode {
+    /// Journal only metadata changes (fastest)
+    MetadataOnly,
+    /// Ensure data writes complete before metadata commits (balanced)
+    OrderedData,
+    /// Journal both data and metadata (maximum protection)
+    FullDataJournaling,
+}
+
+impl Default for DataJournalingMode {
+    fn default() -> Self {
+        DataJournalingMode::OrderedData
+    }
+}
+
+impl Default for DataJournalingConfig {
+    fn default() -> Self {
+        Self {
+            mode: DataJournalingMode::OrderedData,
+            cow_enabled: true,
+            max_data_journal_size: 64 * 1024 * 1024, // 64MB
+            mmap_enabled: true,
+            large_write_threshold: 1024 * 1024, // 1MB
+            data_compression_enabled: false,
+            space_optimization_enabled: true,
+            dynamic_switching_enabled: true,
+        }
+    }
 }
 
 /// Journal flush policies
@@ -433,6 +496,7 @@ impl Default for JournalConfig {
             compression_enabled: false,
             checksums_enabled: true,
             flush_policy: JournalFlushPolicy::Periodic,
+            data_journaling: DataJournalingConfig::default(),
         }
     }
 }

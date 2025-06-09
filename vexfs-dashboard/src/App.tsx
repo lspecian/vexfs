@@ -13,6 +13,8 @@ import { lightTheme } from './theme';
 const Dashboard = React.lazy(() => import('./pages/Dashboard'));
 const Collections = React.lazy(() => import('./pages/Collections'));
 const Search = React.lazy(() => import('./pages/Search'));
+const Graph = React.lazy(() => import('./pages/Graph'));
+const GraphAnalyticsPage = React.lazy(() => import('./pages/GraphAnalyticsPage'));
 const Monitoring = React.lazy(() => import('./pages/Monitoring'));
 const Settings = React.lazy(() => import('./pages/Settings'));
 
@@ -95,6 +97,16 @@ function App() {
                       <ErrorBoundary fallback={<RouteErrorFallback />}>
                         <Suspense fallback={<PageLoadingFallback />}>
                           <Search />
+                        </Suspense>
+                      </ErrorBoundary>
+                    }
+                  />
+                  <Route
+                    path="graph"
+                    element={
+                      <ErrorBoundary fallback={<RouteErrorFallback />}>
+                        <Suspense fallback={<PageLoadingFallback />}>
+                          <Graph />
                         </Suspense>
                       </ErrorBoundary>
                     }

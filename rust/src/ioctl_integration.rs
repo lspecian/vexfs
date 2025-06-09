@@ -15,22 +15,18 @@
 extern crate alloc;
 use alloc::{vec::Vec, collections::BTreeMap, format, sync::Arc, string::String};
 use core::ptr;
-use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
-use crate::shared::errors::{VexfsError, VexfsResult, SearchErrorKind};
+use crate::shared::errors::{VexfsError, VexfsResult};
 use crate::fs_core::operations::OperationContext;
 use crate::fs_core::enhanced_operation_context::{
-    EnhancedOperationContext, OperationType, OperationMetadata, CancellationToken,
-    CancellationReason, TimeoutConfig, TimeoutAction, TelemetryCollector,
-    TelemetryEventType, TelemetrySeverity, ProgressReporter, ResourceTracker,
-    MemoryAllocationType, LifecycleHooks, LifecycleEvent, LifecycleEventType,
-    OperationPriority, ResourceLimits, ResourceUsageSummary
+    OperationType, OperationMetadata, CancellationToken,
+    TimeoutConfig, OperationPriority
 };
 use crate::storage::StorageManager;
 use crate::vector_search_integration::VectorSearchSubsystem;
 use crate::ioctl::*;
-use crate::vector_storage::{VectorStorageManager, VectorHeader, VectorDataType};
-use crate::anns::{DistanceMetric, SearchResult};
+use crate::vector_storage::{VectorStorageManager, VectorHeader};
 use crate::result_scoring::ScoredResult;
 use crate::query_planner::QueryPlanner;
 use crate::search_cache::SearchResultCache;

@@ -15,6 +15,8 @@ pub mod stress_testing_framework;
 pub mod kernel_instrumentation;
 pub mod resource_monitoring;
 pub mod advanced_detection_integration;
+pub mod journal_test;
+pub mod atomic_test;
 
 pub use level1_basic_validation::*;
 pub use level2_vm_mount_operations::*;
@@ -23,3 +25,5 @@ pub use kselftest_integration::*;
 pub use mount_test_suite::*;
 pub use mount_recovery::*;
 pub use advanced_detection_integration::*;
+pub use journal_test::*;
+pub use atomic_test::*;

@@ -10,13 +10,13 @@
 //! filter pushdown optimizations, execution plan generation, and result merging strategies.
 
 use crate::anns::{DistanceMetric, IndexStrategy};
-use crate::vector_search::{SearchQuery, SearchOptions};
-use crate::knn_search::{SearchParams, MetadataFilter, KnnSearchEngine, KnnError};
+use crate::vector_search::SearchQuery;
+use crate::knn_search::{SearchParams, MetadataFilter, KnnSearchEngine};
 use crate::vector_storage::{VectorStorageManager, VectorDataType};
 use crate::fs_core::operations::OperationContext;
 use crate::shared::errors::{VexfsError, VexfsResult};
-use crate::query_planner::{QueryPlanner, QueryCharacteristics, IndexRecommendation, QueryExecutionPlan, CostEstimate};
-use crate::query_monitor::{QueryPerformanceMonitor, QueryPattern as MonitorQueryPattern};
+use crate::query_planner::QueryPlanner;
+use crate::query_monitor::QueryPerformanceMonitor;
 use crate::hybrid_search::{AdvancedHybridSearchEngine, HybridSearchStrategy};
 use crate::result_scoring::ScoredResult;
 use crate::shared::types::InodeNumber;

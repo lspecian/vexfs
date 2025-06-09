@@ -29,8 +29,6 @@
 // Conditional compilation for userspace vs kernel
 #[cfg(not(feature = "kernel"))]
 extern crate std;
-#[cfg(not(feature = "kernel"))]
-use std::prelude::*;
 
 #[cfg(feature = "kernel")]
 extern crate alloc;
@@ -120,10 +118,77 @@ pub use security::{
     KeyMaterial, KeyVersion,
 };
 
+// Re-export performance optimization components at crate level for easy access
+#[cfg(not(feature = "kernel"))]
+pub use performance_optimizations::{
+    PerformanceOptimizationManager, PerformanceMetrics, BenchmarkResults,
+    PerformanceAnalysisReport, OptimizationRecommendation, OptimizationCategory,
+    RecommendationPriority, ImplementationEffort, PerformanceTargets,
+    EnhancedVectorMemoryPool, SIMDVectorMetrics, StackOptimizedFuseOps,
+    PerformanceBenchmark, PoolStatistics, DistanceMetric,
+    VectorBenchmarkResults, MemoryBenchmarkResults, SIMDBenchmarkResults,
+    OverallImprovementMetrics,
+};
+
 // Re-export ChromaDB API components at crate level for easy access
 #[cfg(not(feature = "kernel"))]
 pub use chromadb_api::{
     ChromaDBApi, Collection, Document, QueryResult, DistanceFunction,
+};
+
+// Re-export Semantic API components at crate level for easy access
+#[cfg(all(not(feature = "kernel"), feature = "semantic_api"))]
+pub use semantic_api::{
+    SemanticApiConfig, SemanticResult, SemanticError,
+    initialize_semantic_api, shutdown_semantic_api,
+    types::*
+    // Comment out modules that are not yet implemented
+    // auth::*, query::*, stream::*, rate_limit::*,
+    // serialization::*, kernel_interface::*, api_server::*, client::*
+};
+
+// Re-export VexGraph components at crate level for easy access
+#[cfg(all(not(feature = "kernel"), feature = "vexgraph"))]
+pub use vexgraph::{
+    VexGraph, VexGraphConfig, NodeId, EdgeId, PropertyType,
+    VexGraphError, VexGraphResult,
+    // Core graph functionality
+    GraphNode, GraphEdge, VexGraphCore,
+    // Traversal algorithms
+    TraversalEngine, TraversalAlgorithm, TraversalResult,
+    // API server
+    VexGraphApiServer,
+    // Property graph management
+    PropertyGraphManager,
+    // Semantic integration
+    SemanticIntegration,
+    // Kernel primitives
+    KernelPrimitives,
+    // FUSE extensions
+    FuseExtensions,
+    // Performance optimization
+    PerformanceOptimizer,
+    // Concurrency management
+    ConcurrencyManager,
+    // Advanced Graph Algorithms and Semantic Reasoning (Task 20)
+    // Advanced algorithms
+    advanced_algorithms::AdvancedGraphAlgorithms,
+    advanced_algorithms::DijkstraParams,
+    advanced_algorithms::LouvainParams,
+    advanced_algorithms::MultiGraphParams,
+    advanced_algorithms::AlgorithmResult,
+    advanced_algorithms::AdvancedAlgorithmStatistics,
+    // Semantic reasoning
+    semantic_reasoning::SemanticReasoningEngine,
+    semantic_reasoning::InferenceRule,
+    semantic_reasoning::Condition,
+    semantic_reasoning::Conclusion,
+    semantic_reasoning::Argument,
+    semantic_reasoning::ConditionType,
+    semantic_reasoning::Fact,
+    semantic_reasoning::ReasoningTask,
+    semantic_reasoning::InferenceResult,
+    semantic_reasoning::ReasoningStatistics,
 };
 
 // Multi-dialect server support - only available in userspace with server feature
@@ -158,6 +223,8 @@ pub mod ipc;
 #[cfg(not(feature = "kernel"))]
 pub mod vector_storage;
 #[cfg(not(feature = "kernel"))]
+pub mod vector_storage_optimized;
+#[cfg(not(feature = "kernel"))]
 pub mod vector_cache;
 #[cfg(not(feature = "kernel"))]
 pub mod vector_metrics;
@@ -189,6 +256,8 @@ pub mod hybrid_search;
 pub mod hybrid_query_optimizer;
 #[cfg(not(feature = "kernel"))]
 pub mod ioctl_integration;
+#[cfg(not(feature = "kernel"))]
+pub mod performance_optimizations;
 
 // ChromaDB-compatible API
 #[cfg(not(feature = "kernel"))]
@@ -197,6 +266,22 @@ pub mod chromadb_api;
 // VexFS Main API
 #[cfg(not(feature = "kernel"))]
 pub mod vexfs_api;
+
+// Semantic API for AI agents (Task 13) - userspace only
+#[cfg(all(not(feature = "kernel"), feature = "semantic_api"))]
+pub mod semantic_api;
+
+// Cross-Layer Consistency Manager (Task 14) - userspace only, requires semantic_api
+#[cfg(all(not(feature = "kernel"), feature = "semantic_api"))]
+pub mod cross_layer_consistency;
+
+// Cross-Layer Integration Framework (Task 21) - userspace only
+#[cfg(all(not(feature = "kernel"), feature = "semantic_api"))]
+pub mod cross_layer_integration;
+
+// VexGraph Native Graph Representation and API (Task 17) - userspace only
+#[cfg(all(not(feature = "kernel"), feature = "vexgraph"))]
+pub mod vexgraph;
 
 // FUSE implementation for userspace testing
 #[cfg(feature = "fuse_support")]

@@ -104,3 +104,6 @@ export * from './search';
 
 // Re-export monitoring types
 export * from './monitoring';
+
+// Re-export graph types
+export * from './graph';

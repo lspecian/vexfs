@@ -8,6 +8,7 @@ dev-debug.log
 
 # Dependency directories
 node_modules/
+vexfs-dashboard/node_modules/
 
 # Environment variables
 .env

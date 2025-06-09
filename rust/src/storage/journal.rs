@@ -24,7 +24,7 @@
 //! providing atomic operations and recovery mechanisms for VexFS.
 
 extern crate alloc;
-use alloc::string::ToString;
+use alloc::{string::ToString, vec::Vec, vec};
 use crate::shared::errors::{VexfsError, VexfsResult};
 use crate::shared::constants::VEXFS_JOURNAL_BUFFER_SIZE;
 use crate::shared::types::*;
@@ -353,11 +353,11 @@ pub struct VexfsTransaction {
     /// Current state
     pub state: TransactionState,
     /// Operations in this transaction
-    pub operations: [JournalOperationRecord; VEXFS_MAX_TRANSACTION_OPS],
+    pub operations: Vec<JournalOperationRecord>,
     /// Number of operations
     pub num_ops: u32,
     /// Buffer for operation data
-    pub data_buffer: [u8; VEXFS_TRANSACTION_BUFFER_SIZE],
+    pub data_buffer: Vec<u8>,
     /// Used space in data buffer
     pub data_used: u32,
     /// Transaction flags
@@ -374,9 +374,9 @@ impl VexfsTransaction {
         Self {
             tid,
             state: TransactionState::Building,
-            operations: [JournalOperationRecord::new(); VEXFS_MAX_TRANSACTION_OPS],
+            operations: Vec::with_capacity(VEXFS_MAX_TRANSACTION_OPS),
             num_ops: 0,
-            data_buffer: [0; VEXFS_TRANSACTION_BUFFER_SIZE],
+            data_buffer: Vec::with_capacity(VEXFS_TRANSACTION_BUFFER_SIZE),
             data_used: 0,
             flags,
             ref_count: 1,
@@ -385,7 +385,7 @@ impl VexfsTransaction {
     }
 
     /// Add operation to transaction
-    pub fn add_operation(&mut self, 
+    pub fn add_operation(&mut self,
                         op_type: JournalOpType,
                         block_number: BlockNumber,
                         offset: u32,
@@ -399,13 +399,19 @@ impl VexfsTransaction {
             return Err(VexfsError::NoSpace);
         }
 
-        let op_idx = self.num_ops as usize;
-        let op = &mut self.operations[op_idx];
-        
+        // Create new operation
+        let mut op = JournalOperationRecord::new();
         op.initialize(self.tid, self.num_ops, op_type, block_number, offset, new_data.len() as u32);
         
         // Store data in buffer
         let old_data_offset = self.data_used as usize;
+        
+        // Ensure buffer has enough capacity
+        let required_size = old_data_offset + old_data.len() + new_data.len();
+        if self.data_buffer.len() < required_size {
+            self.data_buffer.resize(required_size, 0);
+        }
+        
         self.data_buffer[old_data_offset..old_data_offset + old_data.len()].copy_from_slice(old_data);
         
         let new_data_offset = old_data_offset + old_data.len();
@@ -416,6 +422,8 @@ impl VexfsTransaction {
         // Set checksums
         op.set_checksums(old_data, new_data);
         
+        // Add operation to vector
+        self.operations.push(op);
         self.num_ops += 1;
         Ok(())
     }
@@ -426,8 +434,8 @@ impl VexfsTransaction {
         checksum ^= self.tid as u32;
         checksum ^= self.num_ops;
 
-        for i in 0..self.num_ops as usize {
-            checksum ^= self.operations[i].header.checksum;
+        for op in &self.operations {
+            checksum ^= op.header.checksum;
         }
 
         checksum
@@ -510,7 +518,7 @@ pub struct VexfsJournal {
     /// Current transaction ID counter
     pub current_tid: u64,
     /// Active transactions
-    pub active_transactions: [Option<VexfsTransaction>; VEXFS_MAX_ACTIVE_TRANSACTIONS],
+    pub active_transactions: Vec<Option<VexfsTransaction>>,
     /// Journal head position
     pub head: u32,
     /// Journal tail position
@@ -535,7 +543,7 @@ impl VexfsJournal {
         Self {
             superblock,
             current_tid: 1,
-            active_transactions: [const { None }; VEXFS_MAX_ACTIVE_TRANSACTIONS],
+            active_transactions: vec![None; VEXFS_MAX_ACTIVE_TRANSACTIONS],
             head: 1,
             tail: 1,
             free_space: journal_blocks - 1, // Minus superblock
@@ -625,8 +633,8 @@ impl VexfsJournal {
                 
                 // Calculate space without borrowing self
                 let mut space = 0u32;
-                for i in 0..transaction.num_ops as usize {
-                    space += transaction.operations[i].header.length;
+                for op in &transaction.operations {
+                    space += op.header.length;
                 }
                 space += core::mem::size_of::<JournalCommitRecord>() as u32;
                 let space_needed = ((space + self.block_size - 1) / self.block_size) * self.block_size;
@@ -694,8 +702,8 @@ impl VexfsJournal {
 
     // Private helper methods
     fn find_free_transaction_slot(&self) -> VexfsResult<usize> {
-        for i in 0..VEXFS_MAX_ACTIVE_TRANSACTIONS {
-            if self.active_transactions[i].is_none() {
+        for (i, transaction_opt) in self.active_transactions.iter().enumerate() {
+            if transaction_opt.is_none() {
                 return Ok(i);
             }
         }
@@ -714,8 +722,8 @@ impl VexfsJournal {
     }
 
     fn find_transaction_slot(&self, tid: u64) -> VexfsResult<usize> {
-        for i in 0..VEXFS_MAX_ACTIVE_TRANSACTIONS {
-            if let Some(ref transaction) = self.active_transactions[i] {
+        for (i, transaction_opt) in self.active_transactions.iter().enumerate() {
+            if let Some(ref transaction) = transaction_opt {
                 if transaction.tid == tid {
                     return Ok(i);
                 }
@@ -728,8 +736,8 @@ impl VexfsJournal {
         let mut space = 0u32;
         
         // Space for operation records
-        for i in 0..transaction.num_ops as usize {
-            space += transaction.operations[i].header.length;
+        for op in &transaction.operations {
+            space += op.header.length;
         }
         
         // Space for commit record
@@ -741,8 +749,7 @@ impl VexfsJournal {
 
     fn write_transaction_to_journal(&mut self, transaction: &VexfsTransaction) -> VexfsResult<()> {
         // Write all operation records
-        for i in 0..transaction.num_ops as usize {
-            let op_record = &transaction.operations[i];
+        for op_record in &transaction.operations {
             self.write_journal_record(&op_record.header)?;
         }
         
