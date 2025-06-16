@@ -38,9 +38,16 @@ cmake-build-*/
 # Test images and results
 tests/images/*.img
 tests/images/*.qcow2
+tests/vm_images/*.qcow2
+tests/vm_images/*.img
 tests/results/
 test_results/
 *.test.img
+
+# Test data files
+test_data/*.json
+test_data/benchmark_*.json
+test_data/stress_*.json
 
 # Test binaries and executables
 tests/**/debug_level*_test
