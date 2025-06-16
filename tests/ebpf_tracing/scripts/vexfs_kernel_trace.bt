@@ -1,0 +1,297 @@
+#!/usr/bin/env bpftrace
+
+/*
+ * VexFS Kernel Module Dynamic Tracing Script
+ * 
+ * This bpftrace script provides comprehensive tracing of VexFS kernel module
+ * operations including filesystem operations, memory management, and performance
+ * metrics for debugging and optimization.
+ *
+ * Usage: sudo bpftrace vexfs_kernel_trace.bt
+ * 
+ * Requirements:
+ * - VexFS kernel module loaded
+ * - Root privileges for kernel tracing
+ * - bpftrace v0.20.2+
+ */
+
+BEGIN
+{
+    printf("=== VexFS Kernel Module Dynamic Tracing Started ===\n");
+    printf("Timestamp: %s\n", strftime("%Y-%m-%d %H:%M:%S", nsecs));
+    printf("Tracing VexFS operations...\n\n");
+    
+    // Initialize counters
+    @vexfs_ops = 0;
+    @vexfs_reads = 0;
+    @vexfs_writes = 0;
+    @vexfs_searches = 0;
+    @vexfs_errors = 0;
+    @vexfs_memory_allocs = 0;
+    @vexfs_memory_frees = 0;
+}
+
+// VexFS Filesystem Operations Tracing
+kprobe:vexfs_*
+{
+    $func = func;
+    $pid = pid;
+    $comm = comm;
+    
+    printf("[%s] VexFS: %s() called by PID=%d (%s)\n", 
+           strftime("%H:%M:%S", nsecs), $func, $pid, $comm);
+    
+    @vexfs_ops++;
+    @vexfs_functions[func]++;
+    @vexfs_processes[comm]++;
+}
+
+// VexFS Read Operations
+kprobe:vexfs_read*,
+kprobe:vexfs_file_read*,
+kprobe:vexfs_vector_read*
+{
+    $size = arg2;  // Typical read size argument
+    printf("[%s] VexFS READ: %s() size=%d bytes, PID=%d\n", 
+           strftime("%H:%M:%S", nsecs), func, $size, pid);
+    
+    @vexfs_reads++;
+    @vexfs_read_sizes = hist($size);
+    @vexfs_read_latency[func] = nsecs;
+}
+
+kretprobe:vexfs_read*,
+kretprobe:vexfs_file_read*,
+kretprobe:vexfs_vector_read*
+{
+    $latency = nsecs - @vexfs_read_latency[func];
+    delete(@vexfs_read_latency[func]);
+    
+    printf("[%s] VexFS READ COMPLETE: %s() latency=%d μs, result=%d\n", 
+           strftime("%H:%M:%S", nsecs), func, $latency / 1000, retval);
+    
+    @vexfs_read_latencies = hist($latency / 1000);
+}
+
+// VexFS Write Operations
+kprobe:vexfs_write*,
+kprobe:vexfs_file_write*,
+kprobe:vexfs_vector_write*
+{
+    $size = arg2;  // Typical write size argument
+    printf("[%s] VexFS WRITE: %s() size=%d bytes, PID=%d\n", 
+           strftime("%H:%M:%S", nsecs), func, $size, pid);
+    
+    @vexfs_writes++;
+    @vexfs_write_sizes = hist($size);
+    @vexfs_write_latency[func] = nsecs;
+}
+
+kretprobe:vexfs_write*,
+kretprobe:vexfs_file_write*,
+kretprobe:vexfs_vector_write*
+{
+    $latency = nsecs - @vexfs_write_latency[func];
+    delete(@vexfs_write_latency[func]);
+    
+    printf("[%s] VexFS WRITE COMPLETE: %s() latency=%d μs, result=%d\n", 
+           strftime("%H:%M:%S", nsecs), func, $latency / 1000, retval);
+    
+    @vexfs_write_latencies = hist($latency / 1000);
+}
+
+// VexFS Vector Search Operations
+kprobe:vexfs_search*,
+kprobe:vexfs_vector_search*,
+kprobe:vexfs_hnsw_search*,
+kprobe:vexfs_lsh_search*
+{
+    printf("[%s] VexFS SEARCH: %s() PID=%d (%s)\n", 
+           strftime("%H:%M:%S", nsecs), func, pid, comm);
+    
+    @vexfs_searches++;
+    @vexfs_search_latency[func] = nsecs;
+}
+
+kretprobe:vexfs_search*,
+kretprobe:vexfs_vector_search*,
+kretprobe:vexfs_hnsw_search*,
+kretprobe:vexfs_lsh_search*
+{
+    $latency = nsecs - @vexfs_search_latency[func];
+    delete(@vexfs_search_latency[func]);
+    
+    printf("[%s] VexFS SEARCH COMPLETE: %s() latency=%d μs, results=%d\n", 
+           strftime("%H:%M:%S", nsecs), func, $latency / 1000, retval);
+    
+    @vexfs_search_latencies = hist($latency / 1000);
+}
+
+// VexFS Memory Management
+kprobe:vexfs_alloc*,
+kprobe:vexfs_kmalloc*,
+kprobe:vexfs_vmalloc*
+{
+    $size = arg0;  // Allocation size
+    printf("[%s] VexFS ALLOC: %s() size=%d bytes\n", 
+           strftime("%H:%M:%S", nsecs), func, $size);
+    
+    @vexfs_memory_allocs++;
+    @vexfs_alloc_sizes = hist($size);
+}
+
+kprobe:vexfs_free*,
+kprobe:vexfs_kfree*,
+kprobe:vexfs_vfree*
+{
+    printf("[%s] VexFS FREE: %s()\n", 
+           strftime("%H:%M:%S", nsecs), func);
+    
+    @vexfs_memory_frees++;
+}
+
+// VexFS Error Handling
+kprobe:vexfs_error*,
+kprobe:vexfs_*_error*
+{
+    $error_code = arg0;
+    printf("[%s] VexFS ERROR: %s() error_code=%d, PID=%d (%s)\n", 
+           strftime("%H:%M:%S", nsecs), func, $error_code, pid, comm);
+    
+    @vexfs_errors++;
+    @vexfs_error_codes[arg0]++;
+}
+
+// VexFS Lock Operations (for debugging deadlocks)
+kprobe:vexfs_lock*,
+kprobe:vexfs_mutex*,
+kprobe:vexfs_spin*
+{
+    printf("[%s] VexFS LOCK: %s() PID=%d (%s)\n", 
+           strftime("%H:%M:%S", nsecs), func, pid, comm);
+    
+    @vexfs_lock_latency[func, pid] = nsecs;
+}
+
+kretprobe:vexfs_lock*,
+kretprobe:vexfs_mutex*,
+kretprobe:vexfs_spin*
+{
+    $latency = nsecs - @vexfs_lock_latency[func, pid];
+    delete(@vexfs_lock_latency[func, pid]);
+    
+    if ($latency > 1000000) {  // > 1ms lock hold time
+        printf("[%s] VexFS LOCK SLOW: %s() held for %d μs, PID=%d\n", 
+               strftime("%H:%M:%S", nsecs), func, $latency / 1000, pid);
+    }
+    
+    @vexfs_lock_latencies = hist($latency / 1000);
+}
+
+// VexFS Module Load/Unload
+kprobe:vexfs_init*,
+kprobe:vexfs_module_init*
+{
+    printf("[%s] VexFS MODULE INIT: %s()\n", 
+           strftime("%H:%M:%S", nsecs), func);
+}
+
+kprobe:vexfs_exit*,
+kprobe:vexfs_module_exit*
+{
+    printf("[%s] VexFS MODULE EXIT: %s()\n", 
+           strftime("%H:%M:%S", nsecs), func);
+}
+
+// Periodic Statistics (every 10 seconds)
+interval:s:10
+{
+    printf("\n=== VexFS Statistics (10s interval) ===\n");
+    printf("Total Operations: %d\n", @vexfs_ops);
+    printf("Reads: %d, Writes: %d, Searches: %d\n", 
+           @vexfs_reads, @vexfs_writes, @vexfs_searches);
+    printf("Memory: Allocs=%d, Frees=%d, Balance=%d\n", 
+           @vexfs_memory_allocs, @vexfs_memory_frees, 
+           @vexfs_memory_allocs - @vexfs_memory_frees);
+    printf("Errors: %d\n", @vexfs_errors);
+    printf("Timestamp: %s\n\n", strftime("%H:%M:%S", nsecs));
+}
+
+// Cleanup and Final Report
+END
+{
+    printf("\n=== VexFS Kernel Tracing Final Report ===\n");
+    printf("Session Duration: %s to %s\n", 
+           strftime("%H:%M:%S", @start_time), strftime("%H:%M:%S", nsecs));
+    
+    printf("\n--- Operation Counts ---\n");
+    printf("Total VexFS Operations: %d\n", @vexfs_ops);
+    printf("Read Operations: %d\n", @vexfs_reads);
+    printf("Write Operations: %d\n", @vexfs_writes);
+    printf("Search Operations: %d\n", @vexfs_searches);
+    printf("Memory Allocations: %d\n", @vexfs_memory_allocs);
+    printf("Memory Frees: %d\n", @vexfs_memory_frees);
+    printf("Memory Balance: %d\n", @vexfs_memory_allocs - @vexfs_memory_frees);
+    printf("Errors: %d\n", @vexfs_errors);
+    
+    if (@vexfs_functions) {
+        printf("\n--- Most Called Functions ---\n");
+        print(@vexfs_functions);
+    }
+    
+    if (@vexfs_processes) {
+        printf("\n--- Processes Using VexFS ---\n");
+        print(@vexfs_processes);
+    }
+    
+    if (@vexfs_read_latencies) {
+        printf("\n--- Read Latency Distribution (μs) ---\n");
+        print(@vexfs_read_latencies);
+    }
+    
+    if (@vexfs_write_latencies) {
+        printf("\n--- Write Latency Distribution (μs) ---\n");
+        print(@vexfs_write_latencies);
+    }
+    
+    if (@vexfs_search_latencies) {
+        printf("\n--- Search Latency Distribution (μs) ---\n");
+        print(@vexfs_search_latencies);
+    }
+    
+    if (@vexfs_lock_latencies) {
+        printf("\n--- Lock Hold Time Distribution (μs) ---\n");
+        print(@vexfs_lock_latencies);
+    }
+    
+    if (@vexfs_alloc_sizes) {
+        printf("\n--- Memory Allocation Size Distribution ---\n");
+        print(@vexfs_alloc_sizes);
+    }
+    
+    if (@vexfs_error_codes) {
+        printf("\n--- Error Code Distribution ---\n");
+        print(@vexfs_error_codes);
+    }
+    
+    // Cleanup
+    clear(@vexfs_ops);
+    clear(@vexfs_reads);
+    clear(@vexfs_writes);
+    clear(@vexfs_searches);
+    clear(@vexfs_errors);
+    clear(@vexfs_memory_allocs);
+    clear(@vexfs_memory_frees);
+    clear(@vexfs_functions);
+    clear(@vexfs_processes);
+    clear(@vexfs_read_latencies);
+    clear(@vexfs_write_latencies);
+    clear(@vexfs_search_latencies);
+    clear(@vexfs_lock_latencies);
+    clear(@vexfs_alloc_sizes);
+    clear(@vexfs_error_codes);
+    clear(@vexfs_read_sizes);
+    clear(@vexfs_write_sizes);
+    
+    printf("\n=== VexFS Kernel Tracing Complete ===\n");
+}

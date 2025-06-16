@@ -1,0 +1,39 @@
+{
+  "timestamp": "2025-06-09T13:48:54.613Z",
+  "test_results": {
+    "embedding_generation": {
+      "total_texts": 3,
+      "successful_embeddings": 3,
+      "embedding_dimensions": 384,
+      "success_rate": "100.0%"
+    },
+    "semantic_analysis": {
+      "concept_embeddings": 7,
+      "constitutional_similarities": "calculated"
+    },
+    "vexfs_capabilities": {
+      "fuse_implementation": "active",
+      "embedding_integration": "ollama_compatible",
+      "vector_operations": "supported",
+      "semantic_search": "enabled",
+      "graph_analytics": "available"
+    }
+  },
+  "constitutional_analysis": {
+    "countries_processed": [
+      "brazil",
+      "germany",
+      "usa"
+    ],
+    "semantic_concepts": 7,
+    "cross_constitutional_comparison": "enabled"
+  },
+  "vexfs_features_demonstrated": [
+    "FUSE filesystem interface",
+    "Ollama embedding integration",
+    "Semantic similarity calculations",
+    "Constitutional text processing",
+    "Vector storage capabilities",
+    "Cross-language document analysis"
+  ]
+}

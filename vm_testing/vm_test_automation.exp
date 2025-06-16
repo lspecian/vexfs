@@ -1,0 +1,58 @@
+#!/usr/bin/expect -f
+
+# Automated test script for VexFS in Alpine VM
+set timeout 120
+
+# Attach to the screen session
+spawn screen -r vexfs_vm
+
+# Wait for login prompt or shell prompt
+expect {
+    "login:" {
+        send "root\r"
+        expect "# "
+    }
+    "# " {
+        # Already logged in
+    }
+    timeout {
+        puts "Timeout waiting for prompt"
+        exit 1
+    }
+}
+
+# Mount shared directory
+send "mkdir -p /mnt/shared\r"
+expect "# "
+send "mount -t 9p -o trans=virtio shared /mnt/shared\r"
+expect "# "
+
+# Check files
+send "ls -la /mnt/shared/\r"
+expect "# "
+
+# Run the test script
+send "/mnt/shared/test_vexfs_fixed.sh\r"
+
+# Wait for test to complete
+expect {
+    "Test completed!" {
+        puts "\n=== TEST COMPLETED SUCCESSFULLY ==="
+    }
+    "ERROR:" {
+        puts "\n=== TEST FAILED - See errors above ==="
+    }
+    timeout {
+        puts "\n=== TEST TIMED OUT ==="
+    }
+}
+
+# Get final status
+send "echo TEST_EXIT_CODE=$?\r"
+expect "# "
+
+# Detach from screen
+send "\x01"
+send "d"
+
+puts "\n=== VM Test Automation Complete ==="

@@ -36,9 +36,9 @@ use crate::storage::{StorageManager, BlockDevice};
 use crate::storage::layout::VexfsLayout;
 
 #[cfg(feature = "kernel")]
-use alloc::{boxed::Box, string::ToString};
+use alloc::{boxed::Box, string::ToString, collections::BTreeMap, vec::Vec};
 #[cfg(not(feature = "kernel"))]
-use std::boxed::Box;
+use std::{boxed::Box, collections::BTreeMap, vec::Vec};
 
 // Import error constants from parent module
 use super::{VEXFS_SUCCESS, VEXFS_ERROR_GENERIC, VEXFS_ERROR_INVAL, VEXFS_ERROR_NOENT, to_ffi_result};
@@ -1034,36 +1034,80 @@ fn release_kernel_file(_inode_ptr: *mut c_void, _file_ptr: *mut c_void) -> Vexfs
 }
 
 #[cfg(feature = "kernel")]
-fn read_kernel_file(_inode_ptr: *mut c_void, _file_ptr: *mut c_void, _buf: *mut c_void, _count: u64, _pos: u64, bytes_read: *mut u64) -> VexfsResult<()> {
-    // TODO: Implement actual file reading
-    // This would typically involve:
-    // 1. Validate file position and size
-    // 2. Read data from storage
-    // 3. Handle vector data if needed
-    // 4. Copy to user buffer
-    // 5. Update file position
-    
-    // For now, return 0 bytes read (EOF)
-    unsafe {
-        *bytes_read = 0;
+fn read_kernel_file(inode_ptr: *mut c_void, _file_ptr: *mut c_void, buf: *mut c_void, count: u64, pos: u64, bytes_read: *mut u64) -> VexfsResult<()> {
+    // Validate parameters
+    if inode_ptr.is_null() || buf.is_null() || bytes_read.is_null() {
+        return Err(VexfsError::InvalidParameter);
     }
-    Ok(())
+    
+    // Get storage manager
+    let storage_manager = unsafe {
+        GLOBAL_STORAGE_MANAGER.as_mut()
+            .ok_or(VexfsError::NotInitialized)?
+    };
+    
+    // For now, implement a simple in-memory file storage
+    // In a real implementation, this would read from actual storage blocks
+    let inode_id = inode_ptr as u64; // Use pointer as simple inode ID
+    
+    // Try to read data from our simple storage
+    match read_file_data_simple(storage_manager, inode_id, pos, count as usize) {
+        Ok(data) => {
+            let data_len = data.len();
+            if data_len > 0 {
+                // Copy data to user buffer (in kernel, this would use copy_to_user)
+                unsafe {
+                    core::ptr::copy_nonoverlapping(
+                        data.as_ptr(),
+                        buf as *mut u8,
+                        data_len
+                    );
+                }
+            }
+            unsafe {
+                *bytes_read = data_len as u64;
+            }
+            Ok(())
+        },
+        Err(e) => {
+            // File not found or no data at position - return 0 bytes (EOF)
+            unsafe {
+                *bytes_read = 0;
+            }
+            Ok(())
+        }
+    }
 }
 
 #[cfg(feature = "kernel")]
-fn write_kernel_file(_inode_ptr: *mut c_void, _file_ptr: *mut c_void, _buf: *const c_void, count: u64, _pos: u64, bytes_written: *mut u64) -> VexfsResult<()> {
-    // TODO: Implement actual file writing
-    // This would typically involve:
-    // 1. Validate write parameters
-    // 2. Allocate storage blocks if needed
-    // 3. Write data to storage
-    // 4. Handle vector data if needed
-    // 5. Update file size and metadata
-    
-    // For now, pretend all bytes were written
-    unsafe {
-        *bytes_written = count;
+fn write_kernel_file(inode_ptr: *mut c_void, _file_ptr: *mut c_void, buf: *const c_void, count: u64, pos: u64, bytes_written: *mut u64) -> VexfsResult<()> {
+    // Validate parameters
+    if inode_ptr.is_null() || buf.is_null() || bytes_written.is_null() {
+        return Err(VexfsError::InvalidParameter);
     }
+    
+    // Get storage manager
+    let storage_manager = unsafe {
+        GLOBAL_STORAGE_MANAGER.as_mut()
+            .ok_or(VexfsError::NotInitialized)?
+    };
+    
+    // Copy data from user buffer (in kernel, this would use copy_from_user)
+    let data_slice = unsafe {
+        core::slice::from_raw_parts(buf as *const u8, count as usize)
+    };
+    
+    // For now, implement a simple in-memory file storage
+    // In a real implementation, this would write to actual storage blocks
+    let inode_id = inode_ptr as u64; // Use pointer as simple inode ID
+    
+    // Write data to our simple storage
+    let written = write_file_data_simple(storage_manager, inode_id, pos, data_slice)?;
+    
+    unsafe {
+        *bytes_written = written as u64;
+    }
+    
     Ok(())
 }
 
@@ -1089,6 +1133,70 @@ fn readdir_kernel(_inode_ptr: *mut c_void, _file_ptr: *mut c_void, _ctx_ptr: *mu
     
     // For now, return success (empty directory)
     Ok(())
+}
+
+// Simple in-memory file storage for initial implementation
+
+static mut SIMPLE_FILE_STORAGE: Option<BTreeMap<u64, Vec<u8>>> = None;
+
+#[cfg(feature = "kernel")]
+fn init_simple_storage() {
+    unsafe {
+        if SIMPLE_FILE_STORAGE.is_none() {
+            SIMPLE_FILE_STORAGE = Some(BTreeMap::new());
+        }
+    }
+}
+
+#[cfg(feature = "kernel")]
+fn read_file_data_simple(_storage_manager: &mut StorageManager, inode_id: u64, pos: u64, count: usize) -> VexfsResult<Vec<u8>> {
+    unsafe {
+        if let Some(ref storage) = SIMPLE_FILE_STORAGE {
+            if let Some(file_data) = storage.get(&inode_id) {
+                let start = pos as usize;
+                let end = (start + count).min(file_data.len());
+                
+                if start >= file_data.len() {
+                    return Ok(Vec::new()); // EOF
+                }
+                
+                return Ok(file_data[start..end].to_vec());
+            }
+        }
+    }
+    
+    // File not found or no data
+    Ok(Vec::new())
+}
+
+#[cfg(feature = "kernel")]
+fn write_file_data_simple(_storage_manager: &mut StorageManager, inode_id: u64, pos: u64, data: &[u8]) -> VexfsResult<usize> {
+    unsafe {
+        // Initialize storage if needed
+        if SIMPLE_FILE_STORAGE.is_none() {
+            SIMPLE_FILE_STORAGE = Some(BTreeMap::new());
+        }
+        
+        if let Some(ref mut storage) = SIMPLE_FILE_STORAGE {
+            // Get or create file data
+            let file_data = storage.entry(inode_id).or_insert_with(Vec::new);
+            
+            let start = pos as usize;
+            let end = start + data.len();
+            
+            // Extend file if needed
+            if end > file_data.len() {
+                file_data.resize(end, 0);
+            }
+            
+            // Write data
+            file_data[start..end].copy_from_slice(data);
+            
+            return Ok(data.len());
+        }
+    }
+    
+    Err(VexfsError::IOError)
 }
 
 // Userspace-only FFI functions
@@ -1160,7 +1268,26 @@ fn init_kernel_components() -> VexfsResult<()> {
     // Initialize vector processing
     // Initialize storage subsystem
     
-    // For now, just return success - real implementation would initialize actual components
+    // Initialize simple file storage
+    init_simple_storage();
+    
+    // Initialize global storage manager
+    unsafe {
+        if GLOBAL_STORAGE_MANAGER.is_none() {
+            // Create a minimal storage manager for testing
+            let block_device = BlockDevice::new(
+                "memory".to_string(),
+                4096,               // 4KB block size
+                false,              // not read-only
+                "kernel-device".to_string()
+            )?;
+            
+            let layout = VexfsLayout::new(1024 * 1024, 4096)?; // 1MB filesystem, 4KB blocks
+            let storage_manager = StorageManager::new(block_device, layout)?;
+            GLOBAL_STORAGE_MANAGER = Some(Box::new(storage_manager));
+        }
+    }
+    
     Ok(())
 }
 

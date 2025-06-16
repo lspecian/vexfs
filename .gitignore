@@ -1,162 +1,225 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-dev-debug.log
+# VexFS Project .gitignore
 
-# Dependency directories
-node_modules/
-vexfs-dashboard/node_modules/
+#===================
+# Build Artifacts
+#===================
 
-# Environment variables
-.env
-
-# Roo configuration (contains API keys)
-.roo/
-.roo/mcp.json
-
-.windsurfrules
-# Editor directories and files
-.idea
-.vscode
-.cursor/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-
-# Rust build artifacts
+# Rust build outputs
 target/
-vexctl/target/
+rust/target/
+Cargo.lock
 *.rlib
-size_check
-size_test*
-vector_storage_test
-
-# Python virtual environments
-workbench/workbench_env/
-tests/legacy/bin/
-tests/legacy/lib/
-tests/legacy/pyvenv.cfg
-benchmarks/venv/
-*.pyc
-__pycache__/
-
-# OS specific
-.DS_Store
-
-# Task files (but keep Task Master tasks directory)
-# tasks.json
-# tasks/
-
-# Added by Claude Task Master
-# Task files
-tasks.json
-tasks/ 
-
-.windsurfrules
-.roomodes
-.taskmasterconfig
-.taskmaster/
-scripts/
-# Large VM images
-tests/legacy/vm_management/vm/images/*.qcow2
-tests/legacy/vm_management/vm/images/*.img
-
-# Docker related
-**/docker-build.log
-**/docker-run.log
-.dockerignore
-Dockerfile.local
-docker-compose.local.yml
-.env.docker
-# If build artifacts are consistently produced outside Docker's build context
-# or if specific local Docker configurations generate them:
-# target-docker/
-
-# Named volume data (usually managed by Docker, but good to ignore if mapped to local dir accidentally)
-vexfs_data/
 
 # Kernel module build artifacts
 *.ko
 *.o
 *.mod
 *.mod.c
+*.mod.o
 .*.cmd
 .tmp_versions/
 Module.symvers
 modules.order
-libvexfs.a
-vexfs_rust_combined.o
-vexfs_rust_combined_raw.o
-.rust_extract/
-extracted_objects/
+*.ko.cmd
+*.symvers
+*.order
 
-# Rust build artifacts (comprehensive)
-rust/target/
-.cargo/
+# C/C++ build artifacts
+*.a
+*.so
+*.dylib
+build/
+cmake-build-*/
 
-# Kernel module backups
-kernel/vexfs_module_entry.c.backup
+#===================
+# Test Artifacts
+#===================
 
-# Test artifacts
+# Test images and results
+tests/images/*.img
+tests/images/*.qcow2
+tests/results/
+test_results/
+*.test.img
+
+# Test binaries and executables
+tests/**/debug_level*_test
+tests/**/*_test
+!tests/**/*_test.c
+!tests/**/*_test.rs
+ollama_integration/*_test
+ollama_integration/*.so
+ollama_integration/*.a
+
+# Temporary test files
 /tmp/vexfs_*
 /tmp/mkfs_vexfs_*
-*.img
-*.qcow2
-tests/legacy/vm_management/vm/
+/tmp/test_*
 
-# Test results (generated artifacts, not source code)
-test_results/
+# Benchmark results
+benchmarks/results/
 benchmarks/*results*.json
-benchmarks/competitive_results*.json
+
+# Benchmark binaries
 benchmarks/vexfs_fuse
+benchmarks/*_benchmark
+benchmarks/*_test
 
-# VM ISO files - download separately
+#===================
+# IDE and Editors
+#===================
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# IntelliJ/CLion
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Cursor
+.cursor/
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*#
+.#*
+
+#===================
+# Environment
+#===================
+
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.testing
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+venv/
+env/
+ENV/
+.Python
+pip-log.txt
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn
+
+#===================
+# System Files
+#===================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+.Trash-*
+.nfs*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+#===================
+# Project Specific
+#===================
+
+# TaskMaster
+.taskmaster/
+tasks.json
+tasks/
+
+# Roo configuration
+.roo/
+.roomodes
+.windsurfrules
+
+# MCP configuration
+.mcp.json
+
+# VM and Docker
 *.iso
-tests/vm_testing/vm/*.iso
+vm_testing/images/*.qcow2
+vm_testing/images/*.img
+docker-build.log
+docker-run.log
+vexfs_data/
 
-# VM ISO files - download separately
-*.iso
-tests/vm_testing/vm/*.iso
+# Documentation build
+docs/_build/
+docs/.doctrees/
 
-# Python virtual environments (additional)
-venv_fuse_test/
+# Logs
+logs/
+*.log
+dev-debug.log
 
-# VM images directory
-tests/vm_images/
+# Temporary directories
+tmp/
+temp/
+.cache/
 
-
-# Build artifacts and packages that should not be committed
+# Package outputs
 *.tar.gz
-vexfs-developer-package-*.tar.gz
-bindings/typescript/vexfs-sdk-*.tgz
+*.tgz
+*.zip
+*.deb
+*.rpm
 
-# Developer package directory (should be generated, not committed)
+# Developer package (generated)
 developer-package/
 
-# Build scripts (should be in scripts/ directory)
-build_developer_package.sh
-build_final_package.sh
+# External projects (should be separate repos)
+vexfs-auto-ingest/
+vexfs-qdrant-adapter/
 
-# Test binaries and artifacts
-test_phase3_basic
-PHASE3_TESTING_SUMMARY.md
-# Python virtual environments
-venv_fuse_test/
+#===================
+# Keep These Files
+#===================
 
-# Rust build artifacts (vexctl)
-vexctl/target/
+# Important configuration templates
+!.env.example
+!.gitignore
+!.dockerignore
 
-# Test data (should be generated, not committed)
-test_data/
+# Documentation
+!README.md
+!docs/**/*.md
 
-# External integration projects (should be separate repos)
-# vexfs-auto-ingest/
-# vexfs-qdrant-adapter/
+# Source code
+!src/
+!rust/src/
+!kernel_module/src/
+!kernel_module/include/
 
-# Root level test files (should be in appropriate test directories)
-test_phase3_basic.c
+# Tools
+!tools/mkfs.vexfs
+!tools/vexctl
+
+# Scripts
+!scripts/**/*.sh
+!scripts/**/*.py
+
+*.img
+.claude
+*.iso
+

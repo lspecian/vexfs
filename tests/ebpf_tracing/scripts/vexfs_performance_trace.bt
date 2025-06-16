@@ -1,0 +1,372 @@
+#!/usr/bin/env bpftrace
+
+/*
+ * VexFS Performance Tracing Script
+ * 
+ * Focused on high-performance vector operations, memory usage patterns,
+ * and bottleneck identification for VexFS optimization.
+ *
+ * Usage: sudo bpftrace vexfs_performance_trace.bt
+ * 
+ * Features:
+ * - Vector operation latency tracking
+ * - Memory allocation patterns
+ * - I/O throughput analysis
+ * - Lock contention detection
+ * - Cache hit/miss ratios
+ */
+
+BEGIN
+{
+    printf("=== VexFS Performance Tracing Started ===\n");
+    printf("Timestamp: %s\n", strftime("%Y-%m-%d %H:%M:%S", nsecs));
+    printf("Monitoring VexFS performance metrics...\n\n");
+    
+    // Performance counters
+    @total_ops = 0;
+    @vector_ops = 0;
+    @io_bytes = 0;
+    @cache_hits = 0;
+    @cache_misses = 0;
+    @lock_contentions = 0;
+    
+    // Latency tracking
+    @op_start_time = 0;
+}
+
+// High-Performance Vector Operations
+kprobe:vexfs_vector_insert*,
+kprobe:vexfs_vector_search*,
+kprobe:vexfs_vector_update*,
+kprobe:vexfs_vector_delete*
+{
+    $op_type = func;
+    $vector_dim = arg1;  // Typical vector dimension argument
+    $start_time = nsecs;
+    
+    printf("[%s] VECTOR_OP: %s() dim=%d, PID=%d\n", 
+           strftime("%H:%M:%S.%f", nsecs), $op_type, $vector_dim, pid);
+    
+    @vector_ops++;
+    @total_ops++;
+    @vector_op_start[pid, func] = $start_time;
+    @vector_dimensions = hist($vector_dim);
+}
+
+kretprobe:vexfs_vector_insert*,
+kretprobe:vexfs_vector_search*,
+kretprobe:vexfs_vector_update*,
+kretprobe:vexfs_vector_delete*
+{
+    $latency = nsecs - @vector_op_start[pid, func];
+    delete(@vector_op_start[pid, func]);
+    
+    $latency_ms = $latency / 1000000;  // Convert to milliseconds
+    
+    printf("[%s] VECTOR_COMPLETE: %s() latency=%.2f ms, result=%d\n", 
+           strftime("%H:%M:%S.%f", nsecs), func, $latency_ms, retval);
+    
+    @vector_latencies = hist($latency / 1000);  // Microseconds
+    
+    // Track high-latency operations
+    if ($latency_ms > 10) {
+        @slow_vector_ops[func]++;
+        printf("⚠️  SLOW VECTOR OP: %s() took %.2f ms\n", func, $latency_ms);
+    }
+}
+
+// HNSW-Specific Performance Tracking
+kprobe:vexfs_hnsw_build*,
+kprobe:vexfs_hnsw_search*,
+kprobe:vexfs_hnsw_insert*
+{
+    $graph_size = arg1;  // Graph size parameter
+    printf("[%s] HNSW: %s() graph_size=%d\n", 
+           strftime("%H:%M:%S.%f", nsecs), func, $graph_size);
+    
+    @hnsw_op_start[pid, func] = nsecs;
+    @hnsw_graph_sizes = hist($graph_size);
+}
+
+kretprobe:vexfs_hnsw_build*,
+kretprobe:vexfs_hnsw_search*,
+kretprobe:vexfs_hnsw_insert*
+{
+    $latency = nsecs - @hnsw_op_start[pid, func];
+    delete(@hnsw_op_start[pid, func]);
+    
+    @hnsw_latencies = hist($latency / 1000);  // Microseconds
+    
+    if ($latency > 50000000) {  // > 50ms
+        printf("⚠️  SLOW HNSW: %s() took %d ms\n", func, $latency / 1000000);
+    }
+}
+
+// LSH-Specific Performance Tracking
+kprobe:vexfs_lsh_hash*,
+kprobe:vexfs_lsh_search*,
+kprobe:vexfs_lsh_bucket*
+{
+    printf("[%s] LSH: %s()\n", strftime("%H:%M:%S.%f", nsecs), func);
+    
+    @lsh_op_start[pid, func] = nsecs;
+}
+
+kretprobe:vexfs_lsh_hash*,
+kretprobe:vexfs_lsh_search*,
+kretprobe:vexfs_lsh_bucket*
+{
+    $latency = nsecs - @lsh_op_start[pid, func];
+    delete(@lsh_op_start[pid, func]);
+    
+    @lsh_latencies = hist($latency / 1000);  // Microseconds
+}
+
+// Memory Performance Tracking
+kprobe:vexfs_alloc*,
+kprobe:vexfs_vector_alloc*
+{
+    $size = arg0;
+    $alloc_type = func;
+    
+    printf("[%s] MEMORY_ALLOC: %s() size=%d bytes\n", 
+           strftime("%H:%M:%S.%f", nsecs), $alloc_type, $size);
+    
+    @memory_alloc_sizes = hist($size);
+    @memory_alloc_types[func]++;
+    
+    // Track large allocations
+    if ($size > 1048576) {  // > 1MB
+        printf("🔍 LARGE_ALLOC: %s() allocated %d MB\n", 
+               $alloc_type, $size / 1048576);
+        @large_allocs[func]++;
+    }
+}
+
+// I/O Performance Tracking
+kprobe:vexfs_read*,
+kprobe:vexfs_write*
+{
+    $size = arg2;  // I/O size
+    $io_type = func;
+    
+    @io_bytes += $size;
+    @io_op_start[pid, func] = nsecs;
+    @io_sizes = hist($size);
+    
+    printf("[%s] IO: %s() size=%d bytes\n", 
+           strftime("%H:%M:%S.%f", nsecs), $io_type, $size);
+}
+
+kretprobe:vexfs_read*,
+kretprobe:vexfs_write*
+{
+    $latency = nsecs - @io_op_start[pid, func];
+    delete(@io_op_start[pid, func]);
+    
+    $throughput = arg2 * 1000000000 / $latency;  // Bytes per second
+    
+    @io_latencies = hist($latency / 1000);  // Microseconds
+    @io_throughput = hist($throughput / 1048576);  // MB/s
+    
+    printf("[%s] IO_COMPLETE: %s() throughput=%d MB/s\n", 
+           strftime("%H:%M:%S.%f", nsecs), func, $throughput / 1048576);
+}
+
+// Cache Performance Tracking
+kprobe:vexfs_cache_get*,
+kprobe:vexfs_cache_lookup*
+{
+    @cache_lookups++;
+}
+
+kretprobe:vexfs_cache_get*,
+kretprobe:vexfs_cache_lookup*
+{
+    if (retval != 0) {
+        @cache_hits++;
+        printf("[%s] CACHE_HIT: %s()\n", strftime("%H:%M:%S.%f", nsecs), func);
+    } else {
+        @cache_misses++;
+        printf("[%s] CACHE_MISS: %s()\n", strftime("%H:%M:%S.%f", nsecs), func);
+    }
+}
+
+// Lock Contention Detection
+kprobe:vexfs_lock*,
+kprobe:vexfs_mutex_lock*,
+kprobe:vexfs_spin_lock*
+{
+    @lock_attempts[func]++;
+    @lock_start[pid, func] = nsecs;
+}
+
+kretprobe:vexfs_lock*,
+kretprobe:vexfs_mutex_lock*,
+kretprobe:vexfs_spin_lock*
+{
+    $wait_time = nsecs - @lock_start[pid, func];
+    delete(@lock_start[pid, func]);
+    
+    @lock_wait_times = hist($wait_time / 1000);  // Microseconds
+    
+    // Detect contention (wait time > 1ms)
+    if ($wait_time > 1000000) {
+        @lock_contentions++;
+        printf("🔒 LOCK_CONTENTION: %s() waited %d ms, PID=%d\n", 
+               func, $wait_time / 1000000, pid);
+    }
+}
+
+// Error Rate Tracking
+kprobe:vexfs_error*,
+kretprobe:vexfs_*
+/retval < 0/
+{
+    @error_count++;
+    @error_functions[func]++;
+    
+    printf("❌ ERROR: %s() returned %d\n", func, retval);
+}
+
+// Real-time Performance Monitoring (every 5 seconds)
+interval:s:5
+{
+    $cache_hit_rate = @cache_hits * 100 / (@cache_hits + @cache_misses);
+    $error_rate = @error_count * 100 / @total_ops;
+    $avg_vector_latency = @vector_ops > 0 ? 
+        (@vector_latencies.sum / @vector_latencies.count) : 0;
+    
+    printf("\n📊 === Performance Metrics (5s interval) ===\n");
+    printf("Operations: Total=%d, Vector=%d\n", @total_ops, @vector_ops);
+    printf("I/O: %d MB transferred\n", @io_bytes / 1048576);
+    printf("Cache: Hit Rate=%.1f%% (%d hits, %d misses)\n", 
+           $cache_hit_rate, @cache_hits, @cache_misses);
+    printf("Locks: %d contentions detected\n", @lock_contentions);
+    printf("Errors: %.2f%% error rate (%d errors)\n", $error_rate, @error_count);
+    printf("Avg Vector Latency: %d μs\n", $avg_vector_latency);
+    printf("Timestamp: %s\n\n", strftime("%H:%M:%S", nsecs));
+}
+
+// Performance Alerts
+interval:s:1
+{
+    // Alert on high error rate
+    if (@total_ops > 100 && (@error_count * 100 / @total_ops) > 5) {
+        printf("🚨 HIGH ERROR RATE: %.1f%% (%d/%d operations)\n", 
+               @error_count * 100.0 / @total_ops, @error_count, @total_ops);
+    }
+    
+    // Alert on low cache hit rate
+    if ((@cache_hits + @cache_misses) > 50 && 
+        (@cache_hits * 100 / (@cache_hits + @cache_misses)) < 80) {
+        printf("🚨 LOW CACHE HIT RATE: %.1f%%\n", 
+               @cache_hits * 100.0 / (@cache_hits + @cache_misses));
+    }
+    
+    // Alert on high lock contention
+    if (@lock_contentions > 10) {
+        printf("🚨 HIGH LOCK CONTENTION: %d contentions detected\n", 
+               @lock_contentions);
+    }
+}
+
+// Final Performance Report
+END
+{
+    printf("\n=== VexFS Performance Analysis Report ===\n");
+    printf("Session: %s to %s\n", 
+           strftime("%H:%M:%S", @start_time), strftime("%H:%M:%S", nsecs));
+    
+    printf("\n--- Operation Summary ---\n");
+    printf("Total Operations: %d\n", @total_ops);
+    printf("Vector Operations: %d (%.1f%%)\n", 
+           @vector_ops, @vector_ops * 100.0 / @total_ops);
+    printf("I/O Volume: %d MB\n", @io_bytes / 1048576);
+    
+    printf("\n--- Performance Metrics ---\n");
+    if ((@cache_hits + @cache_misses) > 0) {
+        printf("Cache Hit Rate: %.1f%% (%d hits, %d misses)\n", 
+               @cache_hits * 100.0 / (@cache_hits + @cache_misses),
+               @cache_hits, @cache_misses);
+    }
+    
+    printf("Lock Contentions: %d\n", @lock_contentions);
+    printf("Error Rate: %.2f%% (%d errors)\n", 
+           @error_count * 100.0 / @total_ops, @error_count);
+    
+    if (@vector_latencies) {
+        printf("\n--- Vector Operation Latencies (μs) ---\n");
+        print(@vector_latencies);
+    }
+    
+    if (@hnsw_latencies) {
+        printf("\n--- HNSW Operation Latencies (μs) ---\n");
+        print(@hnsw_latencies);
+    }
+    
+    if (@lsh_latencies) {
+        printf("\n--- LSH Operation Latencies (μs) ---\n");
+        print(@lsh_latencies);
+    }
+    
+    if (@io_latencies) {
+        printf("\n--- I/O Latencies (μs) ---\n");
+        print(@io_latencies);
+    }
+    
+    if (@io_throughput) {
+        printf("\n--- I/O Throughput (MB/s) ---\n");
+        print(@io_throughput);
+    }
+    
+    if (@lock_wait_times) {
+        printf("\n--- Lock Wait Times (μs) ---\n");
+        print(@lock_wait_times);
+    }
+    
+    if (@memory_alloc_sizes) {
+        printf("\n--- Memory Allocation Sizes ---\n");
+        print(@memory_alloc_sizes);
+    }
+    
+    if (@slow_vector_ops) {
+        printf("\n--- Slow Vector Operations ---\n");
+        print(@slow_vector_ops);
+    }
+    
+    if (@large_allocs) {
+        printf("\n--- Large Memory Allocations ---\n");
+        print(@large_allocs);
+    }
+    
+    if (@error_functions) {
+        printf("\n--- Functions with Errors ---\n");
+        print(@error_functions);
+    }
+    
+    // Cleanup
+    clear(@total_ops);
+    clear(@vector_ops);
+    clear(@io_bytes);
+    clear(@cache_hits);
+    clear(@cache_misses);
+    clear(@lock_contentions);
+    clear(@error_count);
+    clear(@vector_latencies);
+    clear(@hnsw_latencies);
+    clear(@lsh_latencies);
+    clear(@io_latencies);
+    clear(@io_throughput);
+    clear(@lock_wait_times);
+    clear(@memory_alloc_sizes);
+    clear(@vector_dimensions);
+    clear(@hnsw_graph_sizes);
+    clear(@memory_alloc_types);
+    clear(@lock_attempts);
+    clear(@slow_vector_ops);
+    clear(@large_allocs);
+    clear(@error_functions);
+    
+    printf("\n=== Performance Tracing Complete ===\n");
+}

@@ -1,6 +1,6 @@
 [package]
 name = "vexfs"
-version = "1.0.0"
+version = "0.0.4"
 edition = "2021"
 authors = ["VexFS Contributors"]
 description = "Vector Extended File System - A filesystem optimized for vector embeddings and similarity search"

@@ -1,0 +1,329 @@
+#!/usr/bin/env bpftrace
+
+/*
+ * VexFS Memory Analysis Tracing Script
+ * 
+ * Specialized for tracking memory allocation patterns, leaks, and
+ * memory-related performance issues in VexFS kernel module.
+ *
+ * Usage: sudo bpftrace vexfs_memory_trace.bt
+ * 
+ * Features:
+ * - Memory allocation/deallocation tracking
+ * - Memory leak detection
+ * - Allocation size patterns
+ * - Memory pressure monitoring
+ * - Stack trace for large allocations
+ */
+
+BEGIN
+{
+    printf("=== VexFS Memory Analysis Started ===\n");
+    printf("Timestamp: %s\n", strftime("%Y-%m-%d %H:%M:%S", nsecs));
+    printf("Tracking VexFS memory operations...\n\n");
+    
+    // Memory tracking counters
+    @total_allocs = 0;
+    @total_frees = 0;
+    @total_allocated_bytes = 0;
+    @total_freed_bytes = 0;
+    @current_memory_usage = 0;
+    @peak_memory_usage = 0;
+    @allocation_count = 0;
+    
+    // Leak detection
+    @outstanding_allocs = 0;
+}
+
+// VexFS Memory Allocations
+kprobe:vexfs_alloc*,
+kprobe:vexfs_kmalloc*,
+kprobe:vexfs_vmalloc*,
+kprobe:vexfs_kzalloc*,
+kprobe:vexfs_vzalloc*
+{
+    $size = arg0;
+    $alloc_type = func;
+    $caller = caller;
+    
+    printf("[%s] ALLOC: %s() size=%d bytes, caller=0x%lx, PID=%d\n", 
+           strftime("%H:%M:%S.%f", nsecs), $alloc_type, $size, $caller, pid);
+    
+    @total_allocs++;
+    @total_allocated_bytes += $size;
+    @current_memory_usage += $size;
+    @outstanding_allocs++;
+    
+    // Track allocation patterns
+    @alloc_sizes = hist($size);
+    @alloc_types[func]++;
+    @alloc_callers[caller]++;
+    
+    // Update peak memory usage
+    if (@current_memory_usage > @peak_memory_usage) {
+        @peak_memory_usage = @current_memory_usage;
+    }
+    
+    // Track large allocations with stack trace
+    if ($size > 1048576) {  // > 1MB
+        printf("🔍 LARGE_ALLOCATION: %s() size=%d MB\n", 
+               $alloc_type, $size / 1048576);
+        printf("Stack trace:\n%s\n", kstack);
+        @large_allocs[func, $size]++;
+    }
+    
+    // Store allocation info for leak detection
+    @alloc_info[retval] = $size;
+    @alloc_timestamp[retval] = nsecs;
+    @alloc_function[retval] = func;
+}
+
+// VexFS Memory Deallocations
+kprobe:vexfs_free*,
+kprobe:vexfs_kfree*,
+kprobe:vexfs_vfree*
+{
+    $ptr = arg0;
+    $size = @alloc_info[$ptr];
+    $alloc_time = @alloc_timestamp[$ptr];
+    $alloc_func = @alloc_function[$ptr];
+    
+    if ($size > 0) {
+        $lifetime = nsecs - $alloc_time;
+        
+        printf("[%s] FREE: %s() ptr=0x%lx, size=%d bytes, lifetime=%d ms\n", 
+               strftime("%H:%M:%S.%f", nsecs), func, $ptr, $size, $lifetime / 1000000);
+        
+        @total_frees++;
+        @total_freed_bytes += $size;
+        @current_memory_usage -= $size;
+        @outstanding_allocs--;
+        
+        // Track deallocation patterns
+        @free_types[func]++;
+        @allocation_lifetimes = hist($lifetime / 1000000);  // milliseconds
+        
+        // Clean up tracking info
+        delete(@alloc_info[$ptr]);
+        delete(@alloc_timestamp[$ptr]);
+        delete(@alloc_function[$ptr]);
+    } else {
+        printf("⚠️  DOUBLE_FREE or INVALID_FREE: %s() ptr=0x%lx\n", func, $ptr);
+        @double_frees[func]++;
+    }
+}
+
+// VexFS Vector-Specific Memory Operations
+kprobe:vexfs_vector_alloc*,
+kprobe:vexfs_vector_buffer_alloc*
+{
+    $vector_count = arg0;
+    $vector_dim = arg1;
+    $total_size = $vector_count * $vector_dim * 4;  // Assuming 4-byte floats
+    
+    printf("[%s] VECTOR_ALLOC: %s() vectors=%d, dim=%d, total=%d KB\n", 
+           strftime("%H:%M:%S.%f", nsecs), func, $vector_count, $vector_dim, 
+           $total_size / 1024);
+    
+    @vector_allocs++;
+    @vector_memory_usage += $total_size;
+    @vector_dimensions = hist($vector_dim);
+    @vector_counts = hist($vector_count);
+}
+
+kprobe:vexfs_vector_free*,
+kprobe:vexfs_vector_buffer_free*
+{
+    $vector_count = arg0;
+    $vector_dim = arg1;
+    $total_size = $vector_count * $vector_dim * 4;
+    
+    printf("[%s] VECTOR_FREE: %s() vectors=%d, dim=%d, total=%d KB\n", 
+           strftime("%H:%M:%S.%f", nsecs), func, $vector_count, $vector_dim, 
+           $total_size / 1024);
+    
+    @vector_frees++;
+    @vector_memory_usage -= $total_size;
+}
+
+// Memory Pressure Detection
+kprobe:vexfs_*
+/(@current_memory_usage > 104857600)/  // > 100MB
+{
+    printf("⚠️  HIGH_MEMORY_USAGE: %d MB currently allocated\n", 
+           @current_memory_usage / 1048576);
+    @memory_pressure_events++;
+}
+
+// Out of Memory Handling
+kprobe:vexfs_oom*,
+kprobe:vexfs_*_oom*,
+kretprobe:vexfs_*
+/retval == -12/  // -ENOMEM
+{
+    printf("🚨 OUT_OF_MEMORY: %s() failed with ENOMEM\n", func);
+    printf("Current usage: %d MB, Peak: %d MB\n", 
+           @current_memory_usage / 1048576, @peak_memory_usage / 1048576);
+    @oom_events[func]++;
+}
+
+// Memory Fragmentation Detection
+kprobe:vexfs_alloc*
+/retval == 0 && arg0 > 0/
+{
+    printf("⚠️  ALLOCATION_FAILED: %s() size=%d bytes\n", func, arg0);
+    @failed_allocs[func, arg0]++;
+}
+
+// Periodic Memory Status (every 10 seconds)
+interval:s:10
+{
+    $memory_mb = @current_memory_usage / 1048576;
+    $peak_mb = @peak_memory_usage / 1048576;
+    $vector_mb = @vector_memory_usage / 1048576;
+    $leak_count = @outstanding_allocs;
+    
+    printf("\n📊 === Memory Status (10s interval) ===\n");
+    printf("Current Usage: %d MB (Peak: %d MB)\n", $memory_mb, $peak_mb);
+    printf("Vector Memory: %d MB\n", $vector_mb);
+    printf("Outstanding Allocations: %d\n", $leak_count);
+    printf("Allocs: %d, Frees: %d, Balance: %d\n", 
+           @total_allocs, @total_frees, @total_allocs - @total_frees);
+    
+    if ($leak_count > 1000) {
+        printf("🚨 POTENTIAL_MEMORY_LEAK: %d outstanding allocations\n", $leak_count);
+    }
+    
+    printf("Timestamp: %s\n\n", strftime("%H:%M:%S", nsecs));
+}
+
+// Memory Leak Detection (every 30 seconds)
+interval:s:30
+{
+    printf("\n🔍 === Memory Leak Analysis ===\n");
+    
+    // Check for old allocations (> 5 minutes old)
+    $current_time = nsecs;
+    $leak_threshold = 300000000000;  // 5 minutes in nanoseconds
+    $potential_leaks = 0;
+    
+    // Note: This is a simplified leak detection
+    // In practice, we'd iterate through @alloc_timestamp
+    if (@outstanding_allocs > 500) {
+        printf("⚠️  High number of outstanding allocations: %d\n", @outstanding_allocs);
+        printf("Consider investigating potential memory leaks\n");
+    }
+    
+    printf("Analysis complete at %s\n\n", strftime("%H:%M:%S", nsecs));
+}
+
+// Memory Allocation Failure Alert
+kprobe:vexfs_*
+/retval == 0 && (func =~ /alloc/ || func =~ /malloc/)/
+{
+    printf("🚨 ALLOCATION_FAILURE: %s() returned NULL\n", func);
+    printf("Current memory usage: %d MB\n", @current_memory_usage / 1048576);
+    @allocation_failures[func]++;
+}
+
+// Final Memory Analysis Report
+END
+{
+    printf("\n=== VexFS Memory Analysis Report ===\n");
+    printf("Session: %s to %s\n", 
+           strftime("%H:%M:%S", @start_time), strftime("%H:%M:%S", nsecs));
+    
+    printf("\n--- Memory Statistics ---\n");
+    printf("Total Allocations: %d\n", @total_allocs);
+    printf("Total Deallocations: %d\n", @total_frees);
+    printf("Outstanding Allocations: %d\n", @outstanding_allocs);
+    printf("Total Allocated: %d MB\n", @total_allocated_bytes / 1048576);
+    printf("Total Freed: %d MB\n", @total_freed_bytes / 1048576);
+    printf("Peak Memory Usage: %d MB\n", @peak_memory_usage / 1048576);
+    printf("Final Memory Usage: %d MB\n", @current_memory_usage / 1048576);
+    
+    if (@vector_allocs > 0) {
+        printf("\n--- Vector Memory Statistics ---\n");
+        printf("Vector Allocations: %d\n", @vector_allocs);
+        printf("Vector Deallocations: %d\n", @vector_frees);
+        printf("Vector Memory Balance: %d MB\n", @vector_memory_usage / 1048576);
+    }
+    
+    if (@outstanding_allocs > 0) {
+        printf("\n⚠️  POTENTIAL MEMORY LEAKS DETECTED ⚠️\n");
+        printf("Outstanding allocations: %d\n", @outstanding_allocs);
+        printf("Unfreed memory: %d MB\n", @current_memory_usage / 1048576);
+    }
+    
+    if (@alloc_sizes) {
+        printf("\n--- Allocation Size Distribution ---\n");
+        print(@alloc_sizes);
+    }
+    
+    if (@allocation_lifetimes) {
+        printf("\n--- Allocation Lifetime Distribution (ms) ---\n");
+        print(@allocation_lifetimes);
+    }
+    
+    if (@alloc_types) {
+        printf("\n--- Allocation Types ---\n");
+        print(@alloc_types);
+    }
+    
+    if (@free_types) {
+        printf("\n--- Deallocation Types ---\n");
+        print(@free_types);
+    }
+    
+    if (@large_allocs) {
+        printf("\n--- Large Allocations (>1MB) ---\n");
+        print(@large_allocs);
+    }
+    
+    if (@double_frees) {
+        printf("\n--- Double Free Errors ---\n");
+        print(@double_frees);
+    }
+    
+    if (@oom_events) {
+        printf("\n--- Out of Memory Events ---\n");
+        print(@oom_events);
+    }
+    
+    if (@allocation_failures) {
+        printf("\n--- Allocation Failures ---\n");
+        print(@allocation_failures);
+    }
+    
+    if (@vector_dimensions) {
+        printf("\n--- Vector Dimension Distribution ---\n");
+        print(@vector_dimensions);
+    }
+    
+    // Cleanup
+    clear(@total_allocs);
+    clear(@total_frees);
+    clear(@total_allocated_bytes);
+    clear(@total_freed_bytes);
+    clear(@current_memory_usage);
+    clear(@peak_memory_usage);
+    clear(@outstanding_allocs);
+    clear(@vector_allocs);
+    clear(@vector_frees);
+    clear(@vector_memory_usage);
+    clear(@alloc_sizes);
+    clear(@allocation_lifetimes);
+    clear(@alloc_types);
+    clear(@free_types);
+    clear(@large_allocs);
+    clear(@double_frees);
+    clear(@oom_events);
+    clear(@allocation_failures);
+    clear(@vector_dimensions);
+    clear(@vector_counts);
+    clear(@alloc_callers);
+    clear(@failed_allocs);
+    clear(@memory_pressure_events);
+    
+    printf("\n=== Memory Analysis Complete ===\n");
+}

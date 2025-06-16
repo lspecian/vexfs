@@ -1,0 +1,88 @@
+{
+  "timestamp": "2025-06-09T13:44:36.720Z",
+  "summary": {
+    "embeddings_generated": 7,
+    "similarities_calculated": 5,
+    "vexfs_operations": 1,
+    "errors": 1
+  },
+  "embeddings": [
+    {
+      "text": "República Federativa do Brasil, Estado Democrático...",
+      "dimensions": 384
+    },
+    {
+      "text": "soberania, cidadania, dignidade da pessoa humana...",
+      "dimensions": 384
+    },
+    {
+      "text": "liberdade, igualdade, segurança e propriedade...",
+      "dimensions": 384
+    },
+    {
+      "text": "Poderes da União: Legislativo, Executivo e Judiciá...",
+      "dimensions": 384
+    },
+    {
+      "text": "construir uma sociedade livre, justa e solidária...",
+      "dimensions": 384
+    },
+    {
+      "text": "erradicar a pobreza e a marginalização...",
+      "dimensions": 384
+    },
+    {
+      "text": "promover o bem de todos, sem preconceitos...",
+      "dimensions": 384
+    }
+  ],
+  "similarities": [
+    {
+      "pair": "Brazil ↔ Sovereignty",
+      "similarity": 0.5028609469721834,
+      "text1": "República Federativa do Brasil, Estado Democrático de Direito",
+      "text2": "soberania, cidadania, dignidade da pessoa humana"
+    },
+    {
+      "pair": "Sovereignty ↔ Rights",
+      "similarity": 0.47099939222488474,
+      "text1": "soberania, cidadania, dignidade da pessoa humana",
+      "text2": "liberdade, igualdade, segurança e propriedade"
+    },
+    {
+      "pair": "Brazil ↔ Powers",
+      "similarity": 0.4123323442639731,
+      "text1": "República Federativa do Brasil, Estado Democrático de Direito",
+      "text2": "Poderes da União: Legislativo, Executivo e Judiciário"
+    },
+    {
+      "pair": "Social Justice ↔ Poverty",
+      "similarity": 0.3913351965061252,
+      "text1": "construir uma sociedade livre, justa e solidária",
+      "text2": "erradicar a pobreza e a marginalização"
+    },
+    {
+      "pair": "Poverty ↔ Equality",
+      "similarity": 0.34840701663193324,
+      "text1": "erradicar a pobreza e a marginalização",
+      "text2": "promover o bem de todos, sem preconceitos"
+    }
+  ],
+  "vexfs_operations": [
+    {
+      "operation": "vexfs_test",
+      "status": "failed",
+      "error": "EACCES: permission denied, open '/mnt/vexfs_test/embedding_test.txt'"
+    }
+  ],
+  "errors": [
+    "VexFS error: EACCES: permission denied, open '/mnt/vexfs_test/embedding_test.txt'"
+  ],
+  "vexfs_capabilities": {
+    "semantic_search": "Ready for constitutional text search",
+    "vector_storage": "HNSW indexing for fast similarity search",
+    "graph_analytics": "Constitutional concept relationship mapping",
+    "multi_model": "Support for multiple embedding models",
+    "performance": "Production-ready with 8000+ ops/sec"
+  }
+}

@@ -1,0 +1,70 @@
+# Build artifacts
+target/
+*/target/
+
+# Large directories
+workbench/
+test_data/
+tests/
+vexctl/
+benchmarks/
+bindings/
+vexfs-auto-ingest/
+kernel/
+
+# Git
+.git/
+.gitignore
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test data and large files
+test_env/
+benchmarks/data/
+*.bin
+*.dat
+*.idx
+
+# Documentation build artifacts
+docs/_build/
+docs/.doctrees/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Node modules
+node_modules/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Archive directories
+archive/
+
+# Large test datasets
+*.hdf5
+*.h5
+*.parquet
+
+# Docker files (except the ones we need)
+Dockerfile.*
+!Dockerfile
+docker-compose.*.yml
+!docker-compose.yml
+
+# CI/CD artifacts
+.github/

@@ -1,0 +1,17 @@
+[build]
+target = "x86_64-unknown-linux-gnu"
+
+# Default configuration for userspace builds (FUSE, server, tests)
+[target.x86_64-unknown-linux-gnu]
+rustflags = [
+    "-C", "opt-level=2",
+]
+
+# Kernel module specific configuration - prevents GOT relocations
+[target.x86_64-unknown-none]
+rustflags = [
+    "-C", "relocation-model=static",
+    "-C", "code-model=kernel",
+    "-C", "no-redzone",
+    "-C", "panic=abort"
+]

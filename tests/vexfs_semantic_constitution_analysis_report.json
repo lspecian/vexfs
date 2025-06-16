@@ -1,0 +1,130 @@
+{
+  "timestamp": "2025-06-09T14:02:01.885Z",
+  "test_metadata": {
+    "vexfs_version": "1.0.0",
+    "test_type": "semantic_constitutional_analysis",
+    "documents_processed": 3,
+    "concepts_analyzed": 10,
+    "embedding_model": "all-minilm",
+    "embedding_dimensions": 3
+  },
+  "document_storage": {
+    "total_documents": 3,
+    "storage_success_rate": "100.0%",
+    "total_bytes_stored": 7251,
+    "documents": {
+      "brazilian": {
+        "path": "/tmp/vexfs_fuse_test/brazilian_constitution.txt",
+        "size": 1816,
+        "title": "Brazilian Constitution 1988 - Democratic Principles"
+      },
+      "german": {
+        "path": "/tmp/vexfs_fuse_test/german_constitution.txt",
+        "size": 2232,
+        "title": "German Basic Law - Fundamental Rights"
+      },
+      "american": {
+        "path": "/tmp/vexfs_fuse_test/us_constitution.txt",
+        "size": 3203,
+        "title": "US Constitution - Bill of Rights"
+      }
+    }
+  },
+  "semantic_analysis": {
+    "cross_constitutional_similarities": {
+      "brazilian_german": 0.14322353578722125,
+      "brazilian_american": 0.20097956541745807,
+      "german_american": 0.13896833856934973
+    },
+    "concept_document_similarities": {
+      "human dignity and fundamental rights": {
+        "brazilian": 0.08760663818050281,
+        "german": 0.15350333053010976,
+        "american": 0.3116462429386804
+      },
+      "democratic governance and sovereignty": {
+        "brazilian": 0.2837160569519123,
+        "german": 0.07389740398509835,
+        "american": 0.205879805211431
+      },
+      "equality before the law": {
+        "brazilian": 0.13384880525160775,
+        "german": 0.04163002277639762,
+        "american": 0.37266379618097756
+      },
+      "separation of powers": {
+        "brazilian": 0.12307000626158839,
+        "german": 0.03760749662531339,
+        "american": 0.17958034583044424
+      },
+      "freedom of speech and expression": {
+        "brazilian": 0.12530326355718993,
+        "german": 0.1575975852285101,
+        "american": 0.45767092918142616
+      },
+      "social justice and welfare state": {
+        "brazilian": 0.15333351765932204,
+        "german": 0.046298559079073195,
+        "american": 0.1930111490313999
+      },
+      "constitutional democracy and rule of law": {
+        "brazilian": 0.2632137396346158,
+        "german": 0.1313152972919732,
+        "american": 0.34797761548506484
+      },
+      "individual liberty and personal freedom": {
+        "brazilian": 0.17873495549782423,
+        "german": 0.10182722243019421,
+        "american": 0.4670294356623562
+      },
+      "religious freedom and conscience": {
+        "brazilian": 0.10034086062018259,
+        "german": 0.0964753059228907,
+        "american": 0.278143187041054
+      },
+      "due process and fair trial rights": {
+        "brazilian": 0.029807642081919113,
+        "german": 0.03361596920096542,
+        "american": 0.3012997963795141
+      }
+    },
+    "key_insights": [
+      "\"human dignity and fundamental rights\" most strongly represented in american constitution (0.312)",
+      "\"democratic governance and sovereignty\" most strongly represented in brazilian constitution (0.284)",
+      "\"equality before the law\" most strongly represented in american constitution (0.373)",
+      "\"separation of powers\" most strongly represented in american constitution (0.180)",
+      "\"freedom of speech and expression\" most strongly represented in american constitution (0.458)",
+      "\"social justice and welfare state\" most strongly represented in american constitution (0.193)",
+      "\"constitutional democracy and rule of law\" most strongly represented in american constitution (0.348)",
+      "\"individual liberty and personal freedom\" most strongly represented in american constitution (0.467)",
+      "\"religious freedom and conscience\" most strongly represented in american constitution (0.278)",
+      "\"due process and fair trial rights\" most strongly represented in american constitution (0.301)"
+    ],
+    "similarity_statistics": {
+      "highest_similarity": 0.20097956541745807,
+      "lowest_similarity": 0.13896833856934973,
+      "average_similarity": 0.16105714659134304
+    }
+  },
+  "vexfs_capabilities": {
+    "fuseFilesystem": true,
+    "documentStorage": true,
+    "semanticIntegration": true,
+    "ollamaCompatibility": true,
+    "vectorOperations": true
+  },
+  "constitutional_frameworks": {
+    "brazilian": "Federal democratic republic with strong social rights emphasis",
+    "german": "Federal parliamentary democracy with fundamental rights focus",
+    "american": "Federal constitutional republic with individual liberties emphasis"
+  },
+  "technical_achievements": [
+    "Multi-language constitutional document storage through VexFS FUSE",
+    "Semantic embedding generation for legal texts",
+    "Cross-constitutional similarity analysis",
+    "Constitutional concept semantic mapping",
+    "Ollama integration for legal document processing",
+    "Vector-based constitutional comparison",
+    "Real-time semantic search capabilities demonstration"
+  ]
+}

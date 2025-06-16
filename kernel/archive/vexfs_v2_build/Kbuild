@@ -1,6 +1,0 @@
-# VexFS v2.0 Kernel Build Configuration - Phase 3 Integration
-obj-m := vexfs_v2_phase3.o
-vexfs_v2_phase3-objs := vexfs_v2_main.o vexfs_v2_search.o vexfs_v2_monitoring.o vexfs_v2_multi_model.o vexfs_v2_advanced_search.o vexfs_v2_hnsw.o vexfs_v2_lsh.o vexfs_v2_phase3_integration.o
-
-# Enable Phase 3 features
-ccflags-y += -DVEXFS_PHASE3_ENABLED
