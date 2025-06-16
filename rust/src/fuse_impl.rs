@@ -11,6 +11,8 @@ use std::ffi::OsStr;
 use std::time::{SystemTime, UNIX_EPOCH, Instant};
 #[cfg(feature = "std")]
 use std::sync::{Arc, Mutex, RwLock};
+#[cfg(feature = "std")]
+use std::sync::atomic::{AtomicU64, Ordering};
 use time::OffsetDateTime;
 use time01::Timespec;
 
@@ -71,25 +73,27 @@ pub struct FusePerformanceMetrics {
 /// FUSE-specific error mapping for VexFS operations
 #[derive(Debug, Clone)]
 pub enum FuseVexfsError {
-    VectorNotFound,
+    VectorNotFound(u64),
     SearchFailed(String),
     SyncError(String),
     StackOverflow,
     MemoryExhausted,
     InvalidVector(String),
     BridgeError(String),
+    InvalidVectorFormat,
 }
 
 impl From<FuseVexfsError> for i32 {
     fn from(err: FuseVexfsError) -> Self {
         match err {
-            FuseVexfsError::VectorNotFound => ENOENT,
+            FuseVexfsError::VectorNotFound(_) => ENOENT,
             FuseVexfsError::SearchFailed(_) => EIO,
             FuseVexfsError::SyncError(_) => EIO,
             FuseVexfsError::StackOverflow => ENOMEM,
             FuseVexfsError::MemoryExhausted => ENOMEM,
             FuseVexfsError::InvalidVector(_) => EINVAL,
             FuseVexfsError::BridgeError(_) => EIO,
+            FuseVexfsError::InvalidVectorFormat => EINVAL,
         }
     }
 }
@@ -114,6 +118,8 @@ pub struct VexFSFuse {
     vector_id_to_file: Arc<Mutex<HashMap<u64, u64>>>, // vector_id -> file_ino
     // Storage-HNSW Bridge for synchronized operations
     storage_hnsw_bridge: Arc<Mutex<crate::storage::vector_hnsw_bridge::OptimizedVectorStorageManager>>,
+    // Atomic counter for generating unique vector IDs
+    next_vector_id: Arc<AtomicU64>,
 }
 
 impl VexFSFuse {
@@ -209,13 +215,40 @@ impl VexFSFuse {
         // Create Storage-HNSW Bridge for synchronized operations
         eprintln!("VexFSFuse: Creating Storage-HNSW Bridge...");
         
-        // Create a mock storage manager for the bridge (in a full implementation, this would be the real storage manager)
-        let mock_storage_manager = Arc::new(crate::storage::StorageManager::new_for_testing());
+        // Create a real storage manager for the bridge
+        // Use an in-memory block device for FUSE operations
+        let block_size = 4096u32;
+        let total_blocks = 10240u64; // 40MB of storage
+        let device_size = total_blocks * block_size as u64;
+        
+        let device = crate::storage::BlockDevice::new(
+            device_size,
+            block_size,
+            true, // in-memory device for FUSE
+            "vexfs_fuse_device".to_string()
+        )?;
+        
+        let layout = crate::storage::VexfsLayout {
+            total_blocks,
+            block_size,
+            blocks_per_group: 128,
+            inodes_per_group: 32,
+            group_count: (total_blocks / 128) as u32,
+            inode_size: 256,
+            journal_blocks: 256,
+            vector_blocks: 512,
+        };
+        
+        let storage_manager = Arc::new(crate::storage::StorageManager::new(
+            device,
+            layout,
+            1024 * 1024 // 1MB cache
+        )?);
         
         // Create the bridge with FUSE-optimized configuration
         let storage_hnsw_bridge = Arc::new(Mutex::new(
             crate::storage::vector_hnsw_bridge::OptimizedVectorStorageManager::new(
-                mock_storage_manager,
+                storage_manager,
                 128, // Default vector dimensions
                 bridge_config.clone(),
             )?
@@ -235,6 +268,7 @@ impl VexFSFuse {
             operation_context,
             vector_id_to_file,
             storage_hnsw_bridge,
+            next_vector_id: Arc::new(AtomicU64::new(1)),
         })
     }
     
@@ -278,6 +312,116 @@ fn system_time_to_timespec(time: SystemTime) -> Timespec {
 }
 
 impl VexFSFuse {
+    /// Find the inode associated with a vector ID
+    fn find_inode_for_vector(&self, vector_id: u64) -> Result<u64, FuseVexfsError> {
+        // Check if we have a mapping for this vector ID
+        if let Ok(mapping) = self.vector_id_to_file.lock() {
+            if let Some(&inode) = mapping.get(&vector_id) {
+                return Ok(inode);
+            }
+        }
+        
+        // If no mapping exists, return error
+        Err(FuseVexfsError::VectorNotFound(vector_id))
+    }
+    
+    /// Perform direct HNSW search as fallback
+    fn perform_direct_hnsw_search(&self, query_vector: &[f32], top_k: usize) -> Result<Vec<VectorSearchResult>, FuseVexfsError> {
+        // Lock the HNSW graph
+        let mut hnsw_graph = self.hnsw_graph.lock()
+            .map_err(|_| FuseVexfsError::BridgeError("Failed to acquire HNSW graph lock".to_string()))?;
+        
+        // Perform the search with L2 distance
+        let distance_fn = |a: &[f32], b: &[f32]| -> Result<f32, crate::anns::AnnsError> {
+            Ok(a.iter()
+                .zip(b.iter())
+                .map(|(x, y)| (x - y).powi(2))
+                .sum::<f32>()
+                .sqrt())
+        };
+        
+        let search_results = hnsw_graph.search(query_vector, top_k, 50, distance_fn) // ef_search = 50
+            .map_err(|e| FuseVexfsError::SearchFailed(format!("HNSW search failed: {:?}", e)))?;
+        
+        // Convert HNSW results to VectorSearchResult
+        let mut results = Vec::with_capacity(search_results.len());
+        
+        for (node_id, distance) in search_results {
+            // Get file inode from vector mapping
+            let file_inode = self.vector_id_to_file.lock()
+                .ok()
+                .and_then(|map| map.get(&node_id).copied())
+                .unwrap_or(node_id); // Fallback to using node_id as inode
+            
+            // Get vector metadata if available
+            let files = self.files.lock().ok();
+            let metadata = files.as_ref().and_then(|f| f.get(&file_inode)).map(|file| {
+                VectorMetadata {
+                    dimensions: file.vector.as_ref().map(|v| v.len() as u32).unwrap_or(128),
+                    data_type: VectorDataType::Float32,
+                    file_inode,
+                    compression_type: 0, // No compression
+                }
+            });
+            
+            results.push(VectorSearchResult {
+                vector_id: node_id,
+                distance,
+                similarity: 1.0 - distance.min(1.0), // Convert distance to similarity
+                metadata,
+                location: None, // Location info not available in direct search
+            });
+        }
+        
+        Ok(results)
+    }
+    
+    /// Read vector data from storage
+    fn read_vector_from_storage(&self, file_inode: u64, vector_id: u64) -> Result<Vec<f32>, FuseVexfsError> {
+        // Get the file from the files map
+        let files = self.files.lock().map_err(|_| 
+            FuseVexfsError::BridgeError("Failed to acquire files lock".to_string()))?;
+        
+        let file = files.get(&file_inode)
+            .ok_or_else(|| FuseVexfsError::VectorNotFound(vector_id))?;
+        
+        // Check if the file has vector data
+        if let Some(ref vector) = file.vector {
+            return Ok(vector.clone());
+        }
+        
+        // If no vector field, try to parse from content
+        if file.content.is_empty() {
+            return Err(FuseVexfsError::InvalidVector(
+                format!("No vector data found for vector ID {}", vector_id)
+            ));
+        }
+        
+        // Validate content length is divisible by f32 size
+        if file.content.len() % std::mem::size_of::<f32>() != 0 {
+            return Err(FuseVexfsError::InvalidVectorFormat);
+        }
+        
+        // Parse the vector data based on format
+        let vector_size = file.content.len() / std::mem::size_of::<f32>();
+        let mut vector = Vec::with_capacity(vector_size);
+        
+        for chunk in file.content.chunks_exact(4) {
+            let bytes: [u8; 4] = chunk.try_into()
+                .map_err(|_| FuseVexfsError::InvalidVectorFormat)?;
+            vector.push(f32::from_le_bytes(bytes));
+        }
+        
+        // Validate vector has reasonable dimensions
+        if vector.is_empty() || vector.len() > 10000 {
+            return Err(FuseVexfsError::InvalidVector(
+                format!("Invalid vector dimensions: {}", vector.len())
+            ));
+        }
+        
+        Ok(vector)
+    }
+
     /// Performance monitoring helper - record operation start
     fn start_operation(&self) -> Instant {
         Instant::now()
@@ -333,6 +477,27 @@ impl VexFSFuse {
     ) -> Result<Vec<VectorSearchResult>, FuseVexfsError> {
         let start_time = self.start_operation();
         
+        // Validate input parameters
+        if query_vector.is_empty() {
+            return Err(FuseVexfsError::InvalidVector("Query vector is empty".to_string()));
+        }
+        
+        if query_vector.len() > 10000 {
+            return Err(FuseVexfsError::InvalidVector(
+                format!("Query vector dimension {} exceeds maximum", query_vector.len())
+            ));
+        }
+        
+        if top_k == 0 {
+            return Err(FuseVexfsError::InvalidVector("top_k must be greater than 0".to_string()));
+        }
+        
+        if top_k > 1000 {
+            return Err(FuseVexfsError::InvalidVector(
+                format!("top_k {} exceeds maximum of 1000", top_k)
+            ));
+        }
+        
         // Check stack usage (simplified check)
         let stack_check = [0u8; 512]; // Small allocation to check stack
         if stack_check.len() > 1024 {
@@ -354,57 +519,25 @@ impl VexFSFuse {
             // Use the bridge interface for search
             let search_params = search_params.unwrap_or_default();
             
-            // Use real HNSW search implementation
-            match self.search_vectors(query_vector, top_k) {
-                Ok(file_paths) => {
-                    // Convert file paths to VectorSearchResult format with real distances
-                    let results: Vec<VectorSearchResult> = file_paths.into_iter()
-                        .enumerate()
-                        .map(|(i, path)| {
-                            // Try to get actual distance from HNSW results
-                            // For now, use index-based distance approximation
-                            let distance = 0.1f32 + (i as f32 * 0.1f32); // Increasing distance by rank
-                            let similarity = 1.0f32 - distance; // Convert distance to similarity
-                            
-                            VectorSearchResult {
-                                vector_id: i as u64 + 1,
-                                distance,
-                                similarity,
-                                metadata: Some(VectorMetadata {
-                                    dimensions: 128, // Default dimensions
-                                    data_type: VectorDataType::Float32,
-                                    file_inode: i as u64 + 1,
-                                    compression_type: 0, // No compression
-                                }),
-                                location: Some(VectorLocation {
-                                    start_block: i as u64,
-                                    block_count: 1,
-                                    header: VectorHeader {
-                                        magic: 0x56455846, // "VEXF"
-                                        version: 1,
-                                        vector_id: i as u64 + 1,
-                                        file_inode: i as u64 + 1,
-                                        data_type: VectorDataType::Float32,
-                                        compression: CompressionType::None,
-                                        dimensions: 128,
-                                        original_size: 128 * 4, // 128 floats * 4 bytes
-                                        compressed_size: 128 * 4,
-                                        created_timestamp: 0,
-                                        modified_timestamp: 0,
-                                        checksum: 0,
-                                        flags: 0,
-                                        reserved: [],
-                                    },
-                                }),
-                            }
-                        })
-                        .collect();
-                    Ok(results)
+            // Use the Storage-HNSW bridge for real search operations
+            match self.storage_hnsw_bridge.lock() {
+                Ok(mut bridge) => {
+                    match bridge.search_vectors(&mut context, query_vector, top_k, search_params) {
+                        Ok(results) => {
+                            // Results already contain real distances from HNSW
+                            Ok(results)
+                        }
+                        Err(e) => {
+                            eprintln!("Bridge search failed: {:?}", e);
+                            // Fallback: Use direct HNSW search
+                            self.perform_direct_hnsw_search(query_vector, top_k)
+                        }
+                    }
                 }
-                Err(e) => {
-                    let error = FuseVexfsError::SearchFailed(format!("Search failed: {:?}", e));
+                Err(_) => {
+                    let error = FuseVexfsError::BridgeError("Failed to acquire bridge lock".to_string());
                     self.record_error(&error);
-                    Err(error)
+                    return Err(error);
                 }
             }
         };
@@ -421,6 +554,26 @@ impl VexFSFuse {
         metadata: HashMap<String, String>
     ) -> Result<u64, FuseVexfsError> {
         let start_time = self.start_operation();
+        
+        // Validate input parameters
+        if vector_data.is_empty() {
+            return Err(FuseVexfsError::InvalidVector("Vector data is empty".to_string()));
+        }
+        
+        if vector_data.len() > 10000 {
+            return Err(FuseVexfsError::InvalidVector(
+                format!("Vector dimension {} exceeds maximum", vector_data.len())
+            ));
+        }
+        
+        // Check for NaN or infinite values
+        for &value in vector_data {
+            if !value.is_finite() {
+                return Err(FuseVexfsError::InvalidVector(
+                    "Vector contains NaN or infinite values".to_string()
+                ));
+            }
+        }
 
         // Check stack usage
         let stack_check = [0u8; 512];
@@ -448,8 +601,8 @@ impl VexFSFuse {
                 compression_type: 0, // None
             };
 
-            // Generate vector ID (in a full implementation, this would be managed by the storage system)
-            let vector_id = file_inode; // Simple mapping for now
+            // Generate unique vector ID using atomic counter
+            let vector_id = self.next_vector_id.fetch_add(1, Ordering::SeqCst);
 
             // Use the Storage-HNSW bridge for synchronized vector insertion
             match self.storage_hnsw_bridge.lock() {
@@ -467,6 +620,33 @@ impl VexFSFuse {
                                 if let Some(file) = files.get_mut(&file_inode) {
                                     file.vector = Some(vector_data.to_vec());
                                     file.metadata = metadata;
+                                } else {
+                                    // Create a new file entry for the vector
+                                    let now = system_time_to_timespec(SystemTime::now());
+                                    let file = VexFSFile {
+                                        ino: file_inode,
+                                        name: format!("/vectors/v_{}", vector_id),
+                                        content: Vec::new(),
+                                        metadata: metadata,
+                                        vector: Some(vector_data.to_vec()),
+                                        attr: FileAttr {
+                                            ino: file_inode,
+                                            size: (vector_data.len() * 4) as u64, // f32 is 4 bytes
+                                            blocks: 1,
+                                            atime: now,
+                                            mtime: now,
+                                            ctime: now,
+                                            crtime: now,
+                                            kind: FileType::RegularFile,
+                                            perm: 0o644,
+                                            nlink: 1,
+                                            uid: 1000,
+                                            gid: 1000,
+                                            rdev: 0,
+                                            flags: 0,
+                                        },
+                                    };
+                                    files.insert(file_inode, file);
                                 }
                             }
                             
@@ -548,11 +728,12 @@ impl VexFSFuse {
                 }
             };
 
-            // Mock vector retrieval for FUSE implementation
-            // In a full implementation, this would properly integrate with the storage layer
+            // Integrate with the actual vector storage layer
+            // First, find the file inode associated with this vector ID
+            let file_inode = self.find_inode_for_vector(vector_id)?;
             
-            // Create mock vector data for testing
-            let vector_data: Vec<f32> = (0..128).map(|i| i as f32 * 0.1).collect();
+            // Read the vector data from storage
+            let vector_data = self.read_vector_from_storage(file_inode, vector_id)?;
             
             // Create metadata
             let mut metadata = HashMap::new();
@@ -1098,5 +1279,66 @@ impl VexFSFuse {
         
         eprintln!("Bridge-based search completed: {} results returned", file_paths.len());
         Ok(file_paths)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn create_test_fuse() -> VexFSFuse {
+        VexFSFuse::new().expect("Failed to create test FUSE instance")
+    }
+
+    #[test]
+    fn test_vector_storage_and_retrieval() {
+        let fuse = create_test_fuse();
+        
+        // Create test vector
+        let vector_data: Vec<f32> = (0..128).map(|i| i as f32 * 0.1).collect();
+        let file_inode = 1000;
+        let mut metadata = HashMap::new();
+        metadata.insert("test_key".to_string(), "test_value".to_string());
+        
+        // Store vector
+        let vector_id = fuse.store_vector_enhanced(&vector_data, file_inode, metadata.clone())
+            .expect("Failed to store vector");
+        
+        assert!(vector_id > 0);
+        
+        // Retrieve vector
+        let (retrieved_vector, retrieved_metadata) = fuse.get_vector_enhanced(vector_id)
+            .expect("Failed to retrieve vector");
+        
+        // Verify vector data matches
+        assert_eq!(retrieved_vector.len(), vector_data.len());
+        
+        // Verify metadata
+        assert!(retrieved_metadata.contains_key("vector_id"));
+    }
+
+    #[test]
+    fn test_unique_vector_ids() {
+        let fuse = create_test_fuse();
+        let vector_data: Vec<f32> = vec![1.0; 128];
+        let metadata = HashMap::new();
+        
+        let id1 = fuse.store_vector_enhanced(&vector_data, 1001, metadata.clone())
+            .expect("Failed to store first vector");
+        let id2 = fuse.store_vector_enhanced(&vector_data, 1002, metadata.clone())
+            .expect("Failed to store second vector");
+        
+        assert_ne!(id1, id2, "Vector IDs should be unique");
+    }
+
+    #[test]
+    fn test_error_handling_empty_vector() {
+        let fuse = create_test_fuse();
+        let empty_vector: Vec<f32> = vec![];
+        let metadata = HashMap::new();
+        
+        let result = fuse.store_vector_enhanced(&empty_vector, 1000, metadata);
+        assert!(matches!(result, Err(FuseVexfsError::InvalidVector(_))));
     }
 }
