@@ -55,8 +55,17 @@ static void vexfs_kill_sb(struct super_block *sb)
 {
     printk(KERN_INFO "VexFS: Starting filesystem unmount\n");
     
-    /* Ensure all pending I/O is complete */
-    sync_filesystem(sb);
+    /* Check if sb is valid */
+    if (!sb) {
+        printk(KERN_WARNING "VexFS: kill_sb called with NULL sb\n");
+        return;
+    }
+    
+    /* Only sync if filesystem was successfully mounted */
+    if (sb->s_fs_info) {
+        /* Ensure all pending I/O is complete */
+        sync_filesystem(sb);
+    }
     
     /* Ensure proper cleanup */
     sb->s_flags |= SB_ACTIVE;

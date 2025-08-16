@@ -340,8 +340,15 @@ static void vexfs_put_super(struct super_block *sb)
  */
 int vexfs_sync_fs(struct super_block *sb, int wait)
 {
-    struct vexfs_sb_info *sbi = VEXFS_SB(sb);
+    struct vexfs_sb_info *sbi;
     
+    /* Check if sb is NULL first */
+    if (!sb) {
+        printk(KERN_WARNING "VexFS: sync_fs called with NULL sb\n");
+        return 0;
+    }
+    
+    sbi = VEXFS_SB(sb);
     if (!sbi) {
         printk(KERN_WARNING "VexFS: sync_fs called with NULL sb_info\n");
         return 0;
