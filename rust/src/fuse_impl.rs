@@ -149,7 +149,7 @@ impl VexFSFuse {
             flags: 0,
         };
         
-        let root_file = VexFSFile {
+        let mut root_file = VexFSFile {
             ino: 1,
             name: "/".to_string(),
             parent: 1,  // Root is its own parent
@@ -160,7 +160,45 @@ impl VexFSFuse {
             children: Vec::new(),
         };
         
+        // Create special _vexfs control directory
+        let vexfs_dir_ino = 2;
+        let vexfs_dir = VexFSFile {
+            ino: vexfs_dir_ino,
+            name: "_vexfs".to_string(),
+            parent: 1,
+            content: Vec::new(),
+            metadata: HashMap::new(),
+            vector: None,
+            attr: FileAttr {
+                ino: vexfs_dir_ino,
+                size: 0,
+                blocks: 0,
+                atime: now,
+                mtime: now,
+                ctime: now,
+                crtime: now,
+                kind: FileType::Directory,
+                perm: 0o755,
+                nlink: 2,
+                uid: 1000,
+                gid: 1000,
+                rdev: 0,
+                flags: 0,
+            },
+            children: Vec::new(),
+        };
+        
+        // Add _vexfs to root's children
+        root_file.children.push(vexfs_dir_ino);
+        
         files.insert(1, root_file);
+        files.insert(vexfs_dir_ino, vexfs_dir);
+        parent_name_to_ino.insert((1, "_vexfs".to_string()), vexfs_dir_ino);
+        
+        // Create special control files
+        let next_ino = 3;
+        Self::create_control_files(&mut files, &mut parent_name_to_ino, vexfs_dir_ino, &mut next_ino.clone());
+        
         // Root doesn't need parent_name_to_ino entry
         
         // ENHANCED INITIALIZATION - Using stack-safe vector storage manager with HNSW bridge
@@ -264,7 +302,7 @@ impl VexFSFuse {
         Ok(VexFSFuse {
             files: Arc::new(Mutex::new(files)),
             parent_name_to_ino: Arc::new(Mutex::new(parent_name_to_ino)),
-            next_ino: Arc::new(Mutex::new(2)),
+            next_ino: Arc::new(Mutex::new(next_ino + 1)),
             vector_storage,
             hnsw_graph,
             vector_metrics,
@@ -282,6 +320,154 @@ impl VexFSFuse {
         let ino = *next_ino;
         *next_ino += 1;
         ino
+    }
+    
+    /// Create special control files in _vexfs directory
+    fn create_control_files(
+        files: &mut HashMap<u64, VexFSFile>,
+        parent_name_to_ino: &mut HashMap<(u64, String), u64>,
+        parent_ino: u64,
+        next_ino: &mut u64
+    ) {
+        let now = system_time_to_timespec(SystemTime::now());
+        
+        // Create control files
+        let control_files = vec![
+            ("control", "# VexFS Control File\nindex.auto_rebuild=false\nsearch.algorithm=hnsw\n"),
+            ("stats", "vectors_stored: 0\nindex_size: 0\ndimensions: 0\nsearch_operations: 0\n"),
+            ("search", "# Write vector here to search\n"),
+        ];
+        
+        for (name, initial_content) in control_files {
+            let ino = *next_ino;
+            *next_ino += 1;
+            
+            let file = VexFSFile {
+                ino,
+                name: format!("_vexfs/{}", name),
+                parent: parent_ino,
+                content: initial_content.as_bytes().to_vec(),
+                metadata: HashMap::new(),
+                vector: None,
+                attr: FileAttr {
+                    ino,
+                    size: initial_content.len() as u64,
+                    blocks: 1,
+                    atime: now,
+                    mtime: now,
+                    ctime: now,
+                    crtime: now,
+                    kind: FileType::RegularFile,
+                    perm: 0o644,
+                    nlink: 1,
+                    uid: 1000,
+                    gid: 1000,
+                    rdev: 0,
+                    flags: 0,
+                },
+                children: Vec::new(),
+            };
+            
+            files.insert(ino, file);
+            parent_name_to_ino.insert((parent_ino, name.to_string()), ino);
+            
+            // Add to parent's children
+            if let Some(parent) = files.get_mut(&parent_ino) {
+                parent.children.push(ino);
+            }
+        }
+    }
+    
+    /// Handle writes to .search files
+    fn handle_search_file_write(&self, file_ino: u64, content: &[u8]) {
+        if let Ok(content_str) = String::from_utf8(content.to_vec()) {
+            // Parse search query format
+            let mut vector: Option<Vec<f32>> = None;
+            let mut k = 5usize;
+            
+            for line in content_str.lines() {
+                if let Some(vec_str) = line.strip_prefix("vector:") {
+                    if let Ok(v) = self.parse_vector(vec_str.trim()) {
+                        vector = Some(v);
+                    }
+                } else if let Some(k_str) = line.strip_prefix("k:") {
+                    if let Ok(parsed_k) = k_str.trim().parse::<usize>() {
+                        k = parsed_k;
+                    }
+                }
+            }
+            
+            if let Some(query_vector) = vector {
+                // Perform search and store results
+                match self.search_vectors(&query_vector, k) {
+                    Ok(results) => {
+                        // Create results file
+                        let results_content = format_search_results(&results);
+                        self.create_search_results_file(file_ino, results_content);
+                    }
+                    Err(e) => {
+                        eprintln!("Search failed: {:?}", e);
+                    }
+                }
+            }
+        }
+    }
+    
+    /// Handle writes to global search interface
+    fn handle_global_search_write(&self, content: &[u8]) {
+        if let Ok(content_str) = String::from_utf8(content.to_vec()) {
+            if let Ok(vector) = self.parse_vector(content_str.trim()) {
+                match self.search_vectors(&vector, 10) {
+                    Ok(results) => {
+                        // Update the search file with results
+                        let results_content = format_search_results(&results);
+                        self.update_control_file("search", &results_content);
+                    }
+                    Err(e) => {
+                        eprintln!("Global search failed: {:?}", e);
+                    }
+                }
+            }
+        }
+    }
+    
+    /// Handle writes to control file
+    fn handle_control_file_write(&self, content: &[u8]) {
+        if let Ok(content_str) = String::from_utf8(content.to_vec()) {
+            // Parse configuration updates
+            for line in content_str.lines() {
+                if let Some((key, value)) = line.split_once('=') {
+                    self.update_configuration(key.trim(), value.trim());
+                }
+            }
+        }
+    }
+    
+    /// Create search results file
+    fn create_search_results_file(&self, search_file_ino: u64, content: String) {
+        // This would create a .search.results file with the search results
+        // For now, just log the results
+        eprintln!("Search results: {}", content);
+    }
+    
+    /// Update control file content
+    fn update_control_file(&self, name: &str, content: &str) {
+        let mut files = self.files.lock().unwrap();
+        for file in files.values_mut() {
+            if file.name == format!("_vexfs/{}", name) {
+                file.content = content.as_bytes().to_vec();
+                file.attr.size = content.len() as u64;
+                file.attr.mtime = system_time_to_timespec(SystemTime::now());
+                break;
+            }
+        }
+    }
+    
+    /// Update system configuration
+    fn update_configuration(&self, key: &str, value: &str) {
+        eprintln!("Configuration update: {} = {}", key, value);
+        // Here we would update actual system configuration
+        // For now, just log the update
     }
     
     fn create_file_attr(ino: u64, size: u64, kind: FileType) -> FileAttr {
@@ -314,6 +500,23 @@ fn system_time_to_timespec(time: SystemTime) -> Timespec {
         },
         Err(_) => Timespec { sec: 0, nsec: 0 }, // Fallback for times before UNIX_EPOCH
     }
+}
+
+// Helper function to format search results
+fn format_search_results(results: &[String]) -> String {
+    if results.is_empty() {
+        return "No results found\n".to_string();
+    }
+    
+    let mut output = String::new();
+    output.push_str("# Search Results\n");
+    output.push_str(&format!("Found {} similar vectors:\n\n", results.len()));
+    
+    for (i, path) in results.iter().enumerate() {
+        output.push_str(&format!("{}. {}\n", i + 1, path));
+    }
+    
+    output
 }
 
 impl VexFSFuse {
@@ -954,8 +1157,17 @@ impl Filesystem for VexFSFuse {
             file.attr.size = file.content.len() as u64;
             file.attr.mtime = system_time_to_timespec(SystemTime::now());
             
-            // Enhanced vector processing with performance monitoring
-            if file.name.ends_with(".vec") {
+            // Handle special file types
+            if file.name.ends_with(".search") {
+                // Handle search query files
+                self.handle_search_file_write(file.ino, &file.content);
+            } else if file.name == "_vexfs/search" {
+                // Handle global search interface
+                self.handle_global_search_write(&file.content);
+            } else if file.name == "_vexfs/control" {
+                // Handle control file updates
+                self.handle_control_file_write(&file.content);
+            } else if file.name.ends_with(".vec") {
                 if let Ok(content_str) = String::from_utf8(file.content.clone()) {
                     match self.parse_vector(&content_str) {
                         Ok(vector) => {
