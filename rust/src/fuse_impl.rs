@@ -2,7 +2,7 @@ use fuse::{
     FileAttr, FileType, Filesystem, Request, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry,
     ReplyWrite, ReplyCreate, ReplyOpen, ReplyEmpty, ReplyStatfs,
 };
-use libc::{ENOENT, ENOSYS, ENOTDIR, EEXIST, EINVAL, EIO, EACCES, EPERM, ENOMEM};
+use libc::{ENOENT, ENOSYS, ENOTDIR, EEXIST, EINVAL, EIO, EACCES, EPERM, ENOMEM, ENOTEMPTY};
 #[cfg(feature = "std")]
 use std::collections::HashMap;
 #[cfg(feature = "std")]
@@ -50,10 +50,12 @@ const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
 struct VexFSFile {
     ino: u64,
     name: String,
+    parent: u64,  // Parent directory inode
     content: Vec<u8>,
     metadata: HashMap<String, String>,
     vector: Option<Vec<f32>>,
     attr: FileAttr,
+    children: Vec<u64>,  // For directories: child inodes
 }
 
 /// Performance metrics for FUSE operations
@@ -100,7 +102,8 @@ impl From<FuseVexfsError> for i32 {
 
 pub struct VexFSFuse {
     files: Arc<Mutex<HashMap<u64, VexFSFile>>>,
-    name_to_ino: Arc<Mutex<HashMap<String, u64>>>,
+    // Changed to store (parent_ino, name) -> ino mapping for proper hierarchy
+    parent_name_to_ino: Arc<Mutex<HashMap<(u64, String), u64>>>,
     next_ino: Arc<Mutex<u64>>,
     // Enhanced vector storage manager with HNSW bridge integration
     vector_storage: Arc<OptimizedVectorStorageManager>,
@@ -125,7 +128,7 @@ pub struct VexFSFuse {
 impl VexFSFuse {
     pub fn new() -> VexfsResult<Self> {
         let mut files = HashMap::new();
-        let mut name_to_ino = HashMap::new();
+        let mut parent_name_to_ino = HashMap::new();
         
         // Create root directory
         let now = system_time_to_timespec(SystemTime::now());
@@ -149,14 +152,16 @@ impl VexFSFuse {
         let root_file = VexFSFile {
             ino: 1,
             name: "/".to_string(),
+            parent: 1,  // Root is its own parent
             content: Vec::new(),
             metadata: HashMap::new(),
             vector: None,
             attr: root_attr,
+            children: Vec::new(),
         };
         
         files.insert(1, root_file);
-        name_to_ino.insert("/".to_string(), 1);
+        // Root doesn't need parent_name_to_ino entry
         
         // ENHANCED INITIALIZATION - Using stack-safe vector storage manager with HNSW bridge
         eprintln!("VexFSFuse: Initializing with optimized vector storage and HNSW bridge...");
@@ -258,7 +263,7 @@ impl VexFSFuse {
         
         Ok(VexFSFuse {
             files: Arc::new(Mutex::new(files)),
-            name_to_ino: Arc::new(Mutex::new(name_to_ino)),
+            parent_name_to_ino: Arc::new(Mutex::new(parent_name_to_ino)),
             next_ino: Arc::new(Mutex::new(2)),
             vector_storage,
             hnsw_graph,
@@ -626,6 +631,7 @@ impl VexFSFuse {
                                     let file = VexFSFile {
                                         ino: file_inode,
                                         name: format!("/vectors/v_{}", vector_id),
+                                        parent: 1,  // Vector files are stored in root for now
                                         content: Vec::new(),
                                         metadata: metadata,
                                         vector: Some(vector_data.to_vec()),
@@ -645,6 +651,7 @@ impl VexFSFuse {
                                             rdev: 0,
                                             flags: 0,
                                         },
+                                        children: Vec::new(),  // Regular files don't have children
                                     };
                                     files.insert(file_inode, file);
                                 }
@@ -884,12 +891,13 @@ impl VexFSFuse {
 
 impl Filesystem for VexFSFuse {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        let files = self.files.lock().unwrap();
         let name_str = name.to_string_lossy().to_string();
         
-        // Look for file in parent directory
-        for file in files.values() {
-            if file.name == name_str {
+        // Look up the inode using parent and name
+        let parent_name_to_ino = self.parent_name_to_ino.lock().unwrap();
+        if let Some(&ino) = parent_name_to_ino.get(&(parent, name_str.clone())) {
+            let files = self.files.lock().unwrap();
+            if let Some(file) = files.get(&ino) {
                 reply.entry(&TTL, &file.attr, 0);
                 return;
             }
@@ -990,27 +998,45 @@ impl Filesystem for VexFSFuse {
     
     fn create(&mut self, _req: &Request, parent: u64, name: &OsStr, _mode: u32, _flags: u32, reply: ReplyCreate) {
         let name_str = name.to_string_lossy().to_string();
-        let ino = self.get_next_ino();
         
+        // Check if file already exists in this directory
+        {
+            let parent_name_to_ino = self.parent_name_to_ino.lock().unwrap();
+            if parent_name_to_ino.contains_key(&(parent, name_str.clone())) {
+                reply.error(EEXIST);
+                return;
+            }
+        }
+        
+        let ino = self.get_next_ino();
         let attr = Self::create_file_attr(ino, 0, FileType::RegularFile);
         
         let file = VexFSFile {
             ino,
             name: name_str.clone(),
+            parent,
             content: Vec::new(),
             metadata: HashMap::new(),
             vector: None,
             attr,
+            children: Vec::new(),
         };
         
+        // Insert the file
         {
             let mut files = self.files.lock().unwrap();
             files.insert(ino, file);
+            
+            // Add to parent's children list
+            if let Some(parent_file) = files.get_mut(&parent) {
+                parent_file.children.push(ino);
+            }
         }
         
+        // Update the parent-name mapping
         {
-            let mut name_to_ino = self.name_to_ino.lock().unwrap();
-            name_to_ino.insert(name_str, ino);
+            let mut parent_name_to_ino = self.parent_name_to_ino.lock().unwrap();
+            parent_name_to_ino.insert((parent, name_str), ino);
         }
         
         reply.created(&TTL, &attr, 0, 0, 0);
@@ -1019,20 +1045,35 @@ impl Filesystem for VexFSFuse {
     fn readdir(&mut self, _req: &Request, ino: u64, _fh: u64, offset: i64, mut reply: ReplyDirectory) {
         let files = self.files.lock().unwrap();
         
-        if ino == 1 {
-            // Root directory
-            if offset == 0 {
-                reply.add(1, 0, FileType::Directory, ".");
-                reply.add(1, 1, FileType::Directory, "..");
-                
-                let mut entry_offset = 2;
-                for file in files.values() {
-                    if file.ino != 1 {
-                        reply.add(file.ino, entry_offset, file.attr.kind, &file.name);
-                        entry_offset += 1;
-                    }
+        // Get the directory being read
+        if let Some(dir) = files.get(&ino) {
+            if dir.attr.kind != FileType::Directory {
+                reply.error(ENOTDIR);
+                return;
+            }
+            
+            let mut entries = vec![];
+            
+            // Add . and .. entries
+            entries.push((ino, FileType::Directory, ".".to_string()));
+            entries.push((dir.parent, FileType::Directory, "..".to_string()));
+            
+            // Add all children
+            for &child_ino in &dir.children {
+                if let Some(child) = files.get(&child_ino) {
+                    entries.push((child_ino, child.attr.kind, child.name.clone()));
                 }
             }
+            
+            // Send entries starting from offset
+            for (i, (entry_ino, kind, name)) in entries.iter().enumerate().skip(offset as usize) {
+                if reply.add(*entry_ino, (i + 1) as i64, *kind, name) {
+                    break;
+                }
+            }
+        } else {
+            reply.error(ENOENT);
+            return;
         }
         
         reply.ok();
@@ -1082,6 +1123,16 @@ impl Filesystem for VexFSFuse {
     fn mknod(&mut self, _req: &Request, parent: u64, name: &OsStr, mode: u32,
              _rdev: u32, reply: ReplyEntry) {
         let name_str = name.to_string_lossy().to_string();
+        
+        // Check if file already exists in this directory
+        {
+            let parent_name_to_ino = self.parent_name_to_ino.lock().unwrap();
+            if parent_name_to_ino.contains_key(&(parent, name_str.clone())) {
+                reply.error(EEXIST);
+                return;
+            }
+        }
+        
         let ino = self.get_next_ino();
         
         // Determine file type from mode
@@ -1096,20 +1147,29 @@ impl Filesystem for VexFSFuse {
         let file = VexFSFile {
             ino,
             name: name_str.clone(),
+            parent,
             content: Vec::new(),
             metadata: HashMap::new(),
             vector: None,
             attr,
+            children: Vec::new(),
         };
         
+        // Insert the file
         {
             let mut files = self.files.lock().unwrap();
             files.insert(ino, file);
+            
+            // Add to parent's children list
+            if let Some(parent_file) = files.get_mut(&parent) {
+                parent_file.children.push(ino);
+            }
         }
         
+        // Update the parent-name mapping
         {
-            let mut name_to_ino = self.name_to_ino.lock().unwrap();
-            name_to_ino.insert(name_str, ino);
+            let mut parent_name_to_ino = self.parent_name_to_ino.lock().unwrap();
+            parent_name_to_ino.insert((parent, name_str), ino);
         }
         
         reply.entry(&TTL, &attr, 0);
@@ -1117,27 +1177,45 @@ impl Filesystem for VexFSFuse {
     
     fn mkdir(&mut self, _req: &Request, parent: u64, name: &OsStr, mode: u32, reply: ReplyEntry) {
         let name_str = name.to_string_lossy().to_string();
-        let ino = self.get_next_ino();
         
+        // Check if directory already exists in this parent
+        {
+            let parent_name_to_ino = self.parent_name_to_ino.lock().unwrap();
+            if parent_name_to_ino.contains_key(&(parent, name_str.clone())) {
+                reply.error(EEXIST);
+                return;
+            }
+        }
+        
+        let ino = self.get_next_ino();
         let attr = Self::create_file_attr(ino, 0, FileType::Directory);
         
         let file = VexFSFile {
             ino,
             name: name_str.clone(),
+            parent,
             content: Vec::new(),
             metadata: HashMap::new(),
             vector: None,
             attr,
+            children: Vec::new(),
         };
         
+        // Insert the directory
         {
             let mut files = self.files.lock().unwrap();
             files.insert(ino, file);
+            
+            // Add to parent's children list
+            if let Some(parent_file) = files.get_mut(&parent) {
+                parent_file.children.push(ino);
+            }
         }
         
+        // Update the parent-name mapping
         {
-            let mut name_to_ino = self.name_to_ino.lock().unwrap();
-            name_to_ino.insert(name_str, ino);
+            let mut parent_name_to_ino = self.parent_name_to_ino.lock().unwrap();
+            parent_name_to_ino.insert((parent, name_str), ino);
         }
         
         reply.entry(&TTL, &attr, 0);
@@ -1146,20 +1224,41 @@ impl Filesystem for VexFSFuse {
     fn unlink(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEmpty) {
         let name_str = name.to_string_lossy().to_string();
         
+        // Look up the file to remove
         let ino_to_remove = {
-            let name_to_ino = self.name_to_ino.lock().unwrap();
-            name_to_ino.get(&name_str).copied()
+            let parent_name_to_ino = self.parent_name_to_ino.lock().unwrap();
+            parent_name_to_ino.get(&(parent, name_str.clone())).copied()
         };
         
         if let Some(ino) = ino_to_remove {
+            // Check if it's a regular file (not a directory)
+            {
+                let files = self.files.lock().unwrap();
+                if let Some(file) = files.get(&ino) {
+                    if file.attr.kind == FileType::Directory {
+                        reply.error(EPERM);  // Cannot unlink a directory
+                        return;
+                    }
+                }
+            }
+            
+            // Remove from parent's children list and delete the file
             {
                 let mut files = self.files.lock().unwrap();
+                
+                // Remove from parent's children
+                if let Some(parent_file) = files.get_mut(&parent) {
+                    parent_file.children.retain(|&child| child != ino);
+                }
+                
+                // Remove the file itself
                 files.remove(&ino);
             }
             
+            // Remove from parent-name mapping
             {
-                let mut name_to_ino = self.name_to_ino.lock().unwrap();
-                name_to_ino.remove(&name_str);
+                let mut parent_name_to_ino = self.parent_name_to_ino.lock().unwrap();
+                parent_name_to_ino.remove(&(parent, name_str));
             }
             
             reply.ok();
@@ -1169,8 +1268,56 @@ impl Filesystem for VexFSFuse {
     }
     
     fn rmdir(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEmpty) {
-        // For simplicity, treat rmdir the same as unlink
-        self.unlink(_req, parent, name, reply);
+        let name_str = name.to_string_lossy().to_string();
+        
+        // Look up the directory to remove
+        let ino_to_remove = {
+            let parent_name_to_ino = self.parent_name_to_ino.lock().unwrap();
+            parent_name_to_ino.get(&(parent, name_str.clone())).copied()
+        };
+        
+        if let Some(ino) = ino_to_remove {
+            // Check if it's a directory and if it's empty
+            {
+                let files = self.files.lock().unwrap();
+                if let Some(dir) = files.get(&ino) {
+                    if dir.attr.kind != FileType::Directory {
+                        reply.error(ENOTDIR);  // Not a directory
+                        return;
+                    }
+                    if !dir.children.is_empty() {
+                        reply.error(ENOTEMPTY);  // Directory not empty
+                        return;
+                    }
+                } else {
+                    reply.error(ENOENT);
+                    return;
+                }
+            }
+            
+            // Remove from parent's children list and delete the directory
+            {
+                let mut files = self.files.lock().unwrap();
+                
+                // Remove from parent's children
+                if let Some(parent_file) = files.get_mut(&parent) {
+                    parent_file.children.retain(|&child| child != ino);
+                }
+                
+                // Remove the directory itself
+                files.remove(&ino);
+            }
+            
+            // Remove from parent-name mapping
+            {
+                let mut parent_name_to_ino = self.parent_name_to_ino.lock().unwrap();
+                parent_name_to_ino.remove(&(parent, name_str));
+            }
+            
+            reply.ok();
+        } else {
+            reply.error(ENOENT);
+        }
     }
     
     fn open(&mut self, _req: &Request, ino: u64, flags: u32, reply: ReplyOpen) {
