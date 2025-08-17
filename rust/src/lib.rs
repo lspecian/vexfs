@@ -62,7 +62,7 @@ pub mod security;
 pub mod ffi;
 
 // Authentication module for API server
-#[cfg(not(feature = "kernel"))]
+#[cfg(all(not(feature = "kernel"), feature = "server"))]
 pub mod auth;
 
 // Re-export shared domain components at crate level for easy access

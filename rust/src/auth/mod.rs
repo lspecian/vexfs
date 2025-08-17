@@ -2,6 +2,7 @@
 //! 
 //! Provides JWT-based authentication with API keys and role-based access control
 
+#[cfg(feature = "server")]
 use axum::{
     extract::{FromRequestParts},
     http::{request::Parts, StatusCode},
@@ -9,6 +10,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+#[cfg(feature = "server")]
 use chrono::{Duration, Utc};
 
 /// JWT Claims structure
