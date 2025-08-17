@@ -309,6 +309,13 @@ pub mod health_endpoint;
 #[cfg(all(feature = "fuse_support", not(feature = "kernel")))]
 pub mod fuse_with_monitoring;
 
+// FUSE-VexGraph integration
+#[cfg(all(feature = "fuse_support", feature = "vexgraph", not(feature = "kernel")))]
+pub mod fuse_vexgraph_bridge;
+
+#[cfg(all(feature = "fuse_support", feature = "vexgraph", not(feature = "kernel")))]
+pub mod fuse_vexgraph_integrated;
+
 // Conditional compilation for userspace-only modules
 #[cfg(not(feature = "kernel"))]
 #[path = "vector_handlers_stub.rs"]
