@@ -316,6 +316,13 @@ pub mod fuse_vexgraph_bridge;
 #[cfg(all(feature = "fuse_support", feature = "vexgraph", not(feature = "kernel")))]
 pub mod fuse_vexgraph_integrated;
 
+// Comprehensive error handling
+#[cfg(not(feature = "kernel"))]
+pub mod error_handling;
+
+#[cfg(not(feature = "kernel"))]
+pub mod panic_handler;
+
 // Conditional compilation for userspace-only modules
 #[cfg(not(feature = "kernel"))]
 #[path = "vector_handlers_stub.rs"]
