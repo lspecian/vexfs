@@ -69,7 +69,7 @@ remove_redundant() {
         "rust/src/query_monitor.rs"
         
         # Unused features
-        "rust/src/vexgraph"
+        # KEEP: "rust/src/vexgraph"  # Graph DB to be implemented
         "rust/src/domain"
         "rust/src/ipc"
         "rust/src/commands"

@@ -80,7 +80,7 @@ docs/FINAL_*.md                # Old completion reports
 rust/src/anns/                 # Duplicate of vector_handlers
 rust/src/enhanced_vector_*.rs  # Overlaps with vector_*.rs
 rust/src/hybrid_*.rs           # Premature optimization
-rust/src/query_*.rs            # Unused query planning
+rust/src/query_*.rs            # Unused query planning (except for VexGraph)
 
 # Duplicate IPC mechanisms
 rust/src/ipc/                  # Unused in favor of direct API
@@ -88,7 +88,7 @@ rust/src/commands/             # CLI commands never implemented
 
 # Overly complex abstractions
 rust/src/domain/               # Over-engineered domain model
-rust/src/vexgraph/             # Graph DB features not needed
+# KEEP: rust/src/vexgraph/     # Graph DB features - TO BE IMPLEMENTED
 ```
 
 ### 3. Test & Example Code (Consolidate)
