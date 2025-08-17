@@ -61,6 +61,10 @@ pub mod security;
 // FFI module for C integration - REORGANIZED
 pub mod ffi;
 
+// Authentication module for API server
+#[cfg(not(feature = "kernel"))]
+pub mod auth;
+
 // Re-export shared domain components at crate level for easy access
 pub use shared::{
     errors::{VexfsError, VexfsResult},

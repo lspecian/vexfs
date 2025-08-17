@@ -1,0 +1,256 @@
+From: VexFS Development Team
+Date: 2025-01-16
+Subject: Fix NULL pointer dereferences and improve safety checks
+
+This patch addresses multiple NULL pointer dereference issues found in the
+VexFS kernel module that can cause system crashes.
+
+---
+ kernel_module/core/file.c         |  20 +++++++++++++++++---
+ kernel_module/core/inode.c        |  18 ++++++++++++++++--
+ kernel_module/core/dir.c          |  15 +++++++++++++--
+ kernel_module/core/superblock.c   |  25 +++++++++++++++++++++----
+ kernel_module/core/block.c        |  12 ++++++++++--
+ 5 files changed, 77 insertions(+), 13 deletions(-)
+
+diff --git a/kernel_module/core/file.c b/kernel_module/core/file.c
+index 1234567..abcdef0 100644
+--- a/kernel_module/core/file.c
++++ b/kernel_module/core/file.c
+@@ -143,10 +143,16 @@ static int vexfs_get_block(struct inode *inode, sector_t iblock,
+     /* CRITICAL DEBUG: Check if inode is valid */
+     if (!inode) {
+         printk(KERN_ALERT "vexfs_get_block: ERROR - inode is NULL!\n");
++        BUG();
+         return -EINVAL;
+     }
+     
++    /* Check if inode->i_sb is valid */
++    if (!inode->i_sb || !inode->i_sb->s_fs_info) {
++        printk(KERN_ALERT "vexfs_get_block: ERROR - superblock or fs_info is NULL!\n");
++        return -EINVAL;
++    }
++    
+     /* CRITICAL DEBUG: Check if buffer_head is valid */
+     if (!bh) {
+         printk(KERN_ALERT "vexfs_get_block: ERROR - buffer_head is NULL!\n");
+@@ -155,11 +161,19 @@ static int vexfs_get_block(struct inode *inode, sector_t iblock,
+     
+     printk(KERN_DEBUG "vexfs_get_block: called for inode %lu, block %llu, create=%d\n",
+            inode->i_ino, (unsigned long long)iblock, create);
++           
++    /* Validate VexFS inode */
++    vi = VEXFS_INODE(inode);
++    if (!vi) {
++        printk(KERN_ALERT "vexfs_get_block: ERROR - VEXFS_INODE returned NULL!\n");
++        return -EINVAL;
++    }
+ 
+     /* Check if block is within direct blocks range */
+-    vi = VEXFS_INODE(inode);
+-    if (iblock < VEXFS_DIRECT_BLOCKS) {
+-        phys_block = vi->i_blocks[iblock];
++    if (iblock < VEXFS_DIRECT_BLOCKS && iblock < vi->i_block_count) {
++        if (vi->i_blocks) {
++            phys_block = vi->i_blocks[iblock];
++        }
+     }
+ 
+     if (!phys_block && create) {
+diff --git a/kernel_module/core/inode.c b/kernel_module/core/inode.c
+index 1234567..abcdef0 100644
+--- a/kernel_module/core/inode.c
++++ b/kernel_module/core/inode.c
+@@ -78,8 +78,14 @@ struct inode *vexfs_iget(struct super_block *sb, unsigned long ino)
+     struct vexfs_inode_info *vi;
+     int i;
+ 
+-    if (!inode)
++    if (!sb || !sb->s_fs_info) {
++        printk(KERN_ERR "VexFS: vexfs_iget called with invalid superblock\n");
++        return ERR_PTR(-EINVAL);
++    }
++    
++    if (!inode) {
+         return ERR_PTR(-ENOMEM);
++    }
+ 
+     vi = VEXFS_INODE(inode);
+     sbi = VEXFS_SB(sb);
+@@ -102,6 +108,11 @@ struct inode *vexfs_iget(struct super_block *sb, unsigned long ino)
+     
+     bh = sb_bread(sb, block_num);
+     if (!bh) {
++        printk(KERN_ERR "VexFS: Failed to read inode block %lu for inode %lu\n",
++               block_num, ino);
++        iget_failed(inode);
++        return ERR_PTR(-EIO);
++    }
+ 
+     disk_inode = (struct vexfs_disk_inode *)((char *)bh->b_data + offset);
+ 
+@@ -317,6 +328,11 @@ int vexfs_write_inode(struct inode *inode, struct writeback_control *wbc)
+     struct buffer_head *bh;
+     int err = 0;
+ 
++    if (!inode || !inode->i_sb || !inode->i_sb->s_fs_info) {
++        printk(KERN_ERR "VexFS: write_inode called with invalid inode\n");
++        return -EINVAL;
++    }
++
+     vi = VEXFS_INODE(inode);
+     sbi = VEXFS_SB(inode->i_sb);
+ 
+diff --git a/kernel_module/core/dir.c b/kernel_module/core/dir.c
+index 1234567..abcdef0 100644
+--- a/kernel_module/core/dir.c
++++ b/kernel_module/core/dir.c
+@@ -85,6 +85,12 @@ static struct buffer_head *vexfs_get_dir_block(struct inode *dir, int create)
+     struct vexfs_sb_info *sbi = VEXFS_SB(dir->i_sb);
+     unsigned int block;
+ 
++    /* Safety checks */
++    if (!dir || !dir->i_sb || !dir->i_sb->s_fs_info) {
++        printk(KERN_ERR "VexFS: get_dir_block called with invalid inode\n");
++        return NULL;
++    }
++
+     printk(KERN_DEBUG "VexFS: vexfs_get_dir_block: inode %lu, i_block_count=%u, i_blocks[0]=%u, create=%d\n",
+            dir->i_ino, vi->i_block_count, vi->i_blocks[0], create);
+ 
+@@ -131,6 +137,11 @@ static int vexfs_find_entry(struct inode *dir, const struct qstr *child,
+     struct buffer_head *bh;
+     struct vexfs_dir_entry *de;
+ 
++    if (!dir || !child || !res_dir_entry) {
++        printk(KERN_ERR "VexFS: find_entry called with NULL parameters\n");
++        return -EINVAL;
++    }
++
+     bh = vexfs_get_dir_block(dir, 0);
+     if (!bh) {
+         return -EIO;
+@@ -172,6 +183,11 @@ static int vexfs_add_entry(struct inode *dir, const struct qstr *child,
+     int found_space = 0;
+     size_t rec_len, name_len;
+ 
++    if (!dir || !child || child->len > VEXFS_NAME_LEN) {
++        printk(KERN_ERR "VexFS: add_entry called with invalid parameters\n");
++        return -EINVAL;
++    }
++
+     bh = vexfs_get_dir_block(dir, 1);
+     if (!bh) {
+         return -EIO;
+diff --git a/kernel_module/core/superblock.c b/kernel_module/core/superblock.c
+index 1234567..abcdef0 100644
+--- a/kernel_module/core/superblock.c
++++ b/kernel_module/core/superblock.c
+@@ -53,6 +53,11 @@ int vexfs_fill_super(struct super_block *sb, void *data, int silent)
+     struct inode *root_inode;
+     int ret = 0;
+ 
++    if (!sb) {
++        printk(KERN_ERR "VexFS: fill_super called with NULL superblock\n");
++        return -EINVAL;
++    }
++
+     printk(KERN_INFO "VexFS: Filling superblock for device %s\n",
+            sb->s_bdev ? sb->s_bdev->bd_disk->disk_name : "unknown");
+ 
+@@ -62,6 +67,7 @@ int vexfs_fill_super(struct super_block *sb, void *data, int silent)
+         return -ENOMEM;
+     }
+ 
++    memset(sbi, 0, sizeof(*sbi));
+     sb->s_fs_info = sbi;
+ 
+     /* Set blocksize */
+@@ -213,8 +219,14 @@ struct inode *vexfs_alloc_inode(struct super_block *sb)
+ {
+     struct vexfs_inode_info *vi;
+ 
++    if (!vexfs_inode_cachep) {
++        printk(KERN_ERR "VexFS: inode cache not initialized\n");
++        return NULL;
++    }
++
+     vi = kmem_cache_alloc(vexfs_inode_cachep, GFP_KERNEL);
+     if (!vi)
+         return NULL;
++    memset(vi, 0, sizeof(*vi));
+ 
+     inode_init_once(&vi->vfs_inode);
+     
+@@ -234,6 +246,11 @@ struct inode *vexfs_alloc_inode(struct super_block *sb)
+  */
+ void vexfs_destroy_inode(struct inode *inode)
+ {
++    if (!inode) {
++        printk(KERN_WARNING "VexFS: destroy_inode called with NULL inode\n");
++        return;
++    }
++
+     struct vexfs_inode_info *vi = VEXFS_INODE(inode);
+     
+     printk(KERN_DEBUG "VexFS: Destroying inode %lu (nlink=%u)\n",
+@@ -346,12 +363,17 @@ int vexfs_sync_fs(struct super_block *sb, int wait)
+     /* Check if sb is NULL first */
+     if (!sb) {
+         printk(KERN_WARNING "VexFS: sync_fs called with NULL sb\n");
+-        return 0;
++        return -EINVAL;
+     }
+ 
+     struct vexfs_sb_info *sbi = VEXFS_SB(sb);
+     if (!sbi) {
+         printk(KERN_WARNING "VexFS: sync_fs called with NULL sb_info\n");
++        return -EINVAL;
++    }
++    
++    if (!sbi->sb_bh) {
++        printk(KERN_WARNING "VexFS: sync_fs called but sb_bh is NULL\n");
+         return 0;
+     }
+ 
+diff --git a/kernel_module/core/block.c b/kernel_module/core/block.c
+index 1234567..abcdef0 100644
+--- a/kernel_module/core/block.c
++++ b/kernel_module/core/block.c
+@@ -29,6 +29,11 @@ unsigned int vexfs_alloc_block(struct super_block *sb)
+     unsigned int bit, block;
+     struct buffer_head *bitmap_bh;
+ 
++    if (!sb || !sb->s_fs_info) {
++        printk(KERN_ERR "VexFS: alloc_block called with invalid superblock\n");
++        return 0;
++    }
++
+     sbi = VEXFS_SB(sb);
+     first_data_block = le32_to_cpu(sbi->sb->s_first_data_block);
+ 
+@@ -83,6 +88,11 @@ void vexfs_free_block(struct super_block *sb, unsigned int block)
+     struct buffer_head *bitmap_bh;
+     unsigned int bit;
+ 
++    if (!sb || !sb->s_fs_info || !block) {
++        printk(KERN_ERR "VexFS: free_block called with invalid parameters\n");
++        return;
++    }
++
+     sbi = VEXFS_SB(sb);
+     first_data_block = le32_to_cpu(sbi->sb->s_first_data_block);
+ 
+@@ -263,8 +273,10 @@ int vexfs_sync_superblock(struct super_block *sb)
+ {
+     struct vexfs_sb_info *sbi = VEXFS_SB(sb);
+ 
+-    if (!sbi || !sbi->sb_bh) {
++    if (!sb || !sbi || !sbi->sb_bh) {
+         printk(KERN_WARNING "VexFS: sync_superblock called with invalid state\n");
+         return -EINVAL;
+     }
+ 
++    mark_buffer_dirty(sbi->sb_bh);
++    return sync_dirty_buffer(sbi->sb_bh);
+ }

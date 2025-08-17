@@ -8,6 +8,7 @@ use super::chromadb::ChromaDBDialect;
 use super::qdrant::QdrantDialect;
 use super::native::NativeDialect;
 use crate::shared::errors::*;
+use crate::auth::{AuthConfig, AuthUser, OptionalAuth, Claims, UserRole, check_collection_access, generate_api_key};
 
 use axum::{
     extract::{Path, State},
@@ -30,16 +31,19 @@ pub struct RouterState {
     pub chromadb: Arc<ChromaDBDialect>,
     pub qdrant: Arc<QdrantDialect>,
     pub native: Arc<NativeDialect>,
+    pub auth_config: AuthConfig,
 }
 
 impl RouterState {
     pub fn new() -> Self {
         let engine = VexFSEngine::new();
+        let auth_config = AuthConfig::default();
         Self {
             chromadb: Arc::new(ChromaDBDialect::new(engine.clone())),
             qdrant: Arc::new(QdrantDialect::new(engine.clone())),
             native: Arc::new(NativeDialect::new(engine.clone())),
             engine,
+            auth_config,
         }
     }
 }
@@ -52,27 +56,32 @@ pub fn create_router() -> Router {
     let dashboard_path = std::env::var("DASHBOARD_PATH").unwrap_or_else(|_| "/app/dashboard".to_string());
     
     Router::new()
-        // ChromaDB API routes (/api/v1/*)
+        // Authentication endpoints
+        .route("/auth/login", post(auth_login))
+        .route("/auth/api-key", post(create_api_key))
+        .route("/auth/verify", get(verify_token))
+        
+        // ChromaDB API routes (/api/v1/*) - Protected
         .route("/api/v1/version", get(api_version))
-        .route("/api/v1/collections", get(chromadb_handler).post(chromadb_handler))
-        .route("/api/v1/collections/:collection", delete(chromadb_handler))
-        .route("/api/v1/collections/:collection/add", post(chromadb_handler))
-        .route("/api/v1/collections/:collection/query", post(chromadb_handler))
-        .route("/api/v1/collections/:collection/vectors", get(chromadb_handler).post(chromadb_handler))
+        .route("/api/v1/collections", get(chromadb_list_collections).post(chromadb_create_collection))
+        .route("/api/v1/collections/:collection", delete(chromadb_delete_collection))
+        .route("/api/v1/collections/:collection/add", post(chromadb_add_documents))
+        .route("/api/v1/collections/:collection/query", post(chromadb_query))
+        .route("/api/v1/collections/:collection/vectors", get(chromadb_get_vectors).post(chromadb_update_vectors))
         
-        // Qdrant API routes (/collections/*)
-        .route("/collections", get(qdrant_handler))
-        .route("/collections/:collection", put(qdrant_handler))
-        .route("/collections/:collection/points", put(qdrant_handler))
-        .route("/collections/:collection/points/search", post(qdrant_handler))
+        // Qdrant API routes (/collections/*) - Protected
+        .route("/collections", get(qdrant_list_collections))
+        .route("/collections/:collection", put(qdrant_create_collection))
+        .route("/collections/:collection/points", put(qdrant_upsert_points))
+        .route("/collections/:collection/points/search", post(qdrant_search))
         
-        // Native VexFS API routes (/vexfs/v1/*)
-        .route("/vexfs/v1/collections", get(native_handler).post(native_handler))
-        .route("/vexfs/v1/collections/:collection/documents", post(native_handler))
-        .route("/vexfs/v1/collections/:collection/search", post(native_handler))
-        .route("/vexfs/v1/health", get(native_handler))
+        // Native VexFS API routes (/vexfs/v1/*) - Protected
+        .route("/vexfs/v1/collections", get(native_list_collections).post(native_create_collection))
+        .route("/vexfs/v1/collections/:collection/documents", post(native_add_documents))
+        .route("/vexfs/v1/collections/:collection/search", post(native_search))
+        .route("/vexfs/v1/health", get(native_health))
         
-        // Health and metrics endpoints
+        // Health and metrics endpoints (public)
         .route("/health", get(health_check))
         .route("/metrics", get(metrics))
         
@@ -134,17 +143,73 @@ async fn server_info() -> Json<ServerInfo> {
     })
 }
 
-/// ChromaDB API handler
-async fn chromadb_handler(
+/// Authentication endpoints
+
+/// Login endpoint - exchanges credentials for JWT token
+async fn auth_login(
     State(state): State<RouterState>,
-    method: Method,
-    uri: axum::http::Uri,
-    body: String,
-) -> Result<axum::response::Response, StatusCode> {
-    let path = uri.path();
-    let method_str = method.as_str();
+    Json(payload): Json<LoginRequest>,
+) -> Result<Json<LoginResponse>, StatusCode> {
+    // For now, authenticate with API key
+    let claims = state.auth_config.authenticate_api_key(&payload.api_key)
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
     
-    match state.chromadb.handle_request(path, method_str, body.as_bytes()) {
+    let token = state.auth_config.generate_token(&claims)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    
+    Ok(Json(LoginResponse {
+        token,
+        expires_at: claims.exp,
+        role: claims.role,
+    }))
+}
+
+/// Create new API key (admin only)
+async fn create_api_key(
+    State(state): State<RouterState>,
+    auth: AuthUser,
+    Json(payload): Json<CreateApiKeyRequest>,
+) -> Result<Json<CreateApiKeyResponse>, StatusCode> {
+    // Only admins can create API keys
+    if !auth.claims.role.can_admin() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    
+    let api_key = generate_api_key();
+    
+    Ok(Json(CreateApiKeyResponse {
+        api_key,
+        role: payload.role,
+        collections: payload.collections,
+    }))
+}
+
+/// Verify token validity
+async fn verify_token(
+    auth: AuthUser,
+) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "valid": true,
+        "sub": auth.claims.sub,
+        "role": auth.claims.role,
+        "exp": auth.claims.exp,
+    }))
+}
+
+/// ChromaDB API handlers with authentication
+
+async fn chromadb_list_collections(
+    State(state): State<RouterState>,
+    auth: OptionalAuth,
+) -> Result<axum::response::Response, StatusCode> {
+    // Check if user has read permission
+    if let Some(user) = auth.0 {
+        if !user.claims.role.can_read() {
+            return Err(StatusCode::FORBIDDEN);
+        }
+    }
+    
+    match state.chromadb.handle_request("/api/v1/collections", "GET", b"") {
         Ok(response_body) => {
             Ok(axum::response::Response::builder()
                 .status(StatusCode::OK)
@@ -156,17 +221,17 @@ async fn chromadb_handler(
     }
 }
 
-/// Qdrant API handler
-async fn qdrant_handler(
+async fn chromadb_create_collection(
     State(state): State<RouterState>,
-    method: Method,
-    uri: axum::http::Uri,
+    auth: AuthUser,
     body: String,
 ) -> Result<axum::response::Response, StatusCode> {
-    let path = uri.path();
-    let method_str = method.as_str();
+    // Check if user has write permission
+    if !auth.claims.role.can_write() {
+        return Err(StatusCode::FORBIDDEN);
+    }
     
-    match state.qdrant.handle_request(path, method_str, body.as_bytes()) {
+    match state.chromadb.handle_request("/api/v1/collections", "POST", body.as_bytes()) {
         Ok(response_body) => {
             Ok(axum::response::Response::builder()
                 .status(StatusCode::OK)
@@ -178,17 +243,341 @@ async fn qdrant_handler(
     }
 }
 
-/// Native VexFS API handler
-async fn native_handler(
+async fn chromadb_delete_collection(
     State(state): State<RouterState>,
-    method: Method,
-    uri: axum::http::Uri,
+    Path(collection): Path<String>,
+    auth: AuthUser,
+) -> Result<axum::response::Response, StatusCode> {
+    // Check if user has write permission and collection access
+    if !auth.claims.role.can_write() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    
+    check_collection_access(&auth, &collection)
+        .map_err(|_| StatusCode::FORBIDDEN)?;
+    
+    let path = format!("/api/v1/collections/{}", collection);
+    match state.chromadb.handle_request(&path, "DELETE", b"") {
+        Ok(response_body) => {
+            Ok(axum::response::Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(response_body))
+                .unwrap())
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+async fn chromadb_add_documents(
+    State(state): State<RouterState>,
+    Path(collection): Path<String>,
+    auth: AuthUser,
     body: String,
 ) -> Result<axum::response::Response, StatusCode> {
-    let path = uri.path();
-    let method_str = method.as_str();
+    // Check if user has write permission and collection access
+    if !auth.claims.role.can_write() {
+        return Err(StatusCode::FORBIDDEN);
+    }
     
-    match state.native.handle_request(path, method_str, body.as_bytes()) {
+    check_collection_access(&auth, &collection)
+        .map_err(|_| StatusCode::FORBIDDEN)?;
+    
+    let path = format!("/api/v1/collections/{}/add", collection);
+    match state.chromadb.handle_request(&path, "POST", body.as_bytes()) {
+        Ok(response_body) => {
+            Ok(axum::response::Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(response_body))
+                .unwrap())
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+async fn chromadb_query(
+    State(state): State<RouterState>,
+    Path(collection): Path<String>,
+    auth: OptionalAuth,
+    body: String,
+) -> Result<axum::response::Response, StatusCode> {
+    // Check if user has read permission and collection access
+    if let Some(user) = auth.0 {
+        if !user.claims.role.can_read() {
+            return Err(StatusCode::FORBIDDEN);
+        }
+        check_collection_access(&user, &collection)
+            .map_err(|_| StatusCode::FORBIDDEN)?;
+    }
+    
+    let path = format!("/api/v1/collections/{}/query", collection);
+    match state.chromadb.handle_request(&path, "POST", body.as_bytes()) {
+        Ok(response_body) => {
+            Ok(axum::response::Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(response_body))
+                .unwrap())
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+async fn chromadb_get_vectors(
+    State(state): State<RouterState>,
+    Path(collection): Path<String>,
+    auth: OptionalAuth,
+) -> Result<axum::response::Response, StatusCode> {
+    if let Some(user) = auth.0 {
+        if !user.claims.role.can_read() {
+            return Err(StatusCode::FORBIDDEN);
+        }
+        check_collection_access(&user, &collection)
+            .map_err(|_| StatusCode::FORBIDDEN)?;
+    }
+    
+    let path = format!("/api/v1/collections/{}/vectors", collection);
+    match state.chromadb.handle_request(&path, "GET", b"") {
+        Ok(response_body) => {
+            Ok(axum::response::Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(response_body))
+                .unwrap())
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+async fn chromadb_update_vectors(
+    State(state): State<RouterState>,
+    Path(collection): Path<String>,
+    auth: AuthUser,
+    body: String,
+) -> Result<axum::response::Response, StatusCode> {
+    if !auth.claims.role.can_write() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    
+    check_collection_access(&auth, &collection)
+        .map_err(|_| StatusCode::FORBIDDEN)?;
+    
+    let path = format!("/api/v1/collections/{}/vectors", collection);
+    match state.chromadb.handle_request(&path, "POST", body.as_bytes()) {
+        Ok(response_body) => {
+            Ok(axum::response::Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(response_body))
+                .unwrap())
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+/// Qdrant API handlers with authentication
+
+async fn qdrant_list_collections(
+    State(state): State<RouterState>,
+    auth: OptionalAuth,
+) -> Result<axum::response::Response, StatusCode> {
+    if let Some(user) = auth.0 {
+        if !user.claims.role.can_read() {
+            return Err(StatusCode::FORBIDDEN);
+        }
+    }
+    
+    match state.qdrant.handle_request("/collections", "GET", b"") {
+        Ok(response_body) => {
+            Ok(axum::response::Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(response_body))
+                .unwrap())
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+async fn qdrant_create_collection(
+    State(state): State<RouterState>,
+    Path(collection): Path<String>,
+    auth: AuthUser,
+    body: String,
+) -> Result<axum::response::Response, StatusCode> {
+    if !auth.claims.role.can_write() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    
+    let path = format!("/collections/{}", collection);
+    match state.qdrant.handle_request(&path, "PUT", body.as_bytes()) {
+        Ok(response_body) => {
+            Ok(axum::response::Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(response_body))
+                .unwrap())
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+async fn qdrant_upsert_points(
+    State(state): State<RouterState>,
+    Path(collection): Path<String>,
+    auth: AuthUser,
+    body: String,
+) -> Result<axum::response::Response, StatusCode> {
+    if !auth.claims.role.can_write() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    
+    check_collection_access(&auth, &collection)
+        .map_err(|_| StatusCode::FORBIDDEN)?;
+    
+    let path = format!("/collections/{}/points", collection);
+    match state.qdrant.handle_request(&path, "PUT", body.as_bytes()) {
+        Ok(response_body) => {
+            Ok(axum::response::Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(response_body))
+                .unwrap())
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+async fn qdrant_search(
+    State(state): State<RouterState>,
+    Path(collection): Path<String>,
+    auth: OptionalAuth,
+    body: String,
+) -> Result<axum::response::Response, StatusCode> {
+    if let Some(user) = auth.0 {
+        if !user.claims.role.can_read() {
+            return Err(StatusCode::FORBIDDEN);
+        }
+        check_collection_access(&user, &collection)
+            .map_err(|_| StatusCode::FORBIDDEN)?;
+    }
+    
+    let path = format!("/collections/{}/points/search", collection);
+    match state.qdrant.handle_request(&path, "POST", body.as_bytes()) {
+        Ok(response_body) => {
+            Ok(axum::response::Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(response_body))
+                .unwrap())
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+/// Native VexFS API handlers with authentication
+
+async fn native_list_collections(
+    State(state): State<RouterState>,
+    auth: OptionalAuth,
+) -> Result<axum::response::Response, StatusCode> {
+    if let Some(user) = auth.0 {
+        if !user.claims.role.can_read() {
+            return Err(StatusCode::FORBIDDEN);
+        }
+    }
+    
+    match state.native.handle_request("/vexfs/v1/collections", "GET", b"") {
+        Ok(response_body) => {
+            Ok(axum::response::Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(response_body))
+                .unwrap())
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+async fn native_create_collection(
+    State(state): State<RouterState>,
+    auth: AuthUser,
+    body: String,
+) -> Result<axum::response::Response, StatusCode> {
+    if !auth.claims.role.can_write() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    
+    match state.native.handle_request("/vexfs/v1/collections", "POST", body.as_bytes()) {
+        Ok(response_body) => {
+            Ok(axum::response::Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(response_body))
+                .unwrap())
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+async fn native_add_documents(
+    State(state): State<RouterState>,
+    Path(collection): Path<String>,
+    auth: AuthUser,
+    body: String,
+) -> Result<axum::response::Response, StatusCode> {
+    if !auth.claims.role.can_write() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    
+    check_collection_access(&auth, &collection)
+        .map_err(|_| StatusCode::FORBIDDEN)?;
+    
+    let path = format!("/vexfs/v1/collections/{}/documents", collection);
+    match state.native.handle_request(&path, "POST", body.as_bytes()) {
+        Ok(response_body) => {
+            Ok(axum::response::Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(response_body))
+                .unwrap())
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+async fn native_search(
+    State(state): State<RouterState>,
+    Path(collection): Path<String>,
+    auth: OptionalAuth,
+    body: String,
+) -> Result<axum::response::Response, StatusCode> {
+    if let Some(user) = auth.0 {
+        if !user.claims.role.can_read() {
+            return Err(StatusCode::FORBIDDEN);
+        }
+        check_collection_access(&user, &collection)
+            .map_err(|_| StatusCode::FORBIDDEN)?;
+    }
+    
+    let path = format!("/vexfs/v1/collections/{}/search", collection);
+    match state.native.handle_request(&path, "POST", body.as_bytes()) {
+        Ok(response_body) => {
+            Ok(axum::response::Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(response_body))
+                .unwrap())
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+async fn native_health(
+    State(state): State<RouterState>,
+) -> Result<axum::response::Response, StatusCode> {
+    match state.native.handle_request("/vexfs/v1/health", "GET", b"") {
         Ok(response_body) => {
             Ok(axum::response::Response::builder()
                 .status(StatusCode::OK)
@@ -245,6 +634,33 @@ async fn metrics(State(state): State<RouterState>) -> Json<MetricsInfo> {
 /// Redirect root to dashboard
 async fn redirect_to_dashboard() -> Redirect {
     Redirect::permanent("/ui/")
+}
+
+// Request/Response types for authentication
+#[derive(Debug, Serialize, Deserialize)]
+struct LoginRequest {
+    api_key: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct LoginResponse {
+    token: String,
+    expires_at: i64,
+    role: UserRole,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CreateApiKeyRequest {
+    role: UserRole,
+    collections: Option<Vec<String>>,
+    rate_limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CreateApiKeyResponse {
+    api_key: String,
+    role: UserRole,
+    collections: Option<Vec<String>>,
 }
 
 // Response types

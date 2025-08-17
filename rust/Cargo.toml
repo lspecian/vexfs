@@ -77,9 +77,9 @@ md5 = { version = "0.7", optional = true }
 lru = { version = "0.12", optional = true }
 async-stream = { version = "0.3", optional = true }
 im = { version = "15.1", optional = true, features = ["serde"] }
+fastrand = { version = "2.0", optional = true }
 
 [dev-dependencies]
-fastrand = "2.0"
 chrono = { version = "0.4", features = ["serde"] }
 
 [lib]
@@ -137,7 +137,7 @@ kernel = ["linked_list_allocator"]  # Keep for future RfL approach but disabled
 c_bindings = []  # New feature for current C FFI approach
 fuse_support = ["std", "fuse", "time", "time01", "clap", "libc"]  # FUSE userspace testing
 vexctl = ["std", "nix", "console", "tabled", "indicatif", "thiserror", "clap", "chrono", "serde", "serde_json", "url"]  # VexCtl CLI tool
-server = ["axum", "tokio", "tower", "tower-http", "tracing", "tracing-subscriber", "serde", "serde_json", "uuid", "chrono"]  # ChromaDB-compatible server
+server = ["axum", "tokio", "tower", "tower-http", "tracing", "tracing-subscriber", "serde", "serde_json", "uuid", "chrono", "base64", "fastrand"]  # ChromaDB-compatible server
 semantic_api = [
     "tokio", "tokio-stream", "futures", "dashmap", "governor",
     "jsonwebtoken", "ring", "base64", "lz4", "flate2",
