@@ -28,6 +28,7 @@ pub mod fuse_extensions;
 pub mod performance;
 pub mod concurrency;
 pub mod error_handling;
+pub mod storage_backend;
 
 // Semantic Search Integration (Task 11)
 pub mod semantic_search;
