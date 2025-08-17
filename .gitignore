@@ -230,3 +230,28 @@ vexfs-qdrant-adapter/
 .claude
 *.iso
 
+
+# Archive
+/archive/
+
+# Build artifacts
+/rust/target/
+/kernel_module/*.o
+/kernel_module/*.ko
+/kernel_module/*.mod*
+*.pyc
+__pycache__/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+/logs/
+
+# Temporary
+/tmp/
+/temp/
