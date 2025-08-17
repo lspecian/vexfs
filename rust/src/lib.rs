@@ -216,64 +216,66 @@ pub use ffi::{
 };
 
 // Core modules for VexFS - only include kernel-safe modules in kernel mode
-pub mod ondisk;
+// TODO: Restore these modules after cleanup
+// pub mod ondisk;
 pub mod superblock;     // Still needed for legacy kernel interface
 pub mod ioctl;
 
 // IPC module for embedding service communication
-pub mod ipc;
+// pub mod ipc;
 
 // Userspace-only modules (require std types like Vec, String, etc.)
-#[cfg(not(feature = "kernel"))]
-pub mod vector_storage;
-#[cfg(not(feature = "kernel"))]
-pub mod vector_storage_optimized;
-#[cfg(not(feature = "kernel"))]
-pub mod vector_cache;
-#[cfg(not(feature = "kernel"))]
-pub mod vector_metrics;
-#[cfg(not(feature = "kernel"))]
-pub mod knn_search;
+// TODO: Most vector modules need to be restored or recreated
+// #[cfg(not(feature = "kernel"))]
+// pub mod vector_storage;
+// #[cfg(not(feature = "kernel"))]
+// pub mod vector_storage_optimized;
+// #[cfg(not(feature = "kernel"))]
+// pub mod vector_cache;
+// #[cfg(not(feature = "kernel"))]
+// pub mod vector_metrics;
+// #[cfg(not(feature = "kernel"))]
+// pub mod knn_search;
 #[cfg(not(feature = "kernel"))]
 pub mod result_scoring;
-#[cfg(not(feature = "kernel"))]
-pub mod vector_search;
-#[cfg(not(feature = "kernel"))]
-pub mod query_planner;
-#[cfg(not(feature = "kernel"))]
-pub mod anns;
-#[cfg(not(feature = "kernel"))]
-pub mod vector_optimizations;
-#[cfg(not(feature = "kernel"))]
-pub mod vector_large_collections;
+// #[cfg(not(feature = "kernel"))]
+// pub mod vector_search;
+// #[cfg(not(feature = "kernel"))]
+// pub mod query_planner;
+// #[cfg(not(feature = "kernel"))]
+// pub mod anns;
+// #[cfg(not(feature = "kernel"))]
+// pub mod vector_optimizations;
+// #[cfg(not(feature = "kernel"))]
+// pub mod vector_large_collections;
 #[cfg(not(feature = "kernel"))]
 pub mod search_cache;
-#[cfg(not(feature = "kernel"))]
-pub mod query_monitor;
-#[cfg(not(feature = "kernel"))]
-pub mod vector_search_integration;
-#[cfg(not(feature = "kernel"))]
-pub mod enhanced_vector_search;
-#[cfg(not(feature = "kernel"))]
-pub mod hybrid_search;
-#[cfg(not(feature = "kernel"))]
-pub mod hybrid_query_optimizer;
+// #[cfg(not(feature = "kernel"))]
+// pub mod query_monitor;
+// #[cfg(not(feature = "kernel"))]
+// pub mod vector_search_integration;
+// #[cfg(not(feature = "kernel"))]
+// pub mod enhanced_vector_search;
+// #[cfg(not(feature = "kernel"))]
+// pub mod hybrid_search;
+// #[cfg(not(feature = "kernel"))]
+// pub mod hybrid_query_optimizer;
 #[cfg(not(feature = "kernel"))]
 pub mod ioctl_integration;
 #[cfg(not(feature = "kernel"))]
 pub mod performance_optimizations;
 
 // ChromaDB-compatible API
-#[cfg(not(feature = "kernel"))]
-pub mod chromadb_api;
+// #[cfg(not(feature = "kernel"))]
+// pub mod chromadb_api;
 
 // VexFS Main API
-#[cfg(not(feature = "kernel"))]
-pub mod vexfs_api;
+// #[cfg(not(feature = "kernel"))]
+// pub mod vexfs_api;
 
 // Semantic API for AI agents (Task 13) - userspace only
-#[cfg(all(not(feature = "kernel"), feature = "semantic_api"))]
-pub mod semantic_api;
+// #[cfg(all(not(feature = "kernel"), feature = "semantic_api"))]
+// pub mod semantic_api;
 
 // Cross-Layer Consistency Manager (Task 14) - userspace only, requires semantic_api
 #[cfg(all(not(feature = "kernel"), feature = "semantic_api"))]
@@ -292,13 +294,17 @@ pub mod vexgraph;
 #[cfg(all(feature = "fuse_support", not(feature = "kernel")))]
 pub mod fuse_impl;
 
+#[cfg(feature = "fuse_support")]
+#[cfg(all(feature = "fuse_support", not(feature = "kernel")))]
+pub mod fuse_error_handling;
+
 // Conditional compilation for userspace-only modules
 #[cfg(not(feature = "kernel"))]
 #[path = "vector_handlers_stub.rs"]
 pub mod vector_handlers;
 
-#[cfg(not(feature = "kernel"))]
-pub mod vector_test;
+// #[cfg(not(feature = "kernel"))]
+// pub mod vector_test;
 
 // Userspace API for testing and development
 #[cfg(not(feature = "kernel"))]

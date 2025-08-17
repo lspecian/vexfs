@@ -3,6 +3,7 @@ use fuse::{
     ReplyWrite, ReplyCreate, ReplyOpen, ReplyEmpty, ReplyStatfs,
 };
 use libc::{ENOENT, ENOSYS, ENOTDIR, EEXIST, EINVAL, EIO, EACCES, EPERM, ENOMEM, ENOTEMPTY};
+use crate::fuse_error_handling::{safe_lock, safe_read, safe_write, handle_result, log_error};
 #[cfg(feature = "std")]
 use std::collections::HashMap;
 #[cfg(feature = "std")]
@@ -316,10 +317,21 @@ impl VexFSFuse {
     }
     
     fn get_next_ino(&self) -> u64 {
-        let mut next_ino = self.next_ino.lock().unwrap();
-        let ino = *next_ino;
-        *next_ino += 1;
-        ino
+        match safe_lock(&self.next_ino, "get_next_ino") {
+            Ok(mut next_ino) => {
+                let ino = *next_ino;
+                *next_ino += 1;
+                ino
+            }
+            Err(_) => {
+                log_error("get_next_ino", "Failed to acquire lock, using timestamp");
+                // Fallback to timestamp-based inode generation
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos() as u64
+            }
+        }
     }
     
     /// Create special control files in _vexfs directory
@@ -452,9 +464,10 @@ impl VexFSFuse {
     
     /// Update control file content
     fn update_control_file(&self, name: &str, content: &str) {
-        let mut files = self.files.lock().unwrap();
-        for file in files.values_mut() {
-            if file.name == format!("_vexfs/{}", name) {
+        let files_result = safe_lock(&self.files, "update_control_file");
+        if let Ok(mut files) = files_result {
+            for file in files.values_mut() {
+                if file.name == format!("_vexfs/{}", name) {
                 file.content = content.as_bytes().to_vec();
                 file.attr.size = content.len() as u64;
                 file.attr.mtime = system_time_to_timespec(SystemTime::now());
@@ -673,7 +686,13 @@ impl VexFSFuse {
 
     /// Get current performance metrics
     pub fn get_performance_metrics(&self) -> FusePerformanceMetrics {
-        self.performance_metrics.read().unwrap().clone()
+        match safe_read(&self.performance_metrics, "get_performance_metrics") {
+            Ok(metrics) => metrics.clone(),
+            Err(_) => {
+                log_error("get_performance_metrics", "Failed to read metrics, returning defaults");
+                FusePerformanceMetrics::default()
+            }
+        }
     }
 
     /// Perform vector search through FUSE interface
@@ -824,9 +843,9 @@ impl VexFSFuse {
                         Ok(_) => {
                             // Update files map for FUSE access
                             {
-                                let mut files = self.files.lock().unwrap();
-                                if let Some(file) = files.get_mut(&file_inode) {
-                                    file.vector = Some(vector_data.to_vec());
+                                if let Ok(mut files) = safe_lock(&self.files, "handle_ioctl_vector_store") {
+                                    if let Some(file) = files.get_mut(&file_inode) {
+                                        file.vector = Some(vector_data.to_vec());
                                     file.metadata = metadata;
                                 } else {
                                     // Create a new file entry for the vector
@@ -862,8 +881,9 @@ impl VexFSFuse {
                             
                             // Update vector ID to file mapping
                             {
-                                let mut mapping = self.vector_id_to_file.lock().unwrap();
-                                mapping.insert(vector_id, file_inode);
+                                if let Ok(mut mapping) = safe_lock(&self.vector_id_to_file, "update_vector_mapping") {
+                                    mapping.insert(vector_id, file_inode);
+                                }
                             }
                             
                             eprintln!("Vector stored successfully with ID: {} for file inode: {} using Storage-HNSW bridge", vector_id, file_inode);
