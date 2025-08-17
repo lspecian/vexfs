@@ -298,6 +298,17 @@ pub mod fuse_impl;
 #[cfg(all(feature = "fuse_support", not(feature = "kernel")))]
 pub mod fuse_error_handling;
 
+// Monitoring and health checks
+#[cfg(not(feature = "kernel"))]
+pub mod monitoring;
+
+#[cfg(not(feature = "kernel"))]
+pub mod health_endpoint;
+
+#[cfg(feature = "fuse_support")]
+#[cfg(all(feature = "fuse_support", not(feature = "kernel")))]
+pub mod fuse_with_monitoring;
+
 // Conditional compilation for userspace-only modules
 #[cfg(not(feature = "kernel"))]
 #[path = "vector_handlers_stub.rs"]

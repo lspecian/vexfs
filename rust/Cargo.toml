@@ -39,8 +39,8 @@ url = { version = "2.0", optional = true }
 # Server dependencies (optional for ChromaDB-compatible API)
 axum = { version = "0.7", features = ["ws"], optional = true }
 tokio = { version = "1.28.2", features = ["full"], optional = true }
-serde = { version = "1.0", features = ["derive"], optional = true }
-serde_json = { version = "1.0", optional = true }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0" }
 uuid = { version = "1.0", features = ["v4", "serde"], optional = true }
 tower = { version = "0.4", features = ["util"], optional = true }
 tower-http = { version = "0.5", features = ["cors", "fs", "set-header", "trace"], optional = true }
