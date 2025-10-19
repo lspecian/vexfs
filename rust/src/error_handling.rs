@@ -333,35 +333,7 @@ pub struct ErrorStats {
 }
 
 /// Macros for error handling
-
-/// Create an error with context
-#[macro_export]
-macro_rules! vexfs_error {
-    ($error:expr, $context:expr) => {
-        {
-            let err = $error;
-            eprintln!("VexFS Error: {} in {}", err, $context.operation);
-            err
-        }
-    };
-}
-
-/// Try an operation and convert to VexFS error
-#[macro_export]
-macro_rules! vexfs_try {
-    ($expr:expr) => {
-        match $expr {
-            Ok(val) => val,
-            Err(e) => return Err(VexfsError::from(e)),
-        }
-    };
-    ($expr:expr, $error:expr) => {
-        match $expr {
-            Ok(val) => val,
-            Err(_) => return Err($error),
-        }
-    };
-}
+/// Note: vexfs_error and vexfs_try are defined in shared/macros.rs
 
 /// Ensure a condition is true or return an error
 #[macro_export]

@@ -11,7 +11,7 @@ use crate::anns::{DistanceMetric, SearchResult, AnnsError};
 #[cfg(not(feature = "kernel"))]
 use crate::vector_storage::{VectorDataType, VectorStorageError, VectorHeader};
 #[cfg(not(feature = "kernel"))]
-use crate::vector_handlers::VectorStorage;
+use crate::vector::vector_handlers::VectorStorage;
 // use crate::vector_search_integration::VectorSearchSubsystem; // Temporarily disabled
 
 // For kernel mode, import VectorDataType from IPC module
@@ -37,6 +37,46 @@ pub struct SearchResult {
     pub score: f32,
 }
 
+/// Hybrid search response combining vector and metadata results
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct HybridSearchResponse {
+    pub vector_results: Vec<SearchResult>,
+    pub metadata_results: Vec<u64>,
+    pub combined_score: f32,
+    pub num_results: u32,
+    pub total_searched: u64,
+    pub search_time_us: u64,
+    pub vector_score_avg: f32,
+    pub metadata_score_avg: f32,
+}
+
+/// Index management request
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct ManageIndexRequest {
+    pub operation: IndexOperation,
+    pub operation_type: IndexOperation,  // Alias field
+    pub index_type: String,
+    pub parameters: Vec<u8>,
+}
+
+// Index operation type is defined below at line 259 with #[repr(u8)]
+
+/// Index management response
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct ManageIndexResponse {
+    pub success: bool,
+    pub index_id: u64,
+    pub message: String,
+    pub total_vectors: u64,
+    pub operation_result: i32,
+    pub message_size: u32,
+    pub last_optimization: u64,
+    pub index_size_bytes: u64,
+}
+
 extern crate alloc;
 use alloc::{vec::Vec, boxed::Box};
 
@@ -54,6 +94,7 @@ pub const VEXFS_IOCTL_MANAGE_INDEX: u8 = 0x07;
 
 /// Additional operational commands
 pub const VEXFS_IOCTL_GET_STATUS: u8 = 0x10;
+pub const VEXFS_IOCTL_CMD_GET_STATUS: u32 = 0x1007;  // Alternative constant name
 pub const VEXFS_IOCTL_BATCH_SEARCH: u8 = 0x11;
 pub const VEXFS_IOCTL_SET_SEARCH_PARAMS: u8 = 0x12;
 pub const VEXFS_IOCTL_GET_INDEX_INFO: u8 = 0x13;
@@ -124,6 +165,8 @@ pub struct GetEmbeddingRequest {
 pub struct UpdateEmbeddingRequest {
     /// Vector ID to update
     pub vector_id: u64,
+    /// File inode associated with this vector
+    pub file_inode: u64,
     /// New dimensions (0 = keep existing)
     pub dimensions: u32,
     /// New data type (if changing)
@@ -164,6 +207,8 @@ pub struct VectorSearchRequest {
     pub k: u32,
     /// Distance metric to use
     pub metric: DistanceMetric,
+    /// Vector data type
+    pub data_type: u8,
     /// Search parameters (ef for HNSW)
     pub ef_search: u16,
     /// Enable metadata filtering
@@ -177,7 +222,15 @@ pub struct VectorSearchRequest {
     /// Flags for search options
     pub flags: u32,
     /// Reserved for future use
-    pub reserved: [u32; 4],
+    pub reserved: [u32; 3],
+}
+
+impl VectorSearchRequest {
+    // Create request with data_type field populated
+    pub fn with_data_type(mut self) -> Self {
+        // data_type is already added as field in struct
+        self
+    }
 }
 
 /// Hybrid search request - VEXFS_IOCTL_HYBRID_SEARCH
@@ -196,8 +249,14 @@ pub struct HybridSearchRequest {
     pub metadata_weight: u8,
     /// Hybrid search flags
     pub flags: u32,
+    // Convenience fields (duplicates of vector_search)
+    pub k: u32,
+    pub dimensions: u32,
+    pub data_type: u8,
+    pub metadata_filter_size: u32,
+    pub ef_search: u32,
     /// Reserved for future use
-    pub reserved: [u32; 6],
+    pub reserved: [u32; 1],
 }
 
 /// Index management request - VEXFS_IOCTL_MANAGE_INDEX
@@ -650,6 +709,9 @@ pub enum VectorIoctlError {
     InvalidFormat = 15,
     InvalidVectorData = 16,
     InvalidParameter = 17,
+    EmbeddingNotFound = 18,
+    MemoryError = 19,
+    OperationNotSupported = 20,
     UnknownError = 255,
 }
 
@@ -663,8 +725,8 @@ impl From<AnnsError> for VectorIoctlError {
             AnnsError::VectorNotFound => VectorIoctlError::VectorNotFound,
             AnnsError::WalCorrupted => VectorIoctlError::IndexCorrupted,
             AnnsError::OutOfMemory => VectorIoctlError::InsufficientMemory,
-            AnnsError::IOError => VectorIoctlError::IoError,
-            AnnsError::SerializationError => VectorIoctlError::InvalidFormat,
+            AnnsError::IOError(_) => VectorIoctlError::IoError,
+            AnnsError::SerializationError(_) => VectorIoctlError::InvalidFormat,
             AnnsError::InvalidOperation => VectorIoctlError::PermissionDenied,
             AnnsError::MemoryAllocationFailed => VectorIoctlError::InsufficientMemory,
             _ => VectorIoctlError::UnknownError,

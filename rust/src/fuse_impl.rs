@@ -20,7 +20,7 @@ use time01::Timespec;
 use crate::shared::errors::{VexfsError, VexfsResult};
 use crate::vector_storage_optimized::{OptimizedVectorStorageManager, MemoryConfig};
 use crate::anns::hnsw_optimized::OptimizedHnswGraph;
-use crate::anns::HnswParams;
+use crate::anns::{HnswParams, HnswGraph};
 use crate::storage::vector_hnsw_bridge::{
     StorageHnswBridge, OperationContext, VectorMetadata, SearchParameters,
     VectorSearchResult, BridgeConfig, BridgeStatistics, SyncStatus
@@ -238,6 +238,7 @@ impl VexFSFuse {
             m: 16,           // Moderate connectivity for FUSE
             ef_construction: 100, // Reasonable construction parameter
             ef_search: 50,   // Default search parameter
+            max_level: 16,   // Default max level
             max_layers: 16,  // Default max layers
             max_m: 16,
             max_m0: 32,
@@ -245,10 +246,7 @@ impl VexFSFuse {
             seed: 42,
         };
         
-        let hnsw_graph = Arc::new(Mutex::new(OptimizedHnswGraph::new(
-            128, // Default dimensions for vectors
-            hnsw_params,
-        )?));
+        let hnsw_graph = Arc::new(Mutex::new(OptimizedHnswGraph::new(hnsw_params)));
         
         // Initialize vector metrics with SIMD enabled
         let vector_metrics = Arc::new(Mutex::new(VectorMetrics::new(true)));
@@ -468,10 +466,11 @@ impl VexFSFuse {
         if let Ok(mut files) = files_result {
             for file in files.values_mut() {
                 if file.name == format!("_vexfs/{}", name) {
-                file.content = content.as_bytes().to_vec();
-                file.attr.size = content.len() as u64;
-                file.attr.mtime = system_time_to_timespec(SystemTime::now());
-                break;
+                    file.content = content.as_bytes().to_vec();
+                    file.attr.size = content.len() as u64;
+                    file.attr.mtime = system_time_to_timespec(SystemTime::now());
+                    break;
+                }
             }
         }
     }
@@ -561,7 +560,7 @@ impl VexFSFuse {
                 .sqrt())
         };
         
-        let search_results = hnsw_graph.search(query_vector, top_k, 50, distance_fn) // ef_search = 50
+        let search_results = hnsw_graph.search(query_vector, top_k as usize)
             .map_err(|e| FuseVexfsError::SearchFailed(format!("HNSW search failed: {:?}", e)))?;
         
         // Convert HNSW results to VectorSearchResult
@@ -846,8 +845,8 @@ impl VexFSFuse {
                                 if let Ok(mut files) = safe_lock(&self.files, "handle_ioctl_vector_store") {
                                     if let Some(file) = files.get_mut(&file_inode) {
                                         file.vector = Some(vector_data.to_vec());
-                                    file.metadata = metadata;
-                                } else {
+                                        file.metadata = metadata;
+                                    } else {
                                     // Create a new file entry for the vector
                                     let now = system_time_to_timespec(SystemTime::now());
                                     let file = VexFSFile {
@@ -876,9 +875,10 @@ impl VexFSFuse {
                                         children: Vec::new(),  // Regular files don't have children
                                     };
                                     files.insert(file_inode, file);
+                                    }
                                 }
                             }
-                            
+
                             // Update vector ID to file mapping
                             {
                                 if let Ok(mut mapping) = safe_lock(&self.vector_id_to_file, "update_vector_mapping") {
@@ -922,8 +922,8 @@ impl VexFSFuse {
             
             // Create HNSW node for this vector
             // For now, we'll add it to layer 0 (base layer)
-            let node = crate::anns::hnsw_optimized::OptimizedHnswNode::new(vector_id, 0);
-            
+            let node = crate::anns::HnswNode::new(vector_id, 0);
+
             // Add node to graph
             graph.add_node(node)
                 .map_err(|e| VexfsError::SearchError(crate::shared::errors::SearchErrorKind::InvalidQuery))?;
@@ -1368,7 +1368,7 @@ impl Filesystem for VexFSFuse {
         let ino = self.get_next_ino();
         
         // Determine file type from mode
-        let file_type = if mode & libc::S_IFDIR != 0 {
+        let file_type = if mode & (libc::S_IFDIR as u32) != 0 {
             FileType::Directory
         } else {
             FileType::RegularFile

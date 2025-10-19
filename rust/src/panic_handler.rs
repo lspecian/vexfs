@@ -266,7 +266,7 @@ pub struct WatchdogTimer {
     last_heartbeat: Arc<Mutex<SystemTime>>,
     timeout: Duration,
     running: Arc<AtomicBool>,
-    recovery_callback: Option<Box<dyn Fn() + Send + 'static>>,
+    recovery_callback: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
 }
 
 impl WatchdogTimer {

@@ -572,8 +572,11 @@ impl VexfsSpaceAllocator {
         group.free_inodes_count = self.superblock.s_inodes_per_group;
         group.used_dirs_count = 0;
         group.flags = 0;
-        let checksum = self.calculate_group_checksum(group);
-        group.checksum = checksum;
+
+        // Drop mutable borrow before calling calculate_group_checksum
+        let group_idx = group_idx as usize;
+        let checksum = self.calculate_group_checksum(&self.block_groups[group_idx]);
+        self.block_groups[group_idx].checksum = checksum;
         
         Ok(())
     }

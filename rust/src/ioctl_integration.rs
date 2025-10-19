@@ -6420,16 +6420,13 @@ impl EnhancedIoctlHandler {
         let vector_storage_arc = Arc::new(vector_storage);
         
         // Create query planner with vector storage
-        let query_planner = QueryPlanner::new(
-            vector_storage_arc.clone(),
-            Default::default()
-        );
-        
+        let query_planner = QueryPlanner::new();
+
         // Create search cache with config
         let search_cache = SearchResultCache::new(Default::default());
-        
+
         // Create performance monitor
-        let performance_monitor = QueryPerformanceMonitor::new(Default::default());
+        let performance_monitor = QueryPerformanceMonitor::new();
         
         // Create other components
         let security_validator = SecurityValidator::new();
@@ -8627,15 +8624,17 @@ impl EnhancedActiveOperation {
             },
             security_context,
             operation_metadata: OperationMetadata {
+                started_at: current_time,
                 operation_id,
-                operation_type: Self::map_to_operation_type(operation_type),
+                user_id: Some(user_id),
+                group_id: None,
+                operation_type: format!("{:?}", Self::map_to_operation_type(operation_type)),
                 start_time_us: current_time,
                 description: format!("IOCTL operation: {:?}", operation_type),
                 parent_operation_id: None,
-                user_id,
-                session_id: Some(operation_id),
-                request_id: None,
-                tags: BTreeMap::new(),
+                session_id: format!("{}", operation_id),
+                request_id: String::new(),
+                tags: Vec::new(),
             },
             current_state: EnhancedOperationState::Initializing,
             state_history: Vec::new(),

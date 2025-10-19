@@ -135,10 +135,11 @@ pub use performance_optimizations::{
 };
 
 // Re-export ChromaDB API components at crate level for easy access
-#[cfg(not(feature = "kernel"))]
-pub use chromadb_api::{
-    ChromaDBApi, Collection, Document, QueryResult, DistanceFunction,
-};
+// Note: chromadb_api module not yet implemented
+// #[cfg(not(feature = "kernel"))]
+// pub use chromadb_api::{
+//     ChromaDBApi, Collection, Document, QueryResult, DistanceFunction,
+// };
 
 // Re-export Semantic API components at crate level for easy access
 #[cfg(all(not(feature = "kernel"), feature = "semantic_api"))]
@@ -216,10 +217,36 @@ pub use ffi::{
 };
 
 // Core modules for VexFS - only include kernel-safe modules in kernel mode
-// TODO: Restore these modules after cleanup
-// pub mod ondisk;
+pub mod core;           // Core filesystem functionality (ondisk, inode, journal)
+pub mod vector;         // Vector storage and search modules
+pub mod anns;           // ANNS and HNSW implementation
 pub mod superblock;     // Still needed for legacy kernel interface
 pub mod ioctl;
+pub mod inode_mgmt;     // Inode management
+pub mod space_alloc;    // Space allocation
+
+// Query modules
+#[cfg(not(feature = "kernel"))]
+pub mod query_planner;  // Query planning and optimization
+#[cfg(not(feature = "kernel"))]
+pub mod query_monitor;  // Query performance monitoring
+
+// Re-export core modules at crate root for backward compatibility
+pub use core::ondisk;
+#[cfg(feature = "kernel")]
+pub use core::journal;
+
+// Re-export vector modules at crate root for backward compatibility
+pub use vector::{
+    vector_storage, vector_storage_optimized, vector_metrics, vector_cache,
+    knn_search, vector_search, vector_search_integration,
+    vector_optimizations, vector_large_collections
+};
+
+// Re-export compatibility modules
+// Note: compatibility module not yet implemented
+// #[cfg(not(feature = "kernel"))]
+// pub use compatibility::chromadb_api;
 
 // IPC module for embedding service communication
 // pub mod ipc;
@@ -333,13 +360,13 @@ pub mod vector_handlers;
 
 // Userspace API for testing and development
 #[cfg(not(feature = "kernel"))]
-pub fn init_vexfs_userspace() -> core::result::Result<(), String> {
+pub fn init_vexfs_userspace() -> std::result::Result<(), String> {
     println!("VexFS: Initializing in userspace mode");
     Ok(())
 }
 
 #[cfg(not(feature = "kernel"))]
-pub fn test_vector_operations() -> core::result::Result<(), String> {
+pub fn test_vector_operations() -> std::result::Result<(), String> {
     println!("VexFS: Running vector operation tests");
     // Basic vector operations test
     Ok(())

@@ -31,6 +31,30 @@ pub mod kernel;
 pub mod error_handling;
 pub mod hang_prevention;
 
+/// FFI result type
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct FFIResult {
+    pub success: bool,
+    pub error_code: c_int,
+}
+
+impl FFIResult {
+    pub fn ok() -> Self {
+        Self {
+            success: true,
+            error_code: 0,
+        }
+    }
+
+    pub fn error(code: c_int) -> Self {
+        Self {
+            success: false,
+            error_code: code,
+        }
+    }
+}
+
 /// Error codes for C FFI - these must match the C header definitions
 pub const VEXFS_SUCCESS: c_int = 0;
 pub const VEXFS_ERROR_GENERIC: c_int = -1;

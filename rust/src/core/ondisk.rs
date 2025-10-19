@@ -127,10 +127,13 @@ pub struct VexfsSuperblock {
     
     /// Total number of blocks in filesystem
     pub s_blocks_count: u64,
-    
+
     /// Number of free blocks
     pub s_free_blocks_count: u64,
-    
+
+    /// Number of reserved blocks
+    pub s_r_blocks_count: u64,
+
     /// Total number of inodes
     pub s_inodes_count: u32,
     
@@ -568,6 +571,7 @@ impl VexfsSuperblock {
             s_magic: VEXFS_MAGIC,
             s_blocks_count: blocks_count,
             s_free_blocks_count: blocks_count - 100, // Reserve some blocks
+            s_r_blocks_count: 100, // Number of reserved blocks
             s_inodes_count: inodes_count,
             s_free_inodes_count: inodes_count - 1, // Root inode used
             s_block_size: block_size,

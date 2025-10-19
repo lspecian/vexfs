@@ -472,9 +472,9 @@ impl VexfsInodeManager {
     }
     
     /// Release an inode handle and sync changes
-    pub fn release_inode_handle(&mut self, handle: VexfsInodeHandle) -> Result<(), InodeError> {
+    pub fn release_inode_handle(&mut self, mut handle: VexfsInodeHandle) -> Result<(), InodeError> {
         if handle.info.dirty {
-            self.write_inode(&handle.info)?;
+            self.write_inode(&mut handle.info)?;
         }
         Ok(())
     }

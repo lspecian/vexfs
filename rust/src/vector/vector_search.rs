@@ -302,7 +302,7 @@ impl VectorSearchEngine {
         let vector_storage = VectorStorageManager::new(storage_manager.clone(), 4096, 1000000);
         
         // Create a stub storage that implements the VectorStorage trait
-        let stub_storage = Box::new(crate::vector_handlers::StubVectorStorage);
+        let stub_storage = Box::new(crate::vector::vector_handlers::StubVectorStorage);
         let knn_engine = KnnSearchEngine::new(stub_storage)?;
         let scoring_params = options.scoring_params.clone().unwrap_or_default();
         let result_scorer = ResultScorer::new(scoring_params);
@@ -329,7 +329,7 @@ impl VectorSearchEngine {
     }
     
     /// Set HNSW index for approximate search
-    pub fn set_hnsw_index(&mut self, index: AnnsIndex) {
+    pub fn set_hnsw_index(&mut self, index: Box<dyn AnnsIndex>) {
         self.knn_engine.set_hnsw_index(index);
     }
     
@@ -479,25 +479,30 @@ impl VectorSearchEngine {
             };
             
             let query_characteristics = crate::query_planner::QueryCharacteristics {
-                dimensions: query.vector.len(),
-                sparsity,
-                magnitude,
-                entropy,
-                k: query.k,
-                metric: query.metric,
-                has_filters: query.filter.is_some(),
-                filter_selectivity: 1.0, // Default selectivity
                 complexity,
+                selectivity: 0.5,  // Default selectivity
+                cardinality: 0,
+                dimensions: Some(query.vector.len()),
+                sparsity: Some(sparsity as f64),
+                magnitude: Some(magnitude as f64),
+                entropy: Some(entropy as f64),
+                k: Some(query.k),
+                metric: Some(format!("{:?}", query.metric)),
+                has_filters: query.filter.is_some(),
+                filter_selectivity: Some(1.0),
                 approximate_acceptable: query.approximate,
             };
             
             // Create index recommendation for cache
             let index_recommendation = crate::query_planner::IndexRecommendation {
-                primary_strategy: crate::anns::IndexStrategy::HNSW,
+                index_type: "HNSW".to_string(),
+                priority: 10,
+                reason: "Vector search result".to_string(),
+                primary_strategy: Some("HNSW".to_string()),
                 fallback_strategy: None,
                 confidence: 0.8,
                 expected_speedup: 2.0,
-                memory_estimate: estimated_memory,
+                memory_estimate: estimated_memory as u64,
                 reasoning: "Vector search result".to_string(),
             };
             
@@ -870,7 +875,7 @@ impl VectorSearchEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vector_handlers::VectorStorage;
+    use crate::vector::vector_handlers::VectorStorage;
 
     #[test]
     fn test_search_query_default() {

@@ -11,7 +11,7 @@ use core::cmp::Ordering;
 
 use crate::anns::{DistanceMetric, AnnsIndex, SearchResult};
 use crate::vector_metrics::{VectorMetrics, MetricsError, ApproximateMetrics};
-use crate::vector_handlers::{VectorStorage, VectorEmbedding};
+use crate::vector::vector_handlers::{VectorStorage, VectorEmbedding};
 use crate::vector_storage::{VectorHeader, VectorDataType};
 use crate::ondisk::VexfsInode;
 use crate::fs_core::operations::OperationContext;
@@ -246,7 +246,7 @@ pub struct KnnSearchEngine {
     /// Vector storage system
     storage: Box<dyn VectorStorage<Error = String>>,
     /// HNSW index for approximate search
-    hnsw_index: Option<AnnsIndex>,
+    hnsw_index: Option<Box<dyn AnnsIndex>>,
     /// Search result buffer
     result_buffer: Vec<KnnResult>,
     /// Candidate buffer for filtering
@@ -266,7 +266,7 @@ impl KnnSearchEngine {
     }
     
     /// Set HNSW index for approximate search
-    pub fn set_hnsw_index(&mut self, index: AnnsIndex) {
+    pub fn set_hnsw_index(&mut self, index: Box<dyn AnnsIndex>) {
         self.hnsw_index = Some(index);
     }
     
@@ -311,7 +311,7 @@ impl KnnSearchEngine {
         let search_k = search_k.min(MAX_CANDIDATES);
         
         // Perform HNSW search
-        let candidates = hnsw.search(context, query, search_k, None)
+        let candidates = hnsw.search(query, search_k)
             .map_err(|_| KnnError::IndexError)?;
         
         self.candidate_buffer.extend(candidates);
@@ -354,20 +354,29 @@ impl KnnSearchEngine {
             // Load vector header and data
             let header = self.storage.get_vector_header(vector_id)
                 .map_err(|_| KnnError::StorageError)?;
-            
-            // Skip if dimensions don't match query
+
+            // Skip if header not found or dimensions don't match query
+            let header = match header {
+                Some(h) => h,
+                None => continue,
+            };
             if header.dimensions as usize != query.len() {
                 continue;
             }
             
             let vector_data = self.storage.get_vector_data(vector_id)
                 .map_err(|_| KnnError::StorageError)?;
-            
+
+            let vector_data = match vector_data {
+                Some(v) => v,
+                None => continue,
+            };
+
             // Calculate exact distance
             let distance = self.metrics.calculate_distance(
                 query,
                 &vector_data,
-                params.metric,
+                params.metric.into(),
             )?;
             
             // Create result with metadata
@@ -410,14 +419,23 @@ impl KnnSearchEngine {
         for &vector_id in vector_ids {
             let header = self.storage.get_vector_header(vector_id)
                 .map_err(|_| KnnError::StorageError)?;
-            
+
+            let header = match header {
+                Some(h) => h,
+                None => continue,
+            };
             if header.dimensions as usize != query.len() {
                 continue;
             }
             
             let vector_data = self.storage.get_vector_data(vector_id)
                 .map_err(|_| KnnError::StorageError)?;
-            
+
+            let vector_data = match vector_data {
+                Some(v) => v,
+                None => continue,
+            };
+
             // Use approximate distance for fast filtering
             let approx_distance = match params.metric {
                 DistanceMetric::Euclidean => {
@@ -428,7 +446,7 @@ impl KnnSearchEngine {
                 }
                 _ => {
                     // Fallback to exact distance for other metrics
-                    self.metrics.calculate_distance(query, &vector_data, params.metric)?
+                    self.metrics.calculate_distance(query, &vector_data, params.metric.into())?
                 }
             };
             
@@ -445,13 +463,18 @@ impl KnnSearchEngine {
         for (vector_id, header, _) in candidates.into_iter().take(top_candidates) {
             let vector_data = self.storage.get_vector_data(vector_id)
                 .map_err(|_| KnnError::StorageError)?;
-            
+
+            let vector_data = match vector_data {
+                Some(v) => v,
+                None => continue,
+            };
+
             // Calculate exact distance
             let exact_distance = if params.exact_distances {
-                self.metrics.calculate_distance(query, &vector_data, params.metric)?
+                self.metrics.calculate_distance(query, &vector_data, params.metric.into())?
             } else {
                 // Use the approximate distance if exact is not required
-                self.metrics.calculate_distance(query, &vector_data, params.metric)?
+                self.metrics.calculate_distance(query, &vector_data, params.metric.into())?
             };
             
             let result = self.create_knn_result(vector_id, &header, exact_distance)?;
@@ -497,14 +520,25 @@ impl KnnSearchEngine {
                 // Recalculate exact distance
                 let vector_data = self.storage.get_vector_data(candidate.vector_id)
                     .map_err(|_| KnnError::StorageError)?;
-                
-                self.metrics.calculate_distance(query, &vector_data, params.metric)?
+
+                let vector_data = match vector_data {
+                    Some(v) => v,
+                    None => continue,
+                };
+
+                self.metrics.calculate_distance(query, &vector_data, params.metric.into())?
             } else {
                 // Use distance from HNSW search
                 candidate.distance
             };
-            
-            let result = self.create_knn_result(candidate.vector_id, &header, distance)?;
+
+            // Unwrap header if it's an Option
+            let header_ref = match &header {
+                Some(h) => h,
+                None => continue,
+            };
+
+            let result = self.create_knn_result(candidate.vector_id, header_ref, distance)?;
             
             // Apply metadata filter
             if let Some(ref filter) = params.filter {

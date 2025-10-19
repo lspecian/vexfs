@@ -6,8 +6,14 @@
 
 use crate::ioctl::*;
 use crate::vector_storage::{VectorDataType, CompressionType};
+
+#[cfg(feature = "kernel")]
 use alloc::vec::Vec;
+#[cfg(feature = "kernel")]
 use core::ptr;
+
+#[cfg(not(feature = "kernel"))]
+use std::ptr;
 
 // Note: Kernel integration handled via C FFI, not direct kernel crate usage
 
@@ -19,11 +25,19 @@ const MAX_SEARCH_RESULTS: usize = 10000;
 
 /// Vector storage backend trait - abstracts the underlying storage mechanism
 pub trait VectorStorage {
+    type Error;
+
     fn store_embedding(&mut self, inode: u64, embedding: &VectorEmbedding) -> Result<u64, VectorIoctlError>;
     fn get_embedding(&self, inode: u64) -> Result<Option<VectorEmbedding>, VectorIoctlError>;
     fn update_embedding(&mut self, inode: u64, embedding: &VectorEmbedding) -> Result<(), VectorIoctlError>;
     fn delete_embedding(&mut self, inode: u64) -> Result<(), VectorIoctlError>;
     fn search_similar(&self, query: &VectorEmbedding, k: u32, ef_search: u32) -> Result<Vec<VectorSearchResult>, VectorIoctlError>;
+
+    // Additional methods for vector access
+    fn get_all_vector_ids(&self) -> Result<Vec<u64>, Self::Error>;
+    fn get_vector_header(&self, id: u64) -> Result<Option<crate::vector_storage::VectorHeader>, Self::Error>;
+    fn get_vector_data(&self, id: u64) -> Result<Option<Vec<f32>>, Self::Error>;
+    fn get_vector_count(&self) -> Result<usize, Self::Error>;
 }
 
 /// ANNS index management trait - abstracts different indexing algorithms
@@ -102,7 +116,7 @@ impl<S: VectorStorage, I: ANNSIndex> VectorHandlers<S, I> {
             vector_id: 0, // Will be assigned by storage
             file_inode: request.file_inode,
             data_type: request.data_type,
-            compression: request.compression,
+            compression: request.compression.into(),
             dimensions: request.dimensions,
             data: vector_data.clone(),
             created_timestamp: self.get_current_timestamp(),
@@ -155,7 +169,7 @@ impl<S: VectorStorage, I: ANNSIndex> VectorHandlers<S, I> {
             vector_id: embedding.vector_id,
             result: VectorIoctlError::Success,
             data_type: embedding.data_type,
-            compression: embedding.compression,
+            compression: embedding.compression.into(),
             dimensions: embedding.dimensions,
             original_size: embedding.data.len() as u32,
             actual_size: embedding.data.len() as u32,
@@ -163,7 +177,7 @@ impl<S: VectorStorage, I: ANNSIndex> VectorHandlers<S, I> {
             modified_timestamp: embedding.modified_timestamp,
             checksum: embedding.checksum,
             flags: embedding.flags,
-            reserved: [0; 3],
+            reserved: [0; 4],
         })
     }
 
@@ -189,7 +203,7 @@ impl<S: VectorStorage, I: ANNSIndex> VectorHandlers<S, I> {
 
         // Update embedding metadata
         embedding.data_type = request.data_type;
-        embedding.compression = request.compression;
+        embedding.compression = request.compression.into();
         embedding.dimensions = request.dimensions;
         embedding.data = new_vector_data.clone();
         embedding.modified_timestamp = self.get_current_timestamp();
@@ -259,15 +273,15 @@ impl<S: VectorStorage, I: ANNSIndex> VectorHandlers<S, I> {
         // Copy query vector from userspace
         let query_data = self.copy_vector_from_user(
             query_buffer,
-            request.data_type,
+            request.data_type.into(),
             request.dimensions,
         )?;
 
         // Convert query to f32 for search
-        let f32_query = self.convert_to_f32(&query_data, request.data_type)?;
+        let f32_query = self.convert_to_f32(&query_data, request.data_type.into())?;
 
         // Perform similarity search using ANNS index
-        let search_results = self.index.search(&f32_query, request.k, request.ef_search)?;
+        let search_results = self.index.search(&f32_query, request.k, request.ef_search as u32)?;
 
         // Convert results to response format
         let mut results = Vec::with_capacity(search_results.len());
@@ -307,7 +321,7 @@ impl<S: VectorStorage, I: ANNSIndex> VectorHandlers<S, I> {
         // Copy query vector from userspace
         let query_data = self.copy_vector_from_user(
             query_buffer,
-            request.data_type,
+            request.data_type.into(),
             request.dimensions,
         )?;
 
@@ -319,10 +333,10 @@ impl<S: VectorStorage, I: ANNSIndex> VectorHandlers<S, I> {
         };
 
         // Convert query to f32 for search
-        let f32_query = self.convert_to_f32(&query_data, request.data_type)?;
+        let f32_query = self.convert_to_f32(&query_data, request.data_type.into())?;
 
         // Perform vector similarity search
-        let vector_results = self.index.search(&f32_query, request.k * 2, request.ef_search)?;
+        let vector_results = self.index.search(&f32_query, request.k * 2, request.ef_search as u32)?;
 
         // Apply metadata filtering and combine scores
         let mut hybrid_results = Vec::new();
@@ -333,8 +347,8 @@ impl<S: VectorStorage, I: ANNSIndex> VectorHandlers<S, I> {
                 
                 if metadata_score > 0.0 {
                     // Combine vector and metadata scores
-                    let combined_score = request.vector_weight * vector_score 
-                        + request.metadata_weight * metadata_score;
+                    let combined_score = (request.vector_weight as f32) * vector_score
+                        + (request.metadata_weight as f32) * metadata_score;
 
                     hybrid_results.push((vector_id, embedding.file_inode, combined_score));
                 }
@@ -346,8 +360,11 @@ impl<S: VectorStorage, I: ANNSIndex> VectorHandlers<S, I> {
         hybrid_results.truncate(request.k as usize);
 
         Ok(HybridSearchResponse {
+            vector_results: Vec::new(), // Would be populated
+            metadata_results: Vec::new(), // Would be populated
+            combined_score: 0.0,
             num_results: hybrid_results.len() as u32,
-            total_searched: self.index.get_stats().total_vectors as u32,
+            total_searched: self.index.get_stats().total_vectors,
             search_time_us: 0, // Would be measured
             vector_score_avg: 0.0, // Would be calculated
             metadata_score_avg: 0.0, // Would be calculated
@@ -359,21 +376,19 @@ impl<S: VectorStorage, I: ANNSIndex> VectorHandlers<S, I> {
         &mut self,
         request: &ManageIndexRequest,
     ) -> Result<ManageIndexResponse, VectorIoctlError> {
-        // Validate input parameters and permissions
-        if request.operation_type > 3 {
-            return Err(VectorIoctlError::InvalidParameter);
-        }
-
         let result = match request.operation_type {
-            0 => {
+            IndexOperation::Optimize => {
                 // Optimize index
                 self.index.optimize_index()?;
                 "Index optimization completed"
             },
-            1 => {
+            IndexOperation::GetInfo => {
                 // Get statistics
                 let stats = self.index.get_stats();
                 return Ok(ManageIndexResponse {
+                    success: true,
+                    index_id: 0,
+                    message: "Statistics retrieved".to_string(),
                     operation_result: 0,
                     message_size: 0,
                     index_size_bytes: stats.index_size_bytes,
@@ -381,12 +396,12 @@ impl<S: VectorStorage, I: ANNSIndex> VectorHandlers<S, I> {
                     last_optimization: stats.last_optimization,
                 });
             },
-            2 => {
+            IndexOperation::Rebuild => {
                 // Rebuild index
                 self.rebuild_index()?;
                 "Index rebuild completed"
             },
-            3 => {
+            IndexOperation::Validate => {
                 // Validate index integrity
                 self.validate_index_integrity()?;
                 "Index validation completed"
@@ -396,6 +411,9 @@ impl<S: VectorStorage, I: ANNSIndex> VectorHandlers<S, I> {
 
         let stats = self.index.get_stats();
         Ok(ManageIndexResponse {
+            success: true,
+            index_id: 0,
+            message: result.to_string(),
             operation_result: 0,
             message_size: result.len() as u32,
             index_size_bytes: stats.index_size_bytes,
@@ -461,7 +479,7 @@ impl<S: VectorStorage, I: ANNSIndex> VectorHandlers<S, I> {
             return Err(VectorIoctlError::InvalidParameter);
         }
 
-        if request.vector_weight + request.metadata_weight <= 0.0 {
+        if request.vector_weight + request.metadata_weight == 0 {
             return Err(VectorIoctlError::InvalidParameter);
         }
 
@@ -489,12 +507,23 @@ impl<S: VectorStorage, I: ANNSIndex> VectorHandlers<S, I> {
         let total_size = dimensions as usize * element_size;
         let mut buffer = vec![0u8; total_size];
 
-        // Use proper kernel API for copying from userspace
-        let user_slice = UserSlicePtr::new(user_ptr as *mut u8, total_size)
-            .map_err(|_| VectorIoctlError::InvalidParameter)?;
-        let mut reader = user_slice.reader();
-        reader.read_raw(&mut buffer)
-            .map_err(|_| VectorIoctlError::MemoryError)?;
+        #[cfg(feature = "kernel")]
+        {
+            // Use proper kernel API for copying from userspace
+            let user_slice = UserSlicePtr::new(user_ptr as *mut u8, total_size)
+                .map_err(|_| VectorIoctlError::InvalidParameter)?;
+            let mut reader = user_slice.reader();
+            reader.read_raw(&mut buffer)
+                .map_err(|_| VectorIoctlError::MemoryError)?;
+        }
+
+        #[cfg(not(feature = "kernel"))]
+        {
+            // In userspace, use regular memory copy
+            unsafe {
+                ptr::copy_nonoverlapping(user_ptr, buffer.as_mut_ptr(), total_size);
+            }
+        }
 
         Ok(buffer)
     }
@@ -509,13 +538,24 @@ impl<S: VectorStorage, I: ANNSIndex> VectorHandlers<S, I> {
         }
 
         let mut buffer = vec![0u8; size as usize];
-        
-        // Use proper kernel API for copying from userspace
-        let user_slice = UserSlicePtr::new(user_ptr as *mut u8, size as usize)
-            .map_err(|_| VectorIoctlError::InvalidParameter)?;
-        let mut reader = user_slice.reader();
-        reader.read_raw(&mut buffer)
-            .map_err(|_| VectorIoctlError::MemoryError)?;
+
+        #[cfg(feature = "kernel")]
+        {
+            // Use proper kernel API for copying from userspace
+            let user_slice = UserSlicePtr::new(user_ptr as *mut u8, size as usize)
+                .map_err(|_| VectorIoctlError::InvalidParameter)?;
+            let mut reader = user_slice.reader();
+            reader.read_raw(&mut buffer)
+                .map_err(|_| VectorIoctlError::MemoryError)?;
+        }
+
+        #[cfg(not(feature = "kernel"))]
+        {
+            // In userspace, use regular memory copy
+            unsafe {
+                ptr::copy_nonoverlapping(user_ptr, buffer.as_mut_ptr(), size as usize);
+            }
+        }
 
         Ok(buffer)
     }
@@ -616,7 +656,10 @@ impl<T: VectorStorage> VectorStorageExt for T {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(feature = "std"))]
     use alloc::vec;
+    #[cfg(feature = "std")]
+    use std::vec;
 
     // Mock implementations for testing
     struct MockStorage {
@@ -624,6 +667,8 @@ mod tests {
     }
 
     impl VectorStorage for MockStorage {
+        type Error = String;
+
         fn store_embedding(&mut self, inode: u64, embedding: &VectorEmbedding) -> Result<u64, VectorIoctlError> {
             let vector_id = self.embeddings.len() as u64 + 1;
             let mut new_embedding = embedding.clone();
@@ -656,6 +701,22 @@ mod tests {
 
         fn search_similar(&self, _query: &VectorEmbedding, _k: u32, _ef_search: u32) -> Result<Vec<VectorSearchResult>, VectorIoctlError> {
             Ok(Vec::new())
+        }
+
+        fn get_all_vector_ids(&self) -> Result<Vec<u64>, Self::Error> {
+            Ok(self.embeddings.iter().map(|e| e.vector_id).collect())
+        }
+
+        fn get_vector_header(&self, id: u64) -> Result<Option<crate::vector_storage::VectorHeader>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_vector_data(&self, id: u64) -> Result<Option<Vec<f32>>, Self::Error> {
+            Ok(None)
+        }
+
+        fn get_vector_count(&self) -> Result<usize, Self::Error> {
+            Ok(self.embeddings.len())
         }
     }
 
@@ -723,15 +784,71 @@ mod tests {
             dimensions: 0, // Invalid
             k: 10,
             metric: crate::anns::DistanceMetric::Euclidean,
+            data_type: 0,
             ef_search: 100,
             use_metadata_filter: 0,
             file_inode_filter: 0,
             min_confidence: 0,
             max_distance_scaled: 0,
             flags: 0,
-            reserved: [0; 4],
+            reserved: [0; 3],
         };
 
         assert!(handlers.validate_search_request(&request).is_err());
+    }
+}
+
+/// Stub vector storage for testing and development
+pub struct StubVectorStorage;
+
+impl StubVectorStorage {
+    pub fn new() -> Self {
+        StubVectorStorage
+    }
+}
+
+impl Default for StubVectorStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl VectorStorage for StubVectorStorage {
+    type Error = String;
+
+    fn store_embedding(&mut self, _inode: u64, _embedding: &VectorEmbedding) -> Result<u64, VectorIoctlError> {
+        Err(VectorIoctlError::OperationNotSupported)
+    }
+
+    fn get_embedding(&self, _inode: u64) -> Result<Option<VectorEmbedding>, VectorIoctlError> {
+        Ok(None)
+    }
+
+    fn update_embedding(&mut self, _inode: u64, _embedding: &VectorEmbedding) -> Result<(), VectorIoctlError> {
+        Err(VectorIoctlError::OperationNotSupported)
+    }
+
+    fn delete_embedding(&mut self, _inode: u64) -> Result<(), VectorIoctlError> {
+        Err(VectorIoctlError::OperationNotSupported)
+    }
+
+    fn search_similar(&self, _query: &VectorEmbedding, _k: u32, _ef_search: u32) -> Result<Vec<VectorSearchResult>, VectorIoctlError> {
+        Ok(Vec::new())
+    }
+
+    fn get_all_vector_ids(&self) -> Result<Vec<u64>, Self::Error> {
+        Ok(Vec::new())
+    }
+
+    fn get_vector_header(&self, _id: u64) -> Result<Option<crate::vector_storage::VectorHeader>, Self::Error> {
+        Ok(None)
+    }
+
+    fn get_vector_data(&self, _id: u64) -> Result<Option<Vec<f32>>, Self::Error> {
+        Ok(None)
+    }
+
+    fn get_vector_count(&self) -> Result<usize, Self::Error> {
+        Ok(0)
     }
 }

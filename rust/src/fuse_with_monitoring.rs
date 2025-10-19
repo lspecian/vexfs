@@ -15,6 +15,16 @@ use crate::monitoring::{MonitoringSystem, OperationMetrics};
 
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
 
+fn system_time_to_timespec(st: SystemTime) -> Timespec {
+    match st.duration_since(UNIX_EPOCH) {
+        Ok(duration) => Timespec {
+            sec: duration.as_secs() as i64,
+            nsec: duration.subsec_nanos() as i32,
+        },
+        Err(_) => Timespec { sec: 0, nsec: 0 },
+    }
+}
+
 #[derive(Debug, Clone)]
 struct VexFSFile {
     ino: u64,
@@ -37,7 +47,7 @@ impl MonitoredVexFS {
         let mut files = HashMap::new();
         
         // Create root directory
-        let now = SystemTime::now();
+        let now = system_time_to_timespec(SystemTime::now());
         let root_attr = FileAttr {
             ino: 1,
             size: 0,
@@ -208,7 +218,7 @@ impl Filesystem for MonitoredVexFS {
                     
                     file.content[offset..offset + data.len()].copy_from_slice(data);
                     file.attr.size = file.content.len() as u64;
-                    file.attr.mtime = SystemTime::now();
+                    file.attr.mtime = system_time_to_timespec(SystemTime::now());
                     
                     reply.written(data.len() as u32);
                     self.record_operation("write", start, true, None);
@@ -251,7 +261,7 @@ impl Filesystem for MonitoredVexFS {
         }
         
         let ino = self.get_next_ino();
-        let now = SystemTime::now();
+        let now = system_time_to_timespec(SystemTime::now());
         
         let attr = FileAttr {
             ino,
@@ -339,7 +349,7 @@ impl Filesystem for MonitoredVexFS {
         }
         
         let ino = self.get_next_ino();
-        let now = SystemTime::now();
+        let now = system_time_to_timespec(SystemTime::now());
         
         let attr = FileAttr {
             ino,

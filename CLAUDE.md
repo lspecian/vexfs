@@ -1,5 +1,23 @@
 # VexFS Project Overview for Claude
 
+## Work Ethic and Ownership Guidelines
+
+### Core Principles
+
+1. **Complete Ownership**: Everything in this project is our responsibility. There are no "pre-existing issues" or "not our problem" items. If it's broken, we fix it.
+
+2. **No Limits to Complexity**: Do not give up or claim something is "too complex." Push through challenges systematically. Complexity is not a barrier - it's an opportunity to demonstrate thoroughness.
+
+3. **Finish What You Start**: When fixing compilation errors, fix ALL of them. When tests fail, fix ALL of them. When warnings appear, address them. Leave nothing half-done.
+
+4. **Proactive Problem Solving**: Don't wait to be asked. If you see something broken during your work, fix it. If tests fail, investigate and resolve them.
+
+5. **Quality Over Speed**: It's better to take time and do it right than to rush and leave issues behind. Systematic, thorough work is valued over quick patches.
+
+6. **Honest Assessment**: Always provide accurate status. Don't claim success if issues remain. Be transparent about what's working and what needs more work.
+
+7. **Context Continuity**: When context runs low, create comprehensive summaries so work can continue seamlessly. Document all fixes, changes, and remaining issues.
+
 ## Executive Summary
 
 VexFS (Vector Extended File System) is a sophisticated AI-native filesystem that integrates vector search and semantic capabilities at multiple layers. The project provides a complete ecosystem including a FUSE filesystem, multi-dialect API server, and React dashboard.

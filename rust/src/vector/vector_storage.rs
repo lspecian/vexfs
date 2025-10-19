@@ -62,6 +62,24 @@ pub enum VectorDataType {
     Binary = 4,
 }
 
+impl From<u8> for VectorDataType {
+    fn from(value: u8) -> Self {
+        match value {
+            1 => VectorDataType::Float16,
+            2 => VectorDataType::Int8,
+            3 => VectorDataType::Int16,
+            4 => VectorDataType::Binary,
+            _ => VectorDataType::Float32,
+        }
+    }
+}
+
+impl From<VectorDataType> for u8 {
+    fn from(value: VectorDataType) -> Self {
+        value as u8
+    }
+}
+
 /// Compression algorithms supported
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
@@ -71,6 +89,24 @@ pub enum CompressionType {
     Quantization8Bit = 2,
     ProductQuantization = 3,
     SparseEncoding = 4,
+}
+
+impl From<u8> for CompressionType {
+    fn from(value: u8) -> Self {
+        match value {
+            1 => CompressionType::Quantization4Bit,
+            2 => CompressionType::Quantization8Bit,
+            3 => CompressionType::ProductQuantization,
+            4 => CompressionType::SparseEncoding,
+            _ => CompressionType::None,
+        }
+    }
+}
+
+impl From<CompressionType> for u8 {
+    fn from(value: CompressionType) -> Self {
+        value as u8
+    }
 }
 
 /// Vector storage format version

@@ -196,7 +196,7 @@ pub struct OptimizedVectorStorageManager {
     /// Base vector storage manager
     storage_manager: VectorStorageManager,
     /// HNSW graph for approximate nearest neighbor search
-    hnsw_graph: Arc<RwLock<HnswGraph>>,
+    hnsw_graph: Arc<RwLock<dyn HnswGraph>>,
     /// Bridge configuration
     config: BridgeConfig,
     /// Pending synchronization operations (heap-allocated to avoid stack overflow)
@@ -228,8 +228,7 @@ impl OptimizedVectorStorageManager {
 
         // Create HNSW graph with default parameters (heap-allocated)
         let hnsw_params = crate::anns::HnswParams::default();
-        let hnsw_graph = HnswGraph::new(dimensions, hnsw_params)
-            .map_err(|e| VexfsError::from(BridgeError::GraphError(format!("Failed to create HNSW graph: {:?}", e))))?;
+        let hnsw_graph = crate::anns::hnsw_optimized::OptimizedHnswGraph::new(hnsw_params);
 
         let sync_status = SyncStatus {
             is_synchronized: true,
@@ -317,8 +316,11 @@ impl OptimizedVectorStorageManager {
         
         // Create HNSW node
         let node = HnswNode {
+            id: vector_id,
             vector_id,
+            level: 0,
             layer: 0, // Simple layer assignment for now
+            neighbors: Vec::new(),
             connections: Vec::new(),
         };
 
@@ -352,9 +354,9 @@ impl OptimizedVectorStorageManager {
     /// Synchronize vector deletion from HNSW graph
     fn sync_delete_from_graph(&self, vector_id: u64) -> VexfsResult<()> {
         let mut graph = self.hnsw_graph.write().unwrap();
-        
+
         graph.remove_node(vector_id)
-            .map_err(|e| VexfsError::from(BridgeError::GraphError(format!("Failed to remove node: {:?}", e))))?;
+            .ok_or_else(|| VexfsError::from(BridgeError::GraphError(format!("Node not found: {}", vector_id))))?;
 
         // Update vector-to-node mapping
         {
@@ -586,7 +588,7 @@ impl OptimizedVectorStorageManager {
         
         BridgeStatistics {
             total_vectors: graph.node_count() as u64,
-            graph_memory_usage: graph.memory_usage(),
+            graph_memory_usage: graph.memory_usage() as u64,
             storage_memory_usage: 0, // Would be calculated from storage manager
             sync_status: sync_status.clone(),
             pending_operations: sync_status.pending_operations,

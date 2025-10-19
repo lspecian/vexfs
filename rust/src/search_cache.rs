@@ -786,9 +786,10 @@ impl SearchResultCache {
         
         // Cache complex queries more aggressively
         match characteristics.complexity {
-            crate::query_planner::QueryComplexity::Simple => characteristics.k >= 50,
-            crate::query_planner::QueryComplexity::Moderate => characteristics.k >= 20,
-            crate::query_planner::QueryComplexity::Complex => characteristics.k >= 10,
+            crate::query_planner::QueryComplexity::Simple => characteristics.k.unwrap_or(0) >= 50,
+            crate::query_planner::QueryComplexity::Medium => characteristics.k.unwrap_or(0) >= 30,
+            crate::query_planner::QueryComplexity::Moderate => characteristics.k.unwrap_or(0) >= 20,
+            crate::query_planner::QueryComplexity::Complex => characteristics.k.unwrap_or(0) >= 10,
             crate::query_planner::QueryComplexity::HighlyComplex => true,
         }
     }

@@ -3518,6 +3518,7 @@ name = "vexfs"
 version = "1.0.0"
 dependencies = [
  "axum",
+ "base64 0.21.7",
  "candle-core",
  "candle-nn",
  "candle-transformers",

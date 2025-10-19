@@ -298,7 +298,7 @@ impl VectorSearchSubsystem {
     }
     
     /// Initialize the search subsystem with HNSW index
-    pub fn initialize_with_index(&mut self, index: AnnsIndex) -> VexfsResult<()> {
+    pub fn initialize_with_index(&mut self, index: Box<dyn AnnsIndex>) -> VexfsResult<()> {
         self.search_engine.set_hnsw_index(index);
         Ok(())
     }
