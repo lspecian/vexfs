@@ -1,3 +1,5 @@
+Sorry - couldn't find any contact info. I'm currently looking for a solution to deploy a remote POSIX filesystem scalably for an AI agent. Curious if you've tried using this solution for multiple end users - does it require one docker instance per user?
+
 # VexFS - AI-Native Semantic Filesystem
 
 ## Complete Vector Database System with Multi-Interface Access
